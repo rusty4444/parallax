@@ -1,0 +1,581 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:matrixpress/app_theme.dart';
+import 'package:matrixpress/chat_backend.dart';
+import 'package:matrixpress/directory_screen.dart';
+import 'package:matrixpress/gallery_bubble.dart';
+import 'package:matrixpress/inbox_screen.dart';
+import 'package:matrixpress/login_screen.dart';
+import 'package:matrixpress/message_search_screen.dart';
+import 'package:matrixpress/room_screen.dart';
+import 'package:matrixpress/room_background_store.dart';
+import 'package:matrixpress/room_avatar.dart';
+import 'package:matrixpress/settings_screen.dart';
+
+void main() {
+  testWidgets('login validates homeserver and sends credentials', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: LoginScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+        ),
+      ),
+    );
+    await tester.ensureVisible(find.text('Enter the matrix'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enter the matrix'));
+    await tester.pump();
+    expect(find.text('Enter your username'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).at(1), '@sam:matrix.org');
+    await tester.enterText(find.byType(TextFormField).at(2), 'secret');
+    await tester.ensureVisible(find.text('Enter the matrix'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enter the matrix'));
+    await tester.pump();
+    expect(backend.lastLogin, '@sam:matrix.org');
+    expect(backend.lastHomeserver, 'https://matrix.org');
+  });
+
+  testWidgets('unread filter shows only unread rooms', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!a:example.org',
+          name: 'General',
+          preview: 'Hi',
+          lastActivity: DateTime(2026),
+          unread: 3,
+        ),
+        ChatRoom(
+          id: '!b:example.org',
+          name: 'Quiet',
+          preview: '',
+          lastActivity: null,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    expect(find.text('Quiet'), findsOneWidget);
+    await tester.tap(find.text('Unread'));
+    await tester.pump();
+    expect(find.text('General'), findsOneWidget);
+    expect(find.text('Quiet'), findsNothing);
+  });
+
+  testWidgets('invitation can be declined from the inbox', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!invite:example.org',
+          name: 'Project invite',
+          preview: '',
+          lastActivity: null,
+          invited: true,
+        ),
+        ChatRoom(
+          id: '!joined:example.org',
+          name: 'General',
+          preview: '',
+          lastActivity: null,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Invites'));
+    await tester.pump();
+    expect(find.text('General'), findsNothing);
+    await tester.tap(find.text('Project invite'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decline'));
+    await tester.pumpAndSettle();
+    expect(backend.declined, '!invite:example.org');
+    expect(find.text('No invitations'), findsOneWidget);
+  });
+
+  testWidgets('public directory paginates and replaces search results', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: DirectoryScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('First room'), findsOneWidget);
+    await tester.tap(find.text('Load more'));
+    await tester.pumpAndSettle();
+    expect(find.text('Second room'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'kotlin');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(find.text('Kotlin room'), findsOneWidget);
+    expect(find.text('First room'), findsNothing);
+  });
+
+  testWidgets('message search waits for a query and shows joined-room hits', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: MessageSearchScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+        ),
+      ),
+    );
+    expect(
+      find.text('Type at least two characters to search.'),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(find.text('Found it in a room'), findsOneWidget);
+  });
+
+  testWidgets('room sends text and shows an unavailable image fallback', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Photos',
+          preview: '',
+          lastActivity: null,
+          encrypted: true,
+        ),
+      ]
+      ..entries = [
+        ChatEntry(
+          id: r'$event',
+          sender: '@friend:example.org',
+          body: 'photo.jpg',
+          time: DateTime(2026),
+          mine: false,
+          isImage: true,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: RoomBackgroundStore(
+            root: Directory('build/test_background'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Encrypted room'), findsOneWidget);
+    expect(find.text('Image unavailable'), findsOneWidget);
+    expect(backend.imageLoads, 1);
+    await tester.enterText(find.byType(TextField), 'Hello!');
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(backend.lastMessage, 'Hello!');
+  });
+
+  testWidgets('file attachment has a save action and composer picker', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Files',
+          preview: '',
+          lastActivity: null,
+        ),
+      ]
+      ..entries = [
+        ChatEntry(
+          id: 'file-1',
+          sender: '@a:server',
+          body: 'report.pdf',
+          time: DateTime(2026),
+          mine: false,
+          isAttachment: true,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: RoomBackgroundStore(
+            root: Directory('build/test_background'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('report.pdf'), findsOneWidget);
+    expect(find.byTooltip('Attach file'), findsOneWidget);
+    expect(find.byIcon(Icons.download_rounded), findsOneWidget);
+  });
+
+  testWidgets('consecutive photos render as one gallery', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Photos',
+          preview: '',
+          lastActivity: null,
+        ),
+      ]
+      ..entries = [
+        for (var i = 0; i < 3; i++)
+          ChatEntry(
+            id: 'image-$i',
+            sender: '@friend:example.org',
+            body: 'image.jpg',
+            time: DateTime(2026, 10, 20, 12, i),
+            mine: false,
+            isImage: true,
+          ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: RoomBackgroundStore(
+            root: Directory('build/test_background'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(GalleryBubble), findsOneWidget);
+    expect(backend.imageLoads, 3);
+  });
+
+  testWidgets('room background menu clears only the selected room', (
+    tester,
+  ) async {
+    final store = FakeBackgroundStore();
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Photos',
+          preview: '',
+          lastActivity: null,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Room background'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove background'));
+    await tester.pumpAndSettle();
+    expect(store.cleared, ['!r:example.org']);
+    expect(store.rooms.containsKey('!other:example.org'), isTrue);
+  });
+
+  testWidgets('group avatars request visible hero images only', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Team',
+          preview: 'Hi',
+          lastActivity: null,
+          heroes: [
+            ChatAvatar(name: 'Alice', url: Uri.parse('mxc://s/a')),
+            ChatAvatar(name: 'Bob', url: Uri.parse('mxc://s/b')),
+          ],
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomAvatar), findsOneWidget);
+    expect(backend.avatarLoads, 2);
+  });
+
+  testWidgets('recovery uses an obscured field and refreshes identity', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Enter recovery key'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enter recovery key'));
+    await tester.pumpAndSettle();
+    final input = tester.widget<TextField>(find.byType(TextField).last);
+    expect(input.obscureText, isTrue);
+    await tester.enterText(
+      find.byType(TextField).last,
+      '  synthetic-test-recovery-key  ',
+    );
+    await tester.tap(find.text('Restore').last);
+    await tester.pumpAndSettle();
+    expect(backend.lastRecoveryKey, '  synthetic-test-recovery-key  ');
+    expect(find.text('Identity connected on this device'), findsOneWidget);
+  });
+}
+
+class FakeBackgroundStore extends RoomBackgroundStore {
+  final rooms = <String, File>{
+    '!r:example.org': File('assets/matrixpress_icon.png'),
+    '!other:example.org': File('assets/matrixpress_icon.png'),
+  };
+  final cleared = <String>[];
+
+  @override
+  Future<File?> fileFor(String roomId) async => rooms[roomId];
+
+  @override
+  Future<void> clear(String roomId) async {
+    rooms.remove(roomId);
+    cleared.add(roomId);
+  }
+}
+
+class FakeBackend extends ChatBackend {
+  String? lastLogin;
+  String? lastHomeserver;
+  List<ChatRoom> roomList = [];
+  List<ChatEntry> entries = [];
+  String? activeId;
+  String? lastMessage;
+  String? declined;
+  int imageLoads = 0;
+  int avatarLoads = 0;
+  String? lastRecoveryKey;
+  bool connected = false;
+
+  @override
+  SessionStatus get connection => SessionStatus.signedOut;
+  @override
+  String? get userId => null;
+  @override
+  String? get error => null;
+  @override
+  List<ChatRoom> get rooms => roomList;
+  @override
+  String? get activeRoomId => activeId;
+  @override
+  List<ChatEntry> get messages => entries;
+  @override
+  bool get sending => false;
+  @override
+  bool get canLoadOlder => false;
+  @override
+  bool get loadingHistory => false;
+  @override
+  Future<void> initialize() async {}
+  @override
+  Future<void> login({
+    required String homeserver,
+    required String username,
+    required String password,
+  }) async {
+    lastHomeserver = homeserver;
+    lastLogin = username;
+  }
+
+  @override
+  Future<void> logout() async {}
+  @override
+  Future<void> openRoom(String roomId) async {
+    activeId = roomId;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> loadOlder(String roomId) async {}
+
+  @override
+  void closeRoom(String roomId) {
+    activeId = null;
+  }
+
+  @override
+  Future<void> sendText(String roomId, String text) async {
+    lastMessage = text;
+  }
+
+  @override
+  Future<void> sendImages(String roomId, List<XFile> images) async {}
+  @override
+  Future<void> sendAttachment(String roomId, XFile file) async {}
+  @override
+  Future<Uint8List?> loadImage(String roomId, String eventId) async {
+    imageLoads++;
+    return null;
+  }
+
+  @override
+  Future<DownloadedAttachment> loadAttachment(
+    String roomId,
+    String eventId,
+  ) async => throw StateError('not available in widget test');
+
+  @override
+  Future<Uint8List?> loadAvatar(Uri url) async {
+    avatarLoads++;
+    return null;
+  }
+
+  @override
+  Future<void> react(String roomId, String eventId) async {}
+  @override
+  Future<void> createDirectChat(String userId) async {}
+
+  @override
+  Future<void> acceptInvite(String roomId) async {}
+
+  @override
+  Future<void> declineInvite(String roomId) async {
+    declined = roomId;
+    roomList.removeWhere((room) => room.id == roomId);
+    notifyListeners();
+  }
+
+  @override
+  Future<PublicRoomPage> searchPublicRooms(
+    String query, {
+    String? nextBatch,
+  }) async {
+    if (query == 'kotlin') {
+      return const PublicRoomPage(
+        rooms: [
+          PublicRoom(id: '!k:example.org', name: 'Kotlin room', members: 9),
+        ],
+      );
+    }
+    if (nextBatch != null) {
+      return const PublicRoomPage(
+        rooms: [
+          PublicRoom(
+            id: '!second:example.org',
+            name: 'Second room',
+            members: 2,
+          ),
+        ],
+      );
+    }
+    return const PublicRoomPage(
+      rooms: [
+        PublicRoom(id: '!first:example.org', name: 'First room', members: 4),
+      ],
+      nextBatch: 'page2',
+    );
+  }
+
+  @override
+  Future<String> joinPublicRoom(String roomId) async => roomId;
+
+  @override
+  Future<MessageSearchPage> searchMessages(
+    String query, {
+    String? nextBatch,
+  }) async => MessageSearchPage(
+    hits: [
+      MessageHit(
+        id: 'e1',
+        roomId: '!r:example.org',
+        roomName: 'General',
+        sender: '@a:server',
+        body: 'Found it in a room',
+        time: DateTime(2026),
+      ),
+    ],
+  );
+
+  @override
+  Future<CryptoStatus> cryptoStatus() async => CryptoStatus(
+    initialized: true,
+    connected: connected,
+    keyBackupEnabled: true,
+    crossSigningEnabled: true,
+  );
+
+  @override
+  Future<void> restoreCryptoIdentity(String keyOrPassphrase) async {
+    lastRecoveryKey = keyOrPassphrase;
+    connected = true;
+  }
+
+  @override
+  Future<void> restoreBackedUpKeys() async {}
+}
