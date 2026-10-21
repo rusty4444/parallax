@@ -58,6 +58,7 @@ jobs:
             grep -F 'SHA256: 2E:1C:94:44:6D:3C:1D:33:F8:43:CA:3B:54:25:C6:DF:D1:38:3B:BD:5F:C3:40:8D:0C:30:39:27:87:15:EF:F7'
 
       - name: Build arm64 release-optimised test APK
+        id: build
         run: |
           BUILD_NUMBER=$((10000 + GITHUB_RUN_NUMBER))
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
@@ -68,13 +69,27 @@ jobs:
       - name: Inspect APK
         run: |
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" |
-            grep -F 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7'
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" |
-            grep -F "versionCode='$APK_VERSION_CODE'"
-          unzip -Z1 "$APK" | grep -x 'lib/arm64-v8a/libvodozemac_bindings_dart.so'
+          CERTS=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK")
+          echo "$CERTS" | grep -F 'Signer #1 certificate SHA-256 digest:'
+          if ! echo "$CERTS" | grep -Fq 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7'; then
+            echo 'APK signing certificate does not match the previously installed preview.' >&2
+            exit 1
+          fi
+          BADGING=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK")
+          echo "$BADGING" | grep '^package:'
+          if ! echo "$BADGING" | grep -Fq "versionCode='$APK_VERSION_CODE'"; then
+            echo "APK version code does not match expected $APK_VERSION_CODE." >&2
+            exit 1
+          fi
+          LIBRARIES=$(unzip -Z1 "$APK" | grep '^lib/arm64-v8a/')
+          echo "$LIBRARIES"
+          if ! echo "$LIBRARIES" | grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so'; then
+            echo 'Encrypted Matrix native library is absent from the arm64 APK.' >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: matrixpress-arm64-${{ github.sha }}
           path: ${{ env.APK }}
