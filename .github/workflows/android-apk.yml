@@ -50,12 +50,13 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.MATRIXPRESS_DEBUG_KEYSTORE_BASE64 }}
         run: |
           test -n "$KEYSTORE_BASE64"
-          mkdir -p "$HOME/.android"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
+          KEYSTORE_FILE="$RUNNER_TEMP/matrixpress-debug.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          chmod 600 "$KEYSTORE_FILE"
           # Fail before building if CI cannot update previously installed APKs.
-          keytool -list -v -alias androiddebugkey -keystore "$HOME/.android/debug.keystore" -storepass android |
+          keytool -list -v -alias androiddebugkey -keystore "$KEYSTORE_FILE" -storepass android |
             grep -F 'SHA256: 2E:1C:94:44:6D:3C:1D:33:F8:43:CA:3B:54:25:C6:DF:D1:38:3B:BD:5F:C3:40:8D:0C:30:39:27:87:15:EF:F7'
+          echo "MATRIXPRESS_KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
       - name: Build arm64 release-optimised test APK
         id: build

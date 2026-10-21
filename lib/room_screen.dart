@@ -12,6 +12,7 @@ import 'message_groups.dart';
 import 'photo_picker.dart';
 import 'room_avatar.dart';
 import 'room_background_store.dart';
+import 'room_details_screen.dart';
 import 'widgets.dart';
 
 class RoomScreen extends StatefulWidget {
@@ -435,6 +436,26 @@ class _RoomScreenState extends State<RoomScreen> {
                               ),
                             ],
                           ),
+                        ),
+                        IconButton(
+                          tooltip: 'Room details',
+                          icon: Icon(
+                            Icons.info_outline_rounded,
+                            color: p.secondary,
+                          ),
+                          onPressed: _opening || _error != null
+                              ? null
+                              : () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => RoomDetailsScreen(
+                                        backend: widget.backend,
+                                        palette: widget.palette,
+                                        roomId: widget.roomId,
+                                      ),
+                                    ),
+                                  );
+                                },
                         ),
                         PopupMenuButton<String>(
                           tooltip: 'Room background',

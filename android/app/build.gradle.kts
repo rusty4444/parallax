@@ -8,6 +8,7 @@ android {
     namespace = "net.samrussell.matrixpress"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    val ciKeystoreFile = System.getenv("MATRIXPRESS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -24,11 +25,22 @@ android {
         versionName = flutter.versionName
     }
 
+    if (ciKeystoreFile != null) {
+        signingConfigs {
+            create("personalTest") {
+                storeFile = file(ciKeystoreFile)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // CI pins the same personal preview key as earlier APKs. Local
+            // release builds continue to use the developer's debug key.
+            signingConfig = signingConfigs.getByName(if (ciKeystoreFile != null) "personalTest" else "debug")
         }
     }
 }

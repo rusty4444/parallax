@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'room_details.dart';
 
 enum SessionStatus { loading, signedOut, ready, offline }
 
@@ -287,6 +288,15 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> declineInvite(String roomId);
   Future<void> setRoomUnread(String roomId, bool unread);
   Future<void> leaveRoom(String roomId);
+  Future<RoomDetails> getRoomDetails(String roomId);
+  Future<void> editRoomName(String roomId, String name);
+  Future<void> editRoomTopic(String roomId, String topic);
+  Future<void> inviteToRoom(String roomId, String userId);
+  Future<void> moderateRoomMember(
+    String roomId,
+    String userId,
+    RoomAction action,
+  );
   Future<PublicRoomPage> searchPublicRooms(String query, {String? nextBatch});
   Future<String> joinPublicRoom(String roomId);
   Future<MessageSearchPage> searchMessages(String query, {String? nextBatch});

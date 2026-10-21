@@ -20,6 +20,7 @@ import 'matrix_send_guard.dart';
 import 'message_text.dart';
 import 'recipient_trust.dart';
 import 'reaction_summary.dart';
+import 'room_details.dart';
 import 'safe_matrix_database.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
@@ -794,6 +795,112 @@ class MatrixBackend extends ChatBackend {
     await room.leave(waitForSync: true).timeout(const Duration(seconds: 30));
     closeRoom(roomId);
     _refreshRooms();
+  }
+
+  matrix.Room _joinedRoom(matrix.Client client, String roomId) {
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    return room;
+  }
+
+  @override
+  Future<RoomDetails> getRoomDetails(String roomId) async {
+    final client = _requireClient();
+    _joinedRoom(client, roomId);
+    final userId = client.userID;
+    if (userId == null) throw StateError('Not signed in');
+    // Lazy SDK state is insufficient for a complete roster or permissions.
+    final state = await client.getRoomState(roomId);
+    if (!identical(_client, client)) throw StateError('Session changed');
+    _joinedRoom(client, roomId);
+    return RoomDetails.fromState(
+      roomId: roomId,
+      userId: userId,
+      state: [
+        for (final event in state)
+          RoomStateEntry(
+            event.type,
+            event.stateKey ?? '',
+            event.content,
+            event.senderId,
+          ),
+      ],
+    );
+  }
+
+  Future<matrix.Room> _authoriseRoomAction(
+    String roomId,
+    RoomAction action, [
+    String? targetId,
+  ]) async {
+    final client = _requireClient();
+    final details = await getRoomDetails(roomId);
+    if (!identical(_client, client)) throw StateError('Session changed');
+    final target = targetId == null
+        ? null
+        : details.members.where((member) => member.id == targetId).firstOrNull;
+    if (!details.can(action, target)) {
+      throw StateError('Not permitted to ${action.name} in this room');
+    }
+    if (targetId != null && targetId == client.userID) {
+      throw StateError('Cannot moderate yourself');
+    }
+    return _joinedRoom(client, roomId);
+  }
+
+  @override
+  Future<void> editRoomName(String roomId, String name) async {
+    final value = name.trim();
+    if (value.isEmpty) throw ArgumentError('Room name cannot be empty');
+    final room = await _authoriseRoomAction(roomId, RoomAction.name);
+    await room.setName(value);
+    _scheduleRoomUpdate();
+  }
+
+  @override
+  Future<void> editRoomTopic(String roomId, String topic) async {
+    final room = await _authoriseRoomAction(roomId, RoomAction.topic);
+    await room.setDescription(topic.trim());
+    _scheduleRoomUpdate();
+  }
+
+  @override
+  Future<void> inviteToRoom(String roomId, String userId) async {
+    final target = userId.trim();
+    if (!isValidRoomInviteId(target)) {
+      throw ArgumentError('Enter a valid Matrix ID');
+    }
+    final room = await _authoriseRoomAction(roomId, RoomAction.invite);
+    // Room.invite can silently skip a stale locally-cached member.
+    await room.client.inviteUser(roomId, target);
+    _scheduleRoomUpdate();
+  }
+
+  @override
+  Future<void> moderateRoomMember(
+    String roomId,
+    String userId,
+    RoomAction action,
+  ) async {
+    if (action != RoomAction.kick &&
+        action != RoomAction.ban &&
+        action != RoomAction.unban) {
+      throw ArgumentError('Not a moderation action');
+    }
+    final room = await _authoriseRoomAction(roomId, action, userId);
+    switch (action) {
+      case RoomAction.kick:
+        await room.kick(userId);
+      case RoomAction.ban:
+        await room.ban(userId);
+      case RoomAction.unban:
+        await room.unban(userId);
+      default:
+        throw ArgumentError('Not a moderation action');
+    }
+    _scheduleRoomUpdate();
   }
 
   @override

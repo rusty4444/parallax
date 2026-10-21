@@ -6,6 +6,7 @@ A new Android Matrix messenger, built independently of the Element X fork. Its n
 
 - Password login to an HTTPS Matrix homeserver; persistent local session and SDK sync.
 - Room inbox with joined rooms and invitations, search, unread-count badges and manually-unread indicators. Invites can be accepted or declined; long-press a joined room to mark it manually unread or leave after confirmation.
+- Room details fetch current server state for name, topic and member list. Permitted members can edit name/topic, invite by Matrix ID and kick, ban or unban after confirmation; the backend rechecks power levels before each write. These controls need live cross-client testing.
 - Room timelines with older-message loading, text messages, read-on-open markers and double-tap ❤️ reactions in **unencrypted rooms**. Long-press a message to reply, choose a reaction in an unencrypted room, or edit/delete your own message. Encrypted-room reactions and typing sends are disabled because this SDK can send reaction metadata in plaintext or share room keys before recipient approval. Reply fallbacks are stripped from visible text; redactions no longer expose the original body.
 - Up to ten gallery photos in one selection, previewed before sequential upload; encrypted media is encrypted **before** upload and the SDK decrypts the thumbnail or original preview in visible message bubbles. The batch is not atomic.
 - Consecutive photos from one sender form two-, three- or four-image grids without a server change.

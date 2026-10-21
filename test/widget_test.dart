@@ -14,6 +14,7 @@ import 'package:matrixpress/main.dart';
 import 'package:matrixpress/message_search_screen.dart';
 import 'package:matrixpress/room_screen.dart';
 import 'package:matrixpress/room_background_store.dart';
+import 'package:matrixpress/room_details.dart';
 import 'package:matrixpress/room_avatar.dart';
 import 'package:matrixpress/settings_screen.dart';
 import 'package:matrixpress/security_overlay.dart';
@@ -1182,6 +1183,29 @@ class FakeBackend extends ChatBackend {
     roomList.removeWhere((room) => room.id == roomId);
     notifyListeners();
   }
+
+  @override
+  Future<RoomDetails> getRoomDetails(String roomId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> editRoomName(String roomId, String name) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> editRoomTopic(String roomId, String topic) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> inviteToRoom(String roomId, String userId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> moderateRoomMember(
+    String roomId,
+    String userId,
+    RoomAction action,
+  ) async => throw UnimplementedError();
 
   @override
   Future<PublicRoomPage> searchPublicRooms(
