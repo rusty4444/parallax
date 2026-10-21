@@ -14,6 +14,8 @@ class GalleryBubble extends StatelessWidget {
     required this.roomId,
     required this.palette,
     required this.onHeart,
+    required this.onAction,
+    required this.onReaction,
   });
 
   final List<ChatEntry> entries;
@@ -21,10 +23,13 @@ class GalleryBubble extends StatelessWidget {
   final String roomId;
   final AppPalette palette;
   final ValueChanged<ChatEntry> onHeart;
+  final ValueChanged<ChatEntry> onAction;
+  final void Function(ChatEntry, String) onReaction;
 
   Widget _photo(ChatEntry entry, double width, double height) =>
       GestureDetector(
         onDoubleTap: () => onHeart(entry),
+        onLongPress: () => onAction(entry),
         child: MessageImage(
           key: ValueKey(entry.id),
           backend: backend,
@@ -118,6 +123,24 @@ class GalleryBubble extends StatelessWidget {
               LayoutBuilder(
                 builder: (_, constraints) => _layout(constraints.maxWidth),
               ),
+              for (var i = 0; i < entries.length; i++)
+                if (entries[i].reactions.isNotEmpty)
+                  Wrap(
+                    spacing: 5,
+                    children: [
+                      for (final reaction in entries[i].reactions)
+                        ActionChip(
+                          tooltip: reaction.mine
+                              ? 'Remove your ${reaction.emoji} reaction on photo ${i + 1}'
+                              : 'React with ${reaction.emoji} on photo ${i + 1}',
+                          label: Text(
+                            '${i + 1}: ${reaction.emoji} ${reaction.count}',
+                          ),
+                          onPressed: () =>
+                              onReaction(entries[i], reaction.emoji),
+                        ),
+                    ],
+                  ),
               const SizedBox(height: 5),
               Align(
                 alignment: Alignment.bottomRight,

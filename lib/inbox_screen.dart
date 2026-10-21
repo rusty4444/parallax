@@ -5,6 +5,7 @@ import 'directory_screen.dart';
 import 'message_search_screen.dart';
 import 'room_avatar.dart';
 import 'room_screen.dart';
+import 'room_sync_panel.dart';
 import 'settings_screen.dart';
 import 'widgets.dart';
 
@@ -29,6 +30,7 @@ class _InboxScreenState extends State<InboxScreen> {
   String _query = '';
   bool _unreadOnly = false;
   bool _invitesOnly = false;
+  String? _pendingRoomAction;
 
   Future<void> _showInvitation(ChatRoom room) async {
     final choice = await showDialog<bool>(
@@ -64,6 +66,87 @@ class _InboxScreenState extends State<InboxScreen> {
               : 'Couldn’t decline this invitation.',
         );
       }
+    }
+  }
+
+  Future<void> _showRoomActions(ChatRoom room) async {
+    if (room.invited || _pendingRoomAction != null) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                room.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: const Text('Room actions'),
+            ),
+            ListTile(
+              leading: Icon(
+                room.manuallyUnread
+                    ? Icons.mark_email_read_outlined
+                    : Icons.mark_email_unread_outlined,
+              ),
+              title: Text(
+                room.manuallyUnread ? 'Clear manually unread' : 'Mark unread',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'unread'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.exit_to_app_rounded),
+              title: const Text('Leave room'),
+              onTap: () => Navigator.pop(sheetContext, 'leave'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null || _pendingRoomAction != null) return;
+    if (choice == 'leave') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Leave ${room.name}?'),
+          content: const Text(
+            'You will no longer see new messages in this room. '
+            'You may need another invitation to rejoin.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Leave'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    setState(() => _pendingRoomAction = room.id);
+    try {
+      if (choice == 'leave') {
+        await widget.backend.leaveRoom(room.id);
+      } else {
+        await widget.backend.setRoomUnread(room.id, !room.manuallyUnread);
+      }
+    } catch (_) {
+      if (mounted) {
+        _showError(
+          choice == 'leave'
+              ? 'Couldn’t leave this room.'
+              : 'Couldn’t update this room’s unread status.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pendingRoomAction = null);
     }
   }
 
@@ -165,6 +248,13 @@ class _InboxScreenState extends State<InboxScreen> {
     return AnimatedBuilder(
       animation: widget.backend,
       builder: (context, _) {
+        final roomCountLabel = widget.backend.rooms.isNotEmpty
+            ? '${widget.backend.rooms.length} ROOMS'
+            : switch (widget.backend.roomSyncState) {
+                RoomSyncState.loading => 'SYNCING',
+                RoomSyncState.error => 'SYNC ERROR',
+                RoomSyncState.ready => '0 ROOMS',
+              };
         final rooms = widget.backend.rooms
             .where(
               (room) =>
@@ -268,7 +358,7 @@ class _InboxScreenState extends State<InboxScreen> {
                                 borderRadius: BorderRadius.circular(40),
                               ),
                               child: Text(
-                                '${widget.backend.rooms.length} ROOMS',
+                                roomCountLabel,
                                 style: TextStyle(
                                   color: p.secondary,
                                   fontWeight: FontWeight.w800,
@@ -293,90 +383,119 @@ class _InboxScreenState extends State<InboxScreen> {
                           ),
                         ),
                         const SizedBox(height: 17),
-                        Row(
-                          children: [
-                            _FilterChip(
-                              label: 'All chats',
-                              selected: !_unreadOnly && !_invitesOnly,
-                              palette: p,
-                              onTap: () => setState(() {
-                                _unreadOnly = false;
-                                _invitesOnly = false;
-                              }),
-                            ),
-                            const SizedBox(width: 9),
-                            _FilterChip(
-                              label: 'Unread',
-                              selected: _unreadOnly,
-                              palette: p,
-                              onTap: () => setState(() {
-                                _unreadOnly = true;
-                                _invitesOnly = false;
-                              }),
-                            ),
-                            const SizedBox(width: 9),
-                            _FilterChip(
-                              label: 'Invites',
-                              selected: _invitesOnly,
-                              palette: p,
-                              onTap: () => setState(() {
-                                _invitesOnly = true;
-                                _unreadOnly = false;
-                              }),
-                            ),
-                          ],
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All chats',
+                                selected: !_unreadOnly && !_invitesOnly,
+                                palette: p,
+                                onTap: () => setState(() {
+                                  _unreadOnly = false;
+                                  _invitesOnly = false;
+                                }),
+                              ),
+                              const SizedBox(width: 9),
+                              _FilterChip(
+                                label: 'Unread',
+                                selected: _unreadOnly,
+                                palette: p,
+                                onTap: () => setState(() {
+                                  _unreadOnly = true;
+                                  _invitesOnly = false;
+                                }),
+                              ),
+                              const SizedBox(width: 9),
+                              _FilterChip(
+                                label: 'Invites',
+                                selected: _invitesOnly,
+                                palette: p,
+                                onTap: () => setState(() {
+                                  _invitesOnly = true;
+                                  _unreadOnly = false;
+                                }),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 18),
                       ],
                     ),
                   ),
                   Expanded(
-                    child: rooms.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(35),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _query.isNotEmpty
-                                        ? Icons.search_off_rounded
-                                        : Icons.forum_outlined,
-                                    size: 50,
-                                    color: p.secondary,
-                                  ),
-                                  const SizedBox(height: 14),
-                                  Text(
-                                    _query.isNotEmpty
-                                        ? 'No matches yet'
-                                        : _invitesOnly
-                                        ? 'No invitations'
-                                        : _unreadOnly
-                                        ? 'All caught up'
-                                        : 'A quiet start.',
-                                    style: TextStyle(
-                                      color: p.foreground,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w700,
+                    child:
+                        widget.backend.rooms.isEmpty &&
+                            widget.backend.roomSyncState != RoomSyncState.ready
+                        ? RoomSyncPanel(backend: widget.backend, palette: p)
+                        : rooms.isEmpty
+                        ? LayoutBuilder(
+                            builder: (context, viewport) => SingleChildScrollView(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: viewport.maxHeight,
+                                ),
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(35),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          _query.isNotEmpty
+                                              ? Icons.search_off_rounded
+                                              : Icons.forum_outlined,
+                                          size: 50,
+                                          color: p.secondary,
+                                        ),
+                                        const SizedBox(height: 14),
+                                        Text(
+                                          _query.isNotEmpty
+                                              ? 'No matches yet'
+                                              : _invitesOnly
+                                              ? 'No invitations'
+                                              : _unreadOnly
+                                              ? 'All caught up'
+                                              : 'No rooms found',
+                                          style: TextStyle(
+                                            color: p.foreground,
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          _query.isNotEmpty
+                                              ? 'Try another search.'
+                                              : _invitesOnly
+                                              ? 'Invitations will appear here.'
+                                              : _unreadOnly
+                                              ? 'No unread rooms right now.'
+                                              : 'Synced as ${widget.backend.userId ?? 'this account'}. '
+                                                    'No joined rooms or invitations were returned.',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: p.muted,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                        if (_query.isEmpty &&
+                                            !_invitesOnly &&
+                                            !_unreadOnly) ...[
+                                          const SizedBox(height: 18),
+                                          OutlinedButton.icon(
+                                            onPressed: () =>
+                                                widget.backend.refreshRooms(),
+                                            icon: const Icon(
+                                              Icons.refresh_rounded,
+                                            ),
+                                            label: const Text('Refresh rooms'),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    _query.isNotEmpty
-                                        ? 'Try another search.'
-                                        : _invitesOnly
-                                        ? 'Invitations will appear here.'
-                                        : _unreadOnly
-                                        ? 'No unread rooms right now.'
-                                        : 'Your joined rooms will appear here. '
-                                              'Start a conversation to break the silence.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: p.muted,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           )
@@ -394,6 +513,9 @@ class _InboxScreenState extends State<InboxScreen> {
                                     onTap: room.invited
                                         ? () => _showInvitation(room)
                                         : () => _open(room.id),
+                                    onLongPress: room.invited
+                                        ? null
+                                        : () => _showRoomActions(room),
                                     borderRadius: BorderRadius.circular(20),
                                     child: Padding(
                                       padding: const EdgeInsets.all(14),
@@ -526,17 +648,21 @@ class _InboxScreenState extends State<InboxScreen> {
               ),
             ),
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            tooltip: 'New conversation',
-            onPressed: _newConversation,
-            backgroundColor: p.accent,
-            foregroundColor: p.accentOn,
-            icon: const Icon(Icons.edit_rounded),
-            label: const Text(
-              'New chat',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
+          floatingActionButton:
+              widget.backend.rooms.isEmpty &&
+                  widget.backend.roomSyncState != RoomSyncState.ready
+              ? null
+              : FloatingActionButton.extended(
+                  tooltip: 'New conversation',
+                  onPressed: _newConversation,
+                  backgroundColor: p.accent,
+                  foregroundColor: p.accentOn,
+                  icon: const Icon(Icons.edit_rounded),
+                  label: const Text(
+                    'New chat',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
         );
       },
     );

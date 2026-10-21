@@ -3,6 +3,10 @@ import 'package:image_picker/image_picker.dart';
 
 enum SessionStatus { loading, signedOut, ready, offline }
 
+enum RoomSyncState { loading, ready, error }
+
+enum RoomSyncIssue { network, homeserver, processing }
+
 @immutable
 class ChatRoom {
   const ChatRoom({
@@ -30,6 +34,14 @@ class ChatRoom {
   final bool manuallyUnread;
   final List<ChatAvatar> heroes;
   final bool invited;
+}
+
+int compareRooms(ChatRoom a, ChatRoom b) {
+  if (a.invited != b.invited) return a.invited ? -1 : 1;
+  final activity = (b.lastActivity ?? DateTime(1970)).compareTo(
+    a.lastActivity ?? DateTime(1970),
+  );
+  return activity == 0 ? a.id.compareTo(b.id) : activity;
 }
 
 @immutable
@@ -90,6 +102,19 @@ class MessageSearchPage {
 }
 
 @immutable
+class ChatReaction {
+  const ChatReaction({
+    required this.emoji,
+    required this.count,
+    required this.mine,
+  });
+
+  final String emoji;
+  final int count;
+  final bool mine;
+}
+
+@immutable
 class ChatEntry {
   const ChatEntry({
     required this.id,
@@ -99,6 +124,10 @@ class ChatEntry {
     required this.mine,
     this.isImage = false,
     this.isAttachment = false,
+    this.replyToId,
+    this.redacted = false,
+    this.edited = false,
+    this.reactions = const [],
   });
 
   final String id;
@@ -108,6 +137,10 @@ class ChatEntry {
   final bool mine;
   final bool isImage;
   final bool isAttachment;
+  final String? replyToId;
+  final bool redacted;
+  final bool edited;
+  final List<ChatReaction> reactions;
 }
 
 @immutable
@@ -138,6 +171,8 @@ class CryptoStatus {
 
 abstract class ChatBackend extends ChangeNotifier {
   SessionStatus get connection;
+  RoomSyncState get roomSyncState;
+  RoomSyncIssue? get roomSyncIssue;
   String? get userId;
   String? get error;
   List<ChatRoom> get rooms;
@@ -146,8 +181,10 @@ abstract class ChatBackend extends ChangeNotifier {
   bool get sending;
   bool get canLoadOlder;
   bool get loadingHistory;
+  List<String> get typingUsers;
 
   Future<void> initialize();
+  Future<void> refreshRooms();
   Future<void> login({
     required String homeserver,
     required String username,
@@ -157,16 +194,25 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> openRoom(String roomId);
   Future<void> loadOlder(String roomId);
   void closeRoom(String roomId);
-  Future<void> sendText(String roomId, String text);
+  Future<void> sendText(
+    String roomId,
+    String text, {
+    String? replyToId,
+    String? editEventId,
+  });
   Future<void> sendImages(String roomId, List<XFile> images);
   Future<void> sendAttachment(String roomId, XFile file);
   Future<Uint8List?> loadImage(String roomId, String eventId);
   Future<DownloadedAttachment> loadAttachment(String roomId, String eventId);
   Future<Uint8List?> loadAvatar(Uri url);
-  Future<void> react(String roomId, String eventId);
+  Future<void> react(String roomId, String eventId, {String emoji = '❤️'});
+  Future<void> redactMessage(String roomId, String eventId);
+  Future<void> setTyping(String roomId, bool typing);
   Future<void> createDirectChat(String userId);
   Future<void> acceptInvite(String roomId);
   Future<void> declineInvite(String roomId);
+  Future<void> setRoomUnread(String roomId, bool unread);
+  Future<void> leaveRoom(String roomId);
   Future<PublicRoomPage> searchPublicRooms(String query, {String? nextBatch});
   Future<String> joinPublicRoom(String roomId);
   Future<MessageSearchPage> searchMessages(String query, {String? nextBatch});

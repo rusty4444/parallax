@@ -5,8 +5,8 @@ A new Android Matrix messenger, built independently of the Element X fork. Its n
 ## Current build
 
 - Password login to an HTTPS Matrix homeserver; persistent local session and SDK sync.
-- Room inbox with joined rooms and invitations, search, unread-count badges and manually-unread indicators. Invites can be accepted or declined.
-- Room timelines with older-message loading, text messages, read-on-open markers and double-tap ❤️ reactions.
+- Room inbox with joined rooms and invitations, search, unread-count badges and manually-unread indicators. Invites can be accepted or declined; long-press a joined room to mark it manually unread or leave after confirmation.
+- Room timelines with older-message loading, text messages, read-on-open markers and double-tap ❤️ reactions. Long-press a message to reply, choose a reaction, or edit/delete your own message. Reaction counts can be tapped to add/remove your vote. Reply fallbacks are stripped from the visible text; redactions no longer expose the original body. The composer sends and displays typing indicators.
 - Up to ten gallery photos in one selection, previewed before sequential upload; SDK-backed encrypted thumbnail download in visible message bubbles. The batch is not atomic.
 - Consecutive photos from one sender form two-, three- or four-image grids without a server change.
 - Per-room background photos are copied into private app storage and survive restart; the old background remains if replacement fails.
@@ -21,7 +21,7 @@ The room list and timeline use lazy builders; only one room timeline is subscrib
 
 ## Not yet implemented
 
-This is **not** a full Element X replacement. SSO/OIDC, push notifications, threads, calls and cross-device verification remain to be built. Recovery, image uploads, media saves and directory joins still need testing against a live account and device. Do not migrate your main account or rely on this for critical encrypted conversations yet. The local SDK SQLite store is protected by Android's app sandbox and device storage encryption, but has no additional SQLCipher layer.
+This is **not** a full Element X replacement. SSO/OIDC, push notifications, threads, calls and cross-device verification remain to be built. Room management, spaces, moderation, notification settings and rich-media viewing also lag Element X. Recovery, room sync, replies/edits/redactions, image uploads, media saves and directory joins still need testing against a live account and device. Do not migrate your main account or rely on this for critical encrypted conversations yet. The local SDK SQLite store is protected by Android's app sandbox and device storage encryption, but has no additional SQLCipher layer.
 
 ## Build
 

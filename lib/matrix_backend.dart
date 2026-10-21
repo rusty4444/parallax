@@ -12,23 +12,31 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 
 import 'chat_backend.dart';
+import 'message_text.dart';
+import 'reaction_summary.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
 class MatrixBackend extends ChatBackend {
   matrix.Client? _client;
   matrix.Timeline? _timeline;
   StreamSubscription<matrix.SyncUpdate>? _syncSubscription;
+  StreamSubscription<matrix.SyncStatusUpdate>? _syncStatusSubscription;
   StreamSubscription<matrix.LoginState>? _loginSubscription;
   Timer? _roomUpdateTimer;
   int _roomGeneration = 0;
   bool _disposed = false;
   bool _initializing = false;
+  bool _refreshingRooms = false;
+  bool _firstSyncCompleted = false;
+  int _successfulSyncs = 0;
   bool _sending = false;
   bool _loadingHistory = false;
   int _visibleMessageLimit = 100;
   String? _activeRoomId;
   String? _error;
   SessionStatus _connection = SessionStatus.loading;
+  RoomSyncState _roomSyncState = RoomSyncState.loading;
+  RoomSyncIssue? _roomSyncIssue;
   List<ChatRoom> _rooms = const [];
   List<ChatEntry> _messages = const [];
   final _imageCache = <String, Uint8List>{};
@@ -37,9 +45,14 @@ class MatrixBackend extends ChatBackend {
   final _avatarInFlight = <Uri, Future<Uint8List?>>{};
   final _avatarWaiters = Queue<Completer<void>>();
   int _avatarActive = 0;
+  final _reactionInFlight = <String>{};
 
   @override
   SessionStatus get connection => _connection;
+  @override
+  RoomSyncState get roomSyncState => _roomSyncState;
+  @override
+  RoomSyncIssue? get roomSyncIssue => _roomSyncIssue;
   @override
   String? get userId => _client?.userID;
   @override
@@ -58,6 +71,16 @@ class MatrixBackend extends ChatBackend {
       (_timeline?.canRequestHistory ?? false);
   @override
   bool get loadingHistory => _loadingHistory;
+  @override
+  List<String> get typingUsers {
+    final client = _client;
+    final room = client?.getRoomById(_activeRoomId ?? '');
+    if (room == null) return const [];
+    return [
+      for (final user in room.typingUsers)
+        if (user.id != client!.userID) user.calcDisplayname(),
+    ];
+  }
 
   @override
   Future<void> initialize() async {
@@ -79,15 +102,21 @@ class MatrixBackend extends ChatBackend {
           database: openedDatabase,
         ),
         supportedLoginTypes: {matrix.AuthenticationTypes.password},
+        defaultNetworkRequestTimeout: const Duration(seconds: 90),
       );
       final client = openedClient;
       _client = client;
+      _syncSubscription = client.onSync.stream.listen((_) {
+        _firstSyncCompleted = true;
+        _successfulSyncs++;
+        _scheduleRoomUpdate();
+      });
+      _syncStatusSubscription = client.onSyncStatus.stream.listen(
+        _handleSyncStatus,
+      );
       await client.init(
         waitForFirstSync: false,
         waitUntilLoadCompletedLoaded: true,
-      );
-      _syncSubscription = client.onSync.stream.listen(
-        (_) => _scheduleRoomUpdate(),
       );
       _loginSubscription = client.onLoginStateChanged.stream.listen((_) {
         if (_disposed) return;
@@ -102,8 +131,10 @@ class MatrixBackend extends ChatBackend {
       _scheduleRoomUpdate();
     } catch (_) {
       await _syncSubscription?.cancel();
+      await _syncStatusSubscription?.cancel();
       await _loginSubscription?.cancel();
       _syncSubscription = null;
+      _syncStatusSubscription = null;
       _loginSubscription = null;
       if (openedClient != null) {
         await openedClient.dispose();
@@ -134,6 +165,9 @@ class MatrixBackend extends ChatBackend {
       throw const FormatException('An HTTPS homeserver URL is required.');
     }
     await client.checkHomeserver(url);
+    _firstSyncCompleted = false;
+    _roomSyncState = RoomSyncState.loading;
+    _roomSyncIssue = null;
     await client.login(
       matrix.LoginType.mLoginPassword,
       identifier: matrix.AuthenticationUserIdentifier(user: username),
@@ -153,6 +187,9 @@ class MatrixBackend extends ChatBackend {
     _imageCache.clear();
     _imageCacheBytes = 0;
     _avatarCache.clear();
+    _firstSyncCompleted = false;
+    _roomSyncState = RoomSyncState.loading;
+    _roomSyncIssue = null;
     _setStatus(SessionStatus.signedOut);
   }
 
@@ -237,20 +274,55 @@ class MatrixBackend extends ChatBackend {
   }
 
   @override
-  Future<void> sendText(String roomId, String text) async {
+  Future<void> sendText(
+    String roomId,
+    String text, {
+    String? replyToId,
+    String? editEventId,
+  }) async {
     if (_sending) throw StateError('A send is already in progress');
     if (text.trim().isEmpty) return;
     final room = _requireClient().getRoomById(roomId);
     if (room == null || room.membership != matrix.Membership.join) {
       throw StateError('Room is not joined');
     }
+    if (replyToId != null && editEventId != null) {
+      throw ArgumentError('Cannot reply and edit in the same message');
+    }
+    final timeline = _timeline;
+    if ((replyToId != null || editEventId != null) &&
+        (_activeRoomId != roomId || timeline == null)) {
+      throw StateError('Message unavailable');
+    }
     _sending = true;
     notifyListeners();
     try {
+      final reply = replyToId == null
+          ? null
+          : await timeline!.getEventById(replyToId);
+      if (replyToId != null && (reply == null || reply.redacted)) {
+        throw StateError('Reply target unavailable');
+      }
+      if (editEventId != null) {
+        final original = await timeline!.getEventById(editEventId);
+        if (original == null ||
+            original.redacted ||
+            original.senderId != _requireClient().userID ||
+            original.type != matrix.EventTypes.Message ||
+            original.messageType != matrix.MessageTypes.Text) {
+          throw StateError('Message cannot be edited');
+        }
+      }
+      if ((replyToId != null || editEventId != null) &&
+          (_activeRoomId != roomId || _timeline != timeline)) {
+        throw StateError('Room changed before sending');
+      }
       await room.sendTextEvent(
         text.trim(),
         parseCommands: false,
         parseMarkdown: false,
+        inReplyTo: reply,
+        editEventId: editEventId,
       );
     } finally {
       _sending = false;
@@ -466,10 +538,75 @@ class MatrixBackend extends ChatBackend {
   }
 
   @override
-  Future<void> react(String roomId, String eventId) async {
+  Future<void> react(
+    String roomId,
+    String eventId, {
+    String emoji = '❤️',
+  }) async {
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    final timeline = _timeline;
+    if (room == null || timeline == null || _activeRoomId != roomId) {
+      throw StateError('Room unavailable');
+    }
+    if (emoji.isEmpty || emoji.runes.length > 8) {
+      throw ArgumentError('Invalid reaction');
+    }
+    final inFlightKey = '$roomId/$eventId/$emoji';
+    if (!_reactionInFlight.add(inFlightKey)) return;
+    try {
+      final event = await timeline.getEventById(eventId);
+      if (event == null ||
+          event.redacted ||
+          _timeline != timeline ||
+          _activeRoomId != roomId) {
+        throw StateError('Message unavailable');
+      }
+      final ownReaction = event
+          .aggregatedEvents(timeline, matrix.RelationshipTypes.reaction)
+          .where(
+            (reaction) =>
+                !reaction.redacted && reaction.senderId == client.userID,
+          )
+          .where(
+            (reaction) =>
+                (reaction.content['m.relates_to'] as Map?)?['key'] == emoji,
+          )
+          .firstOrNull;
+      if (ownReaction == null) {
+        await room.sendReaction(eventId, emoji);
+      } else {
+        await room.redactEvent(ownReaction.eventId);
+      }
+    } finally {
+      _reactionInFlight.remove(inFlightKey);
+    }
+  }
+
+  @override
+  Future<void> redactMessage(String roomId, String eventId) async {
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    final timeline = _timeline;
+    if (room == null || timeline == null || _activeRoomId != roomId) {
+      throw StateError('Message unavailable');
+    }
+    final event = await timeline.getEventById(eventId);
+    if (_timeline != timeline ||
+        event == null ||
+        event.redacted ||
+        event.senderId != client.userID ||
+        event.type != matrix.EventTypes.Message) {
+      throw StateError('Only your own messages can be deleted');
+    }
+    await room.redactEvent(eventId, redactAllEdits: true);
+  }
+
+  @override
+  Future<void> setTyping(String roomId, bool typing) async {
     final room = _requireClient().getRoomById(roomId);
-    if (room == null) throw StateError('Room unavailable');
-    await room.sendReaction(eventId, '❤️');
+    if (room == null || room.membership != matrix.Membership.join) return;
+    await room.setTyping(typing, timeout: 5000);
   }
 
   @override
@@ -498,6 +635,27 @@ class MatrixBackend extends ChatBackend {
     }
     await room!.leave();
     _scheduleRoomUpdate();
+  }
+
+  @override
+  Future<void> setRoomUnread(String roomId, bool unread) async {
+    final room = _requireClient().getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    await room.markUnread(unread);
+    _refreshRooms();
+  }
+
+  @override
+  Future<void> leaveRoom(String roomId) async {
+    final room = _requireClient().getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    await room.leave(waitForSync: true).timeout(const Duration(seconds: 30));
+    closeRoom(roomId);
+    _refreshRooms();
   }
 
   @override
@@ -631,68 +789,149 @@ class MatrixBackend extends ChatBackend {
     if (!_disposed) notifyListeners();
   }
 
+  void _handleSyncStatus(matrix.SyncStatusUpdate update) {
+    if (_disposed || _client?.isLogged() != true) return;
+    switch (update.status) {
+      case matrix.SyncStatus.error:
+        final failure = update.error?.exception;
+        _roomSyncIssue = failure is matrix.SyncConnectionException
+            ? RoomSyncIssue.network
+            : failure is matrix.MatrixException
+            ? RoomSyncIssue.homeserver
+            : RoomSyncIssue.processing;
+        if (_rooms.isEmpty) _roomSyncState = RoomSyncState.error;
+        notifyListeners();
+      case matrix.SyncStatus.finished:
+        _firstSyncCompleted = true;
+        _successfulSyncs++;
+        if (_roomSyncState == RoomSyncState.error) {
+          _roomSyncState = RoomSyncState.loading;
+          _roomSyncIssue = null;
+          notifyListeners();
+        }
+        _scheduleRoomUpdate();
+      case matrix.SyncStatus.waitingForResponse:
+      case matrix.SyncStatus.processing:
+      case matrix.SyncStatus.cleaningUp:
+        if (!_firstSyncCompleted &&
+            _rooms.isEmpty &&
+            _roomSyncState != RoomSyncState.loading &&
+            _roomSyncState != RoomSyncState.error) {
+          _roomSyncState = RoomSyncState.loading;
+          notifyListeners();
+        }
+    }
+  }
+
+  @override
+  Future<void> refreshRooms() async {
+    if (_refreshingRooms) return;
+    final client = _requireClient();
+    _refreshingRooms = true;
+    final previousSyncs = _successfulSyncs;
+    _roomSyncState = RoomSyncState.loading;
+    _roomSyncIssue = null;
+    notifyListeners();
+    try {
+      await client.oneShotSync(timeout: Duration.zero);
+      if (_successfulSyncs != previousSyncs) {
+        _refreshRooms();
+      } else if (_rooms.isEmpty && _roomSyncState == RoomSyncState.loading) {
+        _roomSyncState = RoomSyncState.error;
+        _roomSyncIssue = RoomSyncIssue.processing;
+        notifyListeners();
+      }
+    } catch (_) {
+      _roomSyncState = RoomSyncState.error;
+      _roomSyncIssue ??= RoomSyncIssue.network;
+      notifyListeners();
+    } finally {
+      _refreshingRooms = false;
+    }
+  }
+
   void _scheduleRoomUpdate() {
     if (_roomUpdateTimer?.isActive ?? false) return;
     _roomUpdateTimer = Timer(const Duration(milliseconds: 40), _refreshRooms);
   }
 
   void _refreshRooms() {
+    try {
+      _projectRooms();
+    } catch (_) {
+      _roomSyncState = RoomSyncState.error;
+      _roomSyncIssue = RoomSyncIssue.processing;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  void _projectRooms() {
     final client = _client;
     if (client == null || _disposed || !client.isLogged()) return;
-    final joined =
-        client.rooms
-            .where(
-              (r) =>
-                  r.membership == matrix.Membership.join ||
-                  r.membership == matrix.Membership.invite,
-            )
-            .toList()
-          ..sort((a, b) {
-            if (a.membership != b.membership) {
-              return a.membership == matrix.Membership.invite ? -1 : 1;
-            }
-            return (b.lastEvent?.originServerTs ?? DateTime(1970)).compareTo(
-              a.lastEvent?.originServerTs ?? DateTime(1970),
-            );
-          });
-    _rooms = List.unmodifiable(
-      joined.map((room) {
-        final event = room.lastEvent;
-        final name = room.getLocalizedDisplayname();
-        final heroIds =
-            room.summary.mHeroes ??
-            [if (room.directChatMatrixID != null) room.directChatMatrixID!];
-        return ChatRoom(
-          id: room.id,
-          name: name,
-          preview: event?.type == matrix.EventTypes.Message
-              ? event!.body
-              : event?.type == matrix.EventTypes.Encrypted
-              ? 'Encrypted message'
-              : '',
-          lastActivity: event?.originServerTs,
-          unread: room.notificationCount,
-          manuallyUnread: room.markedUnread,
-          avatarUrl: room.avatar,
-          encrypted: room.encrypted,
-          isDirect: room.isDirectChat,
-          invited: room.membership == matrix.Membership.invite,
-          heroes: [
-            for (final id
-                in heroIds
-                    .where((id) => id != client.userID && id.isNotEmpty)
-                    .take(4))
-              ChatAvatar(
-                name: room
-                    .unsafeGetUserFromMemoryOrFallback(id)
-                    .calcDisplayname(),
-                url: room.unsafeGetUserFromMemoryOrFallback(id).avatarUrl,
-              ),
-          ],
-        );
-      }),
+    final joined = client.rooms.where(
+      (r) =>
+          r.membership == matrix.Membership.join ||
+          r.membership == matrix.Membership.invite,
     );
+    final projected = <ChatRoom>[];
+    for (final room in joined) {
+      try {
+        projected.add(_projectRoom(room, client));
+      } catch (_) {
+        // One malformed room must not hide the rest of the inbox.
+        projected.add(
+          ChatRoom(
+            id: room.id,
+            name: room.id,
+            preview: 'Room details unavailable',
+            lastActivity: null,
+            invited: room.membership == matrix.Membership.invite,
+          ),
+        );
+      }
+    }
+    projected.sort(compareRooms);
+    _rooms = List.unmodifiable(projected);
+    if (_rooms.isNotEmpty ||
+        (_firstSyncCompleted && _roomSyncState != RoomSyncState.error)) {
+      _roomSyncState = RoomSyncState.ready;
+      _roomSyncIssue = null;
+    }
     notifyListeners();
+  }
+
+  ChatRoom _projectRoom(matrix.Room room, matrix.Client client) {
+    final event = room.lastEvent;
+    final name = room.getLocalizedDisplayname();
+    final heroIds =
+        room.summary.mHeroes ??
+        [if (room.directChatMatrixID != null) room.directChatMatrixID!];
+    return ChatRoom(
+      id: room.id,
+      name: name,
+      preview: event?.type == matrix.EventTypes.Message
+          ? event!.body
+          : event?.type == matrix.EventTypes.Encrypted
+          ? 'Encrypted message'
+          : '',
+      lastActivity: event?.originServerTs,
+      unread: room.notificationCount,
+      manuallyUnread: room.markedUnread,
+      avatarUrl: room.avatar,
+      encrypted: room.encrypted,
+      isDirect: room.isDirectChat,
+      invited: room.membership == matrix.Membership.invite,
+      heroes: [
+        for (final id
+            in heroIds
+                .where((id) => id != client.userID && id.isNotEmpty)
+                .take(4))
+          ChatAvatar(
+            name: room.unsafeGetUserFromMemoryOrFallback(id).calcDisplayname(),
+            url: room.unsafeGetUserFromMemoryOrFallback(id).avatarUrl,
+          ),
+      ],
+    );
   }
 
   void _refreshMessages(matrix.Timeline timeline) {
@@ -708,20 +947,53 @@ class MatrixBackend extends ChatBackend {
           )
           .map((event) {
             final display = event.getDisplayEvent(timeline);
+            final replyToId = event.inReplyToEventId(includingFallback: false);
+            final reactions = event.redacted
+                ? const <ChatReaction>[]
+                : summarizeReactions(
+                    event
+                        .aggregatedEvents(
+                          timeline,
+                          matrix.RelationshipTypes.reaction,
+                        )
+                        .where((reaction) => !reaction.redacted)
+                        .map(
+                          (reaction) => ReactionVote(
+                            ((reaction.content['m.relates_to'] as Map?)?['key']
+                                    as String?) ??
+                                '',
+                            reaction.senderId,
+                          ),
+                        ),
+                    client.userID,
+                  );
             return ChatEntry(
               id: event.eventId,
               sender: event.senderId,
-              body: display.type == matrix.EventTypes.Encrypted
+              body: event.redacted
+                  ? 'Message removed'
+                  : display.type == matrix.EventTypes.Encrypted
                   ? '🔒 Unable to decrypt this message'
-                  : display.body,
+                  : visibleMessageBody(
+                      display.body,
+                      isReply: replyToId != null,
+                    ),
               time: event.originServerTs,
               mine: event.senderId == client.userID,
-              isImage: display.messageType == matrix.MessageTypes.Image,
-              isAttachment: {
-                matrix.MessageTypes.File,
-                matrix.MessageTypes.Audio,
-                matrix.MessageTypes.Video,
-              }.contains(display.messageType),
+              isImage:
+                  !event.redacted &&
+                  display.messageType == matrix.MessageTypes.Image,
+              isAttachment:
+                  !event.redacted &&
+                  {
+                    matrix.MessageTypes.File,
+                    matrix.MessageTypes.Audio,
+                    matrix.MessageTypes.Video,
+                  }.contains(display.messageType),
+              replyToId: replyToId,
+              redacted: event.redacted,
+              edited: display.eventId != event.eventId,
+              reactions: reactions,
             );
           })
           .toList()
@@ -735,6 +1007,7 @@ class MatrixBackend extends ChatBackend {
     _disposed = true;
     _roomUpdateTimer?.cancel();
     _syncSubscription?.cancel();
+    _syncStatusSubscription?.cancel();
     _loginSubscription?.cancel();
     _timeline?.cancelSubscriptions();
     final client = _client;

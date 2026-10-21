@@ -80,6 +80,75 @@ void main() {
     expect(find.text('Quiet'), findsNothing);
   });
 
+  testWidgets(
+    'empty inbox distinguishes syncing, failure, and a true empty account',
+    (tester) async {
+      final backend = FakeBackend()
+        ..syncState = RoomSyncState.loading
+        ..currentUserId = '@test:example.org';
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: themeFor(VisualTheme.ultraviolet),
+          home: InboxScreen(
+            backend: backend,
+            palette: paletteFor(VisualTheme.ultraviolet),
+            style: VisualTheme.ultraviolet,
+            onThemeChanged: (_) {},
+          ),
+        ),
+      );
+      expect(find.text('SYNCING'), findsOneWidget);
+      expect(find.text('No rooms found'), findsNothing);
+
+      backend.setSync(RoomSyncState.error, RoomSyncIssue.network);
+      await tester.pump();
+      expect(find.text('SYNC ERROR'), findsOneWidget);
+      expect(find.text('Couldn’t sync your rooms'), findsOneWidget);
+      await tester.tap(find.text('Retry sync'));
+      await tester.pump();
+      expect(backend.refreshCount, 1);
+      expect(find.text('SYNCING'), findsOneWidget);
+
+      backend.setSync(RoomSyncState.ready);
+      await tester.pump();
+      expect(find.text('0 ROOMS'), findsOneWidget);
+      expect(
+        find.textContaining('Synced as @test:example.org'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Refresh rooms'));
+      await tester.pump();
+      expect(backend.refreshCount, 2);
+    },
+  );
+
+  testWidgets('sync retry remains reachable on a compact display', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final backend = FakeBackend()
+      ..syncState = RoomSyncState.error
+      ..syncIssue = RoomSyncIssue.homeserver;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeFor(VisualTheme.ultraviolet),
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    expect(find.textContaining('homeserver rejected'), findsOneWidget);
+    await tester.ensureVisible(find.text('Retry sync'));
+    await tester.tap(find.text('Retry sync'));
+    await tester.pump();
+    expect(backend.refreshCount, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('invitation can be declined from the inbox', (tester) async {
     final backend = FakeBackend()
       ..roomList = [
@@ -117,6 +186,80 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.declined, '!invite:example.org');
     expect(find.text('No invitations'), findsOneWidget);
+  });
+
+  testWidgets('long-press marks a joined room unread and clears the flag', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        const ChatRoom(
+          id: '!joined:example.org',
+          name: 'General',
+          preview: '',
+          lastActivity: null,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.longPress(find.text('General'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark unread'));
+    await tester.pumpAndSettle();
+    expect(backend.lastRoomUnread, isTrue);
+    expect(find.text('•'), findsOneWidget);
+
+    await tester.longPress(find.text('General'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clear manually unread'));
+    await tester.pumpAndSettle();
+    expect(backend.lastRoomUnread, isFalse);
+  });
+
+  testWidgets('leaving a joined room requires confirmation', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        const ChatRoom(
+          id: '!joined:example.org',
+          name: 'General',
+          preview: '',
+          lastActivity: null,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.longPress(find.text('General'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Leave room'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(backend.lastLeftRoom, isNull);
+
+    await tester.longPress(find.text('General'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Leave room'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Leave'));
+    await tester.pumpAndSettle();
+    expect(backend.lastLeftRoom, '!joined:example.org');
+    expect(find.text('General'), findsNothing);
   });
 
   testWidgets('public directory paginates and replaces search results', (
@@ -211,6 +354,172 @@ void main() {
     await tester.tap(find.byTooltip('Send message'));
     await tester.pump();
     expect(backend.lastMessage, 'Hello!');
+  });
+
+  testWidgets('long-press reply targets the selected Matrix event', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'original',
+          sender: '@friend:example.org',
+          body: 'First message',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('First message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reply'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Replying to @friend'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'My reply');
+    expect(backend.typingStates.last, isTrue);
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(backend.lastReplyId, 'original');
+    expect(backend.lastMessage, 'My reply');
+    expect(find.textContaining('Replying to @friend'), findsNothing);
+    expect(backend.typingStates.last, isFalse);
+  });
+
+  testWidgets('incoming typing and reaction choices are visible', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..typingNames = ['Alice']
+      ..entries = [
+        ChatEntry(
+          id: 'friend-message',
+          sender: '@friend:example.org',
+          body: 'Hi there',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Alice typing…'), findsOneWidget);
+    await tester.longPress(find.text('Hi there'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('React 👍'));
+    await tester.pumpAndSettle();
+    expect(backend.lastReaction, '👍');
+  });
+
+  testWidgets('reaction count is visible and can be toggled', (tester) async {
+    final backend = FakeBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'reacted-message',
+          sender: '@friend:example.org',
+          body: 'Reacted',
+          time: DateTime(2026),
+          mine: false,
+          reactions: const [ChatReaction(emoji: '❤️', count: 2, mine: true)],
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('❤️ 2'), findsOneWidget);
+    await tester.tap(find.text('❤️ 2'));
+    await tester.pumpAndSettle();
+    expect(backend.lastReaction, '❤️');
+  });
+
+  testWidgets('own message can be edited or deleted after confirmation', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'mine',
+          sender: '@me:example.org',
+          body: 'Old text',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Edit message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Edit message'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'New text');
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(backend.lastEditId, 'mine');
+    expect(backend.lastMessage, 'New text');
+
+    await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Delete message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Delete message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(backend.lastRedactedId, isNull);
+    await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Delete message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Delete message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pump();
+    expect(backend.lastRedactedId, 'mine');
   });
 
   testWidgets('file attachment has a save action and composer picker', (
@@ -417,16 +726,38 @@ class FakeBackend extends ChatBackend {
   List<ChatEntry> entries = [];
   String? activeId;
   String? lastMessage;
+  String? lastReplyId;
+  String? lastEditId;
+  String? lastRedactedId;
+  final typingStates = <bool>[];
+  List<String> typingNames = [];
+  String? lastReaction;
   String? declined;
+  bool? lastRoomUnread;
+  String? lastLeftRoom;
   int imageLoads = 0;
   int avatarLoads = 0;
   String? lastRecoveryKey;
   bool connected = false;
+  String? currentUserId;
+  RoomSyncState syncState = RoomSyncState.ready;
+  RoomSyncIssue? syncIssue;
+  int refreshCount = 0;
+
+  void setSync(RoomSyncState state, [RoomSyncIssue? issue]) {
+    syncState = state;
+    syncIssue = issue;
+    notifyListeners();
+  }
 
   @override
   SessionStatus get connection => SessionStatus.signedOut;
   @override
-  String? get userId => null;
+  RoomSyncState get roomSyncState => syncState;
+  @override
+  RoomSyncIssue? get roomSyncIssue => syncIssue;
+  @override
+  String? get userId => currentUserId;
   @override
   String? get error => null;
   @override
@@ -442,7 +773,15 @@ class FakeBackend extends ChatBackend {
   @override
   bool get loadingHistory => false;
   @override
+  List<String> get typingUsers => typingNames;
+  @override
   Future<void> initialize() async {}
+  @override
+  Future<void> refreshRooms() async {
+    refreshCount++;
+    setSync(RoomSyncState.loading);
+  }
+
   @override
   Future<void> login({
     required String homeserver,
@@ -470,8 +809,15 @@ class FakeBackend extends ChatBackend {
   }
 
   @override
-  Future<void> sendText(String roomId, String text) async {
+  Future<void> sendText(
+    String roomId,
+    String text, {
+    String? replyToId,
+    String? editEventId,
+  }) async {
     lastMessage = text;
+    lastReplyId = replyToId;
+    lastEditId = editEventId;
   }
 
   @override
@@ -497,7 +843,24 @@ class FakeBackend extends ChatBackend {
   }
 
   @override
-  Future<void> react(String roomId, String eventId) async {}
+  Future<void> react(
+    String roomId,
+    String eventId, {
+    String emoji = '❤️',
+  }) async {
+    lastReaction = emoji;
+  }
+
+  @override
+  Future<void> redactMessage(String roomId, String eventId) async {
+    lastRedactedId = eventId;
+  }
+
+  @override
+  Future<void> setTyping(String roomId, bool typing) async {
+    typingStates.add(typing);
+  }
+
   @override
   Future<void> createDirectChat(String userId) async {}
 
@@ -507,6 +870,38 @@ class FakeBackend extends ChatBackend {
   @override
   Future<void> declineInvite(String roomId) async {
     declined = roomId;
+    roomList.removeWhere((room) => room.id == roomId);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setRoomUnread(String roomId, bool unread) async {
+    lastRoomUnread = unread;
+    roomList = [
+      for (final room in roomList)
+        if (room.id != roomId)
+          room
+        else
+          ChatRoom(
+            id: room.id,
+            name: room.name,
+            preview: room.preview,
+            lastActivity: room.lastActivity,
+            unread: room.unread,
+            manuallyUnread: unread,
+            invited: room.invited,
+            encrypted: room.encrypted,
+            isDirect: room.isDirect,
+            avatarUrl: room.avatarUrl,
+            heroes: room.heroes,
+          ),
+    ];
+    notifyListeners();
+  }
+
+  @override
+  Future<void> leaveRoom(String roomId) async {
+    lastLeftRoom = roomId;
     roomList.removeWhere((room) => room.id == roomId);
     notifyListeners();
   }

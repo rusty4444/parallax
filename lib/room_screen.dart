@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -32,6 +33,11 @@ class RoomScreen extends StatefulWidget {
 
 class _RoomScreenState extends State<RoomScreen> {
   final _draft = TextEditingController();
+  Timer? _typingStopTimer;
+  DateTime? _lastTypingSent;
+  bool _typing = false;
+  ChatEntry? _replyingTo;
+  ChatEntry? _editing;
   late final _backgroundStore = widget.backgroundStore ?? RoomBackgroundStore();
   File? _background;
   int _backgroundVersion = 0;
@@ -108,6 +114,8 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
+    _typingStopTimer?.cancel();
+    _stopTyping();
     widget.backend.closeRoom(widget.roomId);
     _draft.dispose();
     super.dispose();
@@ -116,9 +124,23 @@ class _RoomScreenState extends State<RoomScreen> {
   Future<void> _send() async {
     final body = _draft.text.trim();
     if (body.isEmpty || widget.backend.sending) return;
+    final reply = _replyingTo;
+    final edit = _editing;
     try {
-      await widget.backend.sendText(widget.roomId, body);
-      if (mounted && _draft.text.trim() == body) _draft.clear();
+      await widget.backend.sendText(
+        widget.roomId,
+        body,
+        replyToId: reply?.id,
+        editEventId: edit?.id,
+      );
+      if (mounted && _draft.text.trim() == body) {
+        _draft.clear();
+        setState(() {
+          _replyingTo = null;
+          _editing = null;
+        });
+        _stopTyping();
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -129,14 +151,131 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Future<void> _heart(ChatEntry entry) async {
+    await _react(entry, '❤️');
+  }
+
+  Future<void> _react(ChatEntry entry, String emoji) async {
     try {
-      await widget.backend.react(widget.roomId, entry.id);
+      await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t react to this message.')),
         );
       }
+    }
+  }
+
+  void _onDraftChanged(String text) {
+    _typingStopTimer?.cancel();
+    if (text.trim().isEmpty) {
+      _stopTyping();
+      return;
+    }
+    final now = DateTime.now();
+    if (!_typing ||
+        _lastTypingSent == null ||
+        now.difference(_lastTypingSent!) > const Duration(seconds: 3)) {
+      _typing = true;
+      _lastTypingSent = now;
+      unawaited(
+        widget.backend.setTyping(widget.roomId, true).catchError((Object _) {}),
+      );
+    }
+    _typingStopTimer = Timer(const Duration(seconds: 4), _stopTyping);
+  }
+
+  void _stopTyping() {
+    _typingStopTimer?.cancel();
+    if (!_typing) return;
+    _typing = false;
+    _lastTypingSent = null;
+    unawaited(
+      widget.backend.setTyping(widget.roomId, false).catchError((Object _) {}),
+    );
+  }
+
+  Future<void> _showActions(ChatEntry entry) async {
+    if (entry.redacted) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: const Text('Reply'),
+              onTap: () => Navigator.pop(sheetContext, 'reply'),
+            ),
+            for (final emoji in ['❤️', '👍', '😂', '🎉', '😮'])
+              ListTile(
+                leading: Text(emoji, style: const TextStyle(fontSize: 23)),
+                title: Text('React $emoji'),
+                onTap: () => Navigator.pop(sheetContext, emoji),
+              ),
+            if (entry.mine && !entry.isImage && !entry.isAttachment)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit message'),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
+              ),
+            if (entry.mine)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Delete message'),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'reply') {
+      setState(() {
+        _replyingTo = entry;
+        _editing = null;
+      });
+    } else if (choice == 'edit') {
+      _draft.text = entry.body;
+      _draft.selection = TextSelection.collapsed(offset: _draft.text.length);
+      setState(() {
+        _editing = entry;
+        _replyingTo = null;
+      });
+    } else if (choice == 'delete') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete this message?'),
+          content: const Text(
+            'This removes the message for everyone in the room.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      try {
+        await widget.backend.redactMessage(widget.roomId, entry.id);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Couldn’t delete this message.')),
+          );
+        }
+      }
+    } else {
+      await _react(entry, choice);
     }
   }
 
@@ -368,6 +507,8 @@ class _RoomScreenState extends State<RoomScreen> {
                                   roomId: widget.roomId,
                                   palette: p,
                                   onHeart: _heart,
+                                  onAction: _showActions,
+                                  onReaction: _react,
                                 );
                               }
                               final entry = row.entries.single;
@@ -388,10 +529,70 @@ class _RoomScreenState extends State<RoomScreen> {
                                 palette: p,
                                 group: group,
                                 onHeart: () => _heart(entry),
+                                onAction: () => _showActions(entry),
+                                onReaction: (emoji) => _react(entry, emoji),
+                                replyPreview: entry.replyToId == null
+                                    ? null
+                                    : entries
+                                          .where(
+                                            (item) =>
+                                                item.id == entry.replyToId,
+                                          )
+                                          .firstOrNull,
                               );
                             },
                           ),
                   ),
+                  if (widget.backend.typingUsers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 5, 18, 5),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '${widget.backend.typingUsers.take(2).join(', ')} typing…',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: p.secondary, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  if (_replyingTo != null || _editing != null)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
+                      decoration: BoxDecoration(
+                        color: p.surface,
+                        border: Border(top: BorderSide(color: p.stroke)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _editing == null
+                                ? Icons.reply_rounded
+                                : Icons.edit_outlined,
+                            color: p.secondary,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _editing == null
+                                  ? 'Replying to ${_replyingTo!.sender}: ${_replyingTo!.body}'
+                                  : 'Editing: ${_editing!.body}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: p.foreground),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cancel reply or edit',
+                            onPressed: () => setState(() {
+                              _replyingTo = null;
+                              _editing = null;
+                            }),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
                   Container(
                     decoration: BoxDecoration(
                       color: p.surface,
@@ -436,6 +637,7 @@ class _RoomScreenState extends State<RoomScreen> {
                         Expanded(
                           child: TextField(
                             controller: _draft,
+                            onChanged: _onDraftChanged,
                             minLines: 1,
                             maxLines: 5,
                             textCapitalization: TextCapitalization.sentences,
@@ -492,6 +694,9 @@ class _MessageBubble extends StatelessWidget {
     required this.palette,
     required this.group,
     required this.onHeart,
+    required this.onAction,
+    required this.onReaction,
+    this.replyPreview,
   });
   final ChatEntry entry;
   final ChatBackend backend;
@@ -499,6 +704,9 @@ class _MessageBubble extends StatelessWidget {
   final AppPalette palette;
   final bool group;
   final VoidCallback onHeart;
+  final VoidCallback onAction;
+  final ValueChanged<String> onReaction;
+  final ChatEntry? replyPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -511,112 +719,174 @@ class _MessageBubble extends StatelessWidget {
         ),
         child: Padding(
           padding: EdgeInsets.only(top: group ? 3 : 14),
-          child: GestureDetector(
-            onDoubleTap: onHeart,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: mine ? palette.bubble : palette.surface,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(19),
-                  topRight: const Radius.circular(19),
-                  bottomLeft: Radius.circular(mine ? 19 : 5),
-                  bottomRight: Radius.circular(mine ? 5 : 19),
-                ),
-                border: mine ? null : Border.all(color: palette.stroke),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: mine ? palette.bubble : palette.surface,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(19),
+                topRight: const Radius.circular(19),
+                bottomLeft: Radius.circular(mine ? 19 : 5),
+                bottomRight: Radius.circular(mine ? 5 : 19),
               ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (!mine && !group) ...[
-                      Text(
-                        entry.sender,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: palette.secondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                    ],
-                    if (entry.isImage) ...[
-                      MessageImage(
-                        backend: backend,
-                        palette: palette,
-                        roomId: roomId,
-                        eventId: entry.id,
-                      ),
-                      const SizedBox(height: 4),
-                    ],
-                    if (entry.isAttachment)
-                      InkWell(
-                        onTap: () =>
-                            saveAttachment(context, backend, roomId, entry.id),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 5),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.insert_drive_file_outlined,
-                                color: mine
-                                    ? palette.bubbleText
-                                    : palette.secondary,
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  entry.body,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: mine
-                                        ? palette.bubbleText
-                                        : palette.foreground,
-                                  ),
+              border: mine ? null : Border.all(color: palette.stroke),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onDoubleTap: onHeart,
+                    onLongPress: onAction,
+                    behavior: HitTestBehavior.opaque,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (!mine && !group) ...[
+                          Text(
+                            entry.sender,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: palette.secondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                        ],
+                        if (entry.replyToId != null) ...[
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                left: BorderSide(
+                                  color: palette.secondary,
+                                  width: 3,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Icon(
-                                Icons.download_rounded,
-                                size: 18,
+                            ),
+                            child: Text(
+                              replyPreview == null
+                                  ? 'In reply to an earlier message'
+                                  : '${replyPreview!.sender}: ${replyPreview!.body}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
                                 color: mine
                                     ? palette.bubbleText
-                                    : palette.secondary,
+                                    : palette.muted,
+                                fontSize: 12,
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      )
-                    else if (entry.body.isNotEmpty)
-                      Text(
-                        entry.body,
-                        style: TextStyle(
-                          color: mine ? palette.bubbleText : palette.foreground,
-                          fontSize: 15,
-                          height: 1.35,
-                        ),
-                      ),
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.bottomRight,
-                      child: Text(
-                        TimeOfDay.fromDateTime(
-                          entry.time.toLocal(),
-                        ).format(context),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: mine
-                              ? palette.bubbleText.withValues(alpha: 0.77)
-                              : palette.muted,
-                        ),
-                      ),
+                          const SizedBox(height: 5),
+                        ],
+                        if (entry.isImage) ...[
+                          MessageImage(
+                            backend: backend,
+                            palette: palette,
+                            roomId: roomId,
+                            eventId: entry.id,
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        if (entry.isAttachment)
+                          InkWell(
+                            onTap: () => saveAttachment(
+                              context,
+                              backend,
+                              roomId,
+                              entry.id,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.insert_drive_file_outlined,
+                                    color: mine
+                                        ? palette.bubbleText
+                                        : palette.secondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      entry.body,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: mine
+                                            ? palette.bubbleText
+                                            : palette.foreground,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.download_rounded,
+                                    size: 18,
+                                    color: mine
+                                        ? palette.bubbleText
+                                        : palette.secondary,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else if (entry.body.isNotEmpty)
+                          Text(
+                            entry.edited
+                                ? '${entry.body} (edited)'
+                                : entry.body,
+                            style: TextStyle(
+                              color: mine
+                                  ? palette.bubbleText
+                                  : palette.foreground,
+                              fontSize: 15,
+                              height: 1.35,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (entry.reactions.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 3,
+                      children: [
+                        for (final reaction in entry.reactions)
+                          ActionChip(
+                            tooltip: reaction.mine
+                                ? 'Remove your ${reaction.emoji} reaction'
+                                : 'React with ${reaction.emoji}',
+                            label: Text('${reaction.emoji} ${reaction.count}'),
+                            backgroundColor: reaction.mine
+                                ? palette.accent.withValues(alpha: 0.25)
+                                : palette.background,
+                            onPressed: () => onReaction(reaction.emoji),
+                          ),
+                      ],
                     ),
                   ],
-                ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Text(
+                      TimeOfDay.fromDateTime(
+                        entry.time.toLocal(),
+                      ).format(context),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: mine
+                            ? palette.bubbleText.withValues(alpha: 0.77)
+                            : palette.muted,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
