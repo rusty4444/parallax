@@ -142,6 +142,7 @@ class _AvatarFaceState extends State<_AvatarFace> {
                   width: widget.size,
                   height: widget.size,
                   cacheWidth: (widget.size * 3).round().clamp(1, 384),
+                  cacheHeight: (widget.size * 3).round().clamp(1, 384),
                   fit: BoxFit.cover,
                   errorBuilder: (_, _, _) => fallback,
                 ),

@@ -155,6 +155,16 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Future<void> _react(ChatEntry entry, String emoji) async {
+    if (widget.backend.rooms.any(
+      (room) => room.id == widget.roomId && room.encrypted,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Encrypted reactions are unavailable in this build.'),
+        ),
+      );
+      return;
+    }
     try {
       await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
     } catch (_) {
@@ -209,12 +219,24 @@ class _RoomScreenState extends State<RoomScreen> {
               title: const Text('Reply'),
               onTap: () => Navigator.pop(sheetContext, 'reply'),
             ),
-            for (final emoji in ['❤️', '👍', '😂', '🎉', '😮'])
+            if (!entry.mine &&
+                widget.backend.rooms.any(
+                  (room) => room.id == widget.roomId && room.encrypted,
+                ))
               ListTile(
-                leading: Text(emoji, style: const TextStyle(fontSize: 23)),
-                title: Text('React $emoji'),
-                onTap: () => Navigator.pop(sheetContext, emoji),
+                leading: const Icon(Icons.verified_user_outlined),
+                title: const Text('Verify sender'),
+                onTap: () => Navigator.pop(sheetContext, 'verify'),
               ),
+            if (!widget.backend.rooms.any(
+              (room) => room.id == widget.roomId && room.encrypted,
+            ))
+              for (final emoji in ['❤️', '👍', '😂', '🎉', '😮'])
+                ListTile(
+                  leading: Text(emoji, style: const TextStyle(fontSize: 23)),
+                  title: Text('React $emoji'),
+                  onTap: () => Navigator.pop(sheetContext, emoji),
+                ),
             if (entry.mine && !entry.isImage && !entry.isAttachment)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -232,7 +254,17 @@ class _RoomScreenState extends State<RoomScreen> {
       ),
     );
     if (!mounted || choice == null) return;
-    if (choice == 'reply') {
+    if (choice == 'verify') {
+      try {
+        await widget.backend.startVerification(entry.sender);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Couldn’t start verification.')),
+          );
+        }
+      }
+    } else if (choice == 'reply') {
       setState(() {
         _replyingTo = entry;
         _editing = null;

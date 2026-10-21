@@ -23,17 +23,36 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late VisualTheme _style = widget.style;
   late Future<CryptoStatus> _cryptoFuture;
+  late Future<List<VerificationDevice>> _devicesFuture;
   bool _restoring = false;
 
   @override
   void initState() {
     super.initState();
     _cryptoFuture = widget.backend.cryptoStatus();
+    _devicesFuture = widget.backend.ownDevices();
   }
 
   void _refreshCrypto() => setState(() {
     _cryptoFuture = widget.backend.cryptoStatus();
+    _devicesFuture = widget.backend.ownDevices();
   });
+
+  Future<void> _verifyDevice(VerificationDevice device) async {
+    final userId = widget.backend.userId;
+    if (userId == null) return;
+    try {
+      await widget.backend.startVerification(userId, deviceId: device.id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t start device verification. Try again.'),
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _restoreCrypto() async {
     if (_restoring) return;
@@ -317,6 +336,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
+              ),
+              const SizedBox(height: 14),
+              FutureBuilder<List<VerificationDevice>>(
+                future: _devicesFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return TextButton(
+                      onPressed: _refreshCrypto,
+                      child: const Text('Retry loading devices'),
+                    );
+                  }
+                  if (!snapshot.hasData) {
+                    return const Text('Loading your other devices…');
+                  }
+                  final devices = snapshot.data!;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Verify with another device',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      if (devices.isEmpty)
+                        const Text(
+                          'No other device found. Sign in on a second client first.',
+                        )
+                      else
+                        for (final device in devices)
+                          ListTile(
+                            title: Text(device.name),
+                            subtitle: Text(
+                              device.verified
+                                  ? '${device.id} · Verified'
+                                  : '${device.id} · Not verified',
+                            ),
+                            trailing: const Icon(Icons.verified_user_outlined),
+                            onTap: () => _verifyDevice(device),
+                          ),
+                      TextButton(
+                        onPressed: _refreshCrypto,
+                        child: const Text('Refresh devices'),
+                      ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 28),
               OutlinedButton.icon(

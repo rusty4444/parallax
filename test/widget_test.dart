@@ -10,11 +10,13 @@ import 'package:matrixpress/directory_screen.dart';
 import 'package:matrixpress/gallery_bubble.dart';
 import 'package:matrixpress/inbox_screen.dart';
 import 'package:matrixpress/login_screen.dart';
+import 'package:matrixpress/main.dart';
 import 'package:matrixpress/message_search_screen.dart';
 import 'package:matrixpress/room_screen.dart';
 import 'package:matrixpress/room_background_store.dart';
 import 'package:matrixpress/room_avatar.dart';
 import 'package:matrixpress/settings_screen.dart';
+import 'package:matrixpress/security_overlay.dart';
 
 void main() {
   testWidgets('login validates homeserver and sends credentials', (
@@ -354,6 +356,26 @@ void main() {
     await tester.tap(find.byTooltip('Send message'));
     await tester.pump();
     expect(backend.lastMessage, 'Hello!');
+  });
+
+  testWidgets('failed send retains the draft for retry', (tester) async {
+    final backend = FakeBackend()..failSend = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Keep this message');
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(find.text('Keep this message'), findsOneWidget);
+    expect(find.text('Message not sent. Try again.'), findsOneWidget);
   });
 
   testWidgets('long-press reply targets the selected Matrix event', (
@@ -700,6 +722,197 @@ void main() {
     expect(backend.lastRecoveryKey, '  synthetic-test-recovery-key  ');
     expect(find.text('Identity connected on this device'), findsOneWidget);
   });
+
+  testWidgets('incoming verification requires explicit acceptance', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..shownVerification = const VerificationDetails(
+        id: 1,
+        userId: '@friend:example.org',
+        deviceId: 'OTHER',
+        stage: VerificationStage.accept,
+        incoming: true,
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SecurityOverlay(backend: backend, child: const Scaffold()),
+      ),
+    );
+    expect(find.text('Accept request'), findsOneWidget);
+    expect(find.text('Device: OTHER'), findsOneWidget);
+    await tester.tap(find.text('Accept request'));
+    await tester.pump();
+    expect(backend.verificationAction, 'accept');
+    await tester.tap(find.text('Cancel verification'));
+    await tester.pump();
+    expect(backend.verificationAction, 'cancel');
+  });
+
+  testWidgets('incoming verification appears over the app navigation', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..shownVerification = const VerificationDetails(
+        id: 8,
+        userId: '@me:example.org',
+        stage: VerificationStage.accept,
+        incoming: true,
+      );
+    await tester.pumpWidget(MatrixpressApp(backend: backend));
+    await tester.pump();
+    expect(find.text('Verify identity'), findsOneWidget);
+    expect(find.text('Accept request'), findsOneWidget);
+    expect(find.text('SIGN IN TO MATRIX'), findsOneWidget);
+  });
+
+  testWidgets('encrypted-room sender offers verification', (tester) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        const ChatRoom(
+          id: '!r:example.org',
+          name: 'Secure room',
+          preview: '',
+          lastActivity: null,
+          encrypted: true,
+        ),
+      ]
+      ..entries = [
+        ChatEntry(
+          id: 'event',
+          sender: '@friend:example.org',
+          body: 'Hello',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Hello'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verify sender'));
+    await tester.pumpAndSettle();
+    expect(backend.verificationAction, 'start:@friend:example.org:null');
+  });
+
+  testWidgets('SAS emoji and decimal comparison require a decision', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..shownVerification = const VerificationDetails(
+        id: 2,
+        userId: '@friend:example.org',
+        stage: VerificationStage.compare,
+        incoming: false,
+        emojis: [
+          VerificationEmoji('🐶', 'Dog'),
+          VerificationEmoji('🐱', 'Cat'),
+          VerificationEmoji('🌞', 'Sun'),
+          VerificationEmoji('🌙', 'Moon'),
+          VerificationEmoji('🔥', 'Fire'),
+          VerificationEmoji('🌳', 'Tree'),
+          VerificationEmoji('🌊', 'Wave'),
+        ],
+        numbers: [1234, 5678, 9012],
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SecurityOverlay(backend: backend, child: const Scaffold()),
+      ),
+    );
+    expect(find.text('Dog'), findsOneWidget);
+    await tester.tap(find.text('Show numbers instead'));
+    await tester.pump();
+    expect(find.text('1234  5678  9012'), findsOneWidget);
+    await tester.tap(find.text('They do not match'));
+    await tester.pump();
+    expect(backend.verificationAction, 'mismatch');
+    await tester.tap(find.text('They match exactly'));
+    await tester.pump();
+    expect(backend.verificationAction, 'match');
+  });
+
+  testWidgets('verification secret stays obscured and can be skipped', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..shownVerification = const VerificationDetails(
+        id: 3,
+        userId: '@me:example.org',
+        stage: VerificationStage.secret,
+        incoming: false,
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SecurityOverlay(backend: backend, child: const Scaffold()),
+      ),
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).obscureText,
+      isTrue,
+    );
+    await tester.enterText(find.byType(TextField), 'test-only-secret');
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Unlock and sign'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Unlock and sign'));
+    await tester.pump();
+    expect(backend.verificationAction, 'unlock');
+    await tester.tap(find.text('Continue without signing'));
+    await tester.pump();
+    expect(backend.verificationAction, 'skip');
+  });
+
+  testWidgets('untrusted recipient blocks send until explicit decision', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..shownTrust = const TrustWarning(
+        roomId: '!room:example.org',
+        recipients: [
+          UntrustedRecipient(
+            userId: '@friend:example.org',
+            masterKey: 'sample-master-key',
+          ),
+        ],
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SecurityOverlay(backend: backend, child: const Scaffold()),
+      ),
+    );
+    expect(find.text('Unverified recipients'), findsOneWidget);
+    expect(find.text('sample-master-key'), findsOneWidget);
+    await tester.tap(find.text('Do not send'));
+    await tester.pump();
+    expect(backend.verificationAction, 'reject-trust');
+    backend.shownTrust = const TrustWarning(
+      roomId: '!room:example.org',
+      recipients: [UntrustedRecipient(userId: '@friend:example.org')],
+    );
+    backend.notifyListeners();
+    await tester.pump();
+    await tester.ensureVisible(find.text('Send without verification'));
+    await tester.pump();
+    await tester.tap(find.text('Send without verification'));
+    await tester.pump();
+    expect(backend.verificationAction, 'trust');
+  });
 }
 
 class FakeBackgroundStore extends RoomBackgroundStore {
@@ -726,6 +939,7 @@ class FakeBackend extends ChatBackend {
   List<ChatEntry> entries = [];
   String? activeId;
   String? lastMessage;
+  bool failSend = false;
   String? lastReplyId;
   String? lastEditId;
   String? lastRedactedId;
@@ -739,6 +953,9 @@ class FakeBackend extends ChatBackend {
   int avatarLoads = 0;
   String? lastRecoveryKey;
   bool connected = false;
+  VerificationDetails? shownVerification;
+  TrustWarning? shownTrust;
+  String? verificationAction;
   String? currentUserId;
   RoomSyncState syncState = RoomSyncState.ready;
   RoomSyncIssue? syncIssue;
@@ -774,6 +991,65 @@ class FakeBackend extends ChatBackend {
   bool get loadingHistory => false;
   @override
   List<String> get typingUsers => typingNames;
+  @override
+  VerificationDetails? get verification => shownVerification;
+  @override
+  TrustWarning? get trustWarning => shownTrust;
+
+  void showVerification(VerificationDetails details) {
+    shownVerification = details;
+    notifyListeners();
+  }
+
+  @override
+  Future<List<VerificationDevice>> ownDevices() async => const [];
+  @override
+  Future<void> startVerification(String userId, {String? deviceId}) async {
+    verificationAction = 'start:$userId:$deviceId';
+  }
+
+  @override
+  Future<void> acceptVerification() async {
+    verificationAction = 'accept';
+  }
+
+  @override
+  Future<void> chooseEmojiVerification() async {
+    verificationAction = 'choose';
+  }
+
+  @override
+  Future<void> confirmVerification({required bool matches}) async {
+    verificationAction = matches ? 'match' : 'mismatch';
+  }
+
+  @override
+  Future<void> unlockVerification(String keyOrPassphrase) async {
+    verificationAction = 'unlock';
+  }
+
+  @override
+  Future<void> skipVerificationSigning() async {
+    verificationAction = 'skip';
+  }
+
+  @override
+  Future<void> cancelVerification() async {
+    verificationAction = 'cancel';
+  }
+
+  @override
+  void dismissVerification() {
+    verificationAction = 'dismiss';
+  }
+
+  @override
+  void respondToTrustWarning(bool approved) {
+    verificationAction = approved ? 'trust' : 'reject-trust';
+    shownTrust = null;
+    notifyListeners();
+  }
+
   @override
   Future<void> initialize() async {}
   @override
@@ -815,6 +1091,7 @@ class FakeBackend extends ChatBackend {
     String? replyToId,
     String? editEventId,
   }) async {
+    if (failSend) throw StateError('SDK returned no event ID');
     lastMessage = text;
     lastReplyId = replyToId;
     lastEditId = editEventId;

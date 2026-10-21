@@ -7,6 +7,67 @@ enum RoomSyncState { loading, ready, error }
 
 enum RoomSyncIssue { network, homeserver, processing }
 
+enum VerificationStage { accept, waiting, choose, compare, secret, done, error }
+
+@immutable
+class VerificationEmoji {
+  const VerificationEmoji(this.symbol, this.name);
+  final String symbol;
+  final String name;
+}
+
+@immutable
+class VerificationDetails {
+  const VerificationDetails({
+    required this.id,
+    required this.userId,
+    required this.stage,
+    required this.incoming,
+    this.deviceId,
+    this.emojis = const [],
+    this.numbers = const [],
+    this.busy = false,
+    this.secretSkipped = false,
+    this.error,
+  });
+  final int id;
+  final String userId;
+  final String? deviceId;
+  final VerificationStage stage;
+  final bool incoming;
+  final List<VerificationEmoji> emojis;
+  final List<int> numbers;
+  final bool busy;
+  final bool secretSkipped;
+  final String? error;
+}
+
+@immutable
+class VerificationDevice {
+  const VerificationDevice({
+    required this.id,
+    required this.name,
+    required this.verified,
+  });
+  final String id;
+  final String name;
+  final bool verified;
+}
+
+@immutable
+class UntrustedRecipient {
+  const UntrustedRecipient({required this.userId, this.masterKey});
+  final String userId;
+  final String? masterKey;
+}
+
+@immutable
+class TrustWarning {
+  const TrustWarning({required this.roomId, required this.recipients});
+  final String roomId;
+  final List<UntrustedRecipient> recipients;
+}
+
 @immutable
 class ChatRoom {
   const ChatRoom({
@@ -182,6 +243,19 @@ abstract class ChatBackend extends ChangeNotifier {
   bool get canLoadOlder;
   bool get loadingHistory;
   List<String> get typingUsers;
+  VerificationDetails? get verification;
+  TrustWarning? get trustWarning;
+
+  Future<List<VerificationDevice>> ownDevices();
+  Future<void> startVerification(String userId, {String? deviceId});
+  Future<void> acceptVerification();
+  Future<void> chooseEmojiVerification();
+  Future<void> confirmVerification({required bool matches});
+  Future<void> unlockVerification(String keyOrPassphrase);
+  Future<void> skipVerificationSigning();
+  Future<void> cancelVerification();
+  void dismissVerification();
+  void respondToTrustWarning(bool approved);
 
   Future<void> initialize();
   Future<void> refreshRooms();

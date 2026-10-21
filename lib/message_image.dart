@@ -55,6 +55,7 @@ class _MessageImageState extends State<MessageImage> {
             height: widget.height,
             fit: BoxFit.cover,
             cacheWidth: (widget.width * 3).round().clamp(1, 1024),
+            cacheHeight: (widget.height * 3).round().clamp(1, 1024),
             errorBuilder: (_, _, _) => _placeholder('Image unavailable'),
           ),
         );

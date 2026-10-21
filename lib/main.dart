@@ -8,6 +8,7 @@ import 'chat_backend.dart';
 import 'inbox_screen.dart';
 import 'login_screen.dart';
 import 'matrix_backend.dart';
+import 'security_overlay.dart';
 import 'widgets.dart';
 
 void main() {
@@ -69,6 +70,10 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
       title: 'MatriXpress',
       debugShowCheckedModeBanner: false,
       theme: themeFor(_style),
+      builder: (context, child) => SecurityOverlay(
+        backend: _backend,
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: AnimatedBuilder(
         animation: _backend,
         builder: (context, _) => switch (_backend.connection) {
