@@ -61,7 +61,9 @@ jobs:
       - name: Build arm64 release-optimised test APK
         id: build
         run: |
-          BUILD_NUMBER=$((10000 + GITHUB_RUN_NUMBER))
+          # Exceed older installed personal previews (including version 12050)
+          # without requiring a data-destructive uninstall or downgrade.
+          BUILD_NUMBER=$((20000 + GITHUB_RUN_NUMBER))
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           # Flutter's arm64 split adds 2000 to the requested build number.
           echo "APK_VERSION_CODE=$((BUILD_NUMBER + 2000))" >> "$GITHUB_ENV"
