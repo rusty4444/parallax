@@ -1348,6 +1348,44 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
   }
 
   @override
+  Future<String> createRoom(String name, {required bool encrypted}) async {
+    final value = name.trim();
+    if (value.isEmpty || value.length > 255) {
+      throw ArgumentError('Room name must be between 1 and 255 characters');
+    }
+    final client = _requireClient();
+    if (_disposed || _loggingOut || !client.isLogged()) {
+      throw StateError('Sign in first');
+    }
+    final userId = client.userID;
+    final deviceId = client.deviceID;
+    if (encrypted && !client.encryptionEnabled) {
+      throw StateError('Encryption is unavailable');
+    }
+    // Always pass the choice explicitly: the SDK otherwise decides whether to
+    // encrypt a private room based on the client configuration.
+    final roomId = await client.createGroupChat(
+      groupName: value,
+      preset: matrix.CreateRoomPreset.privateChat,
+      enableEncryption: encrypted,
+      // Keep the acknowledged ID even if the subsequent sync stalls. The UI
+      // reconciles that ID with a bounded, cancellable wait instead of creating
+      // a second room when sync cannot finish.
+      waitForSync: false,
+    );
+    if (_disposed ||
+        _loggingOut ||
+        !identical(_client, client) ||
+        client.userID != userId ||
+        client.deviceID != deviceId ||
+        !client.isLogged()) {
+      throw StateError('Session changed after creating the room');
+    }
+    _scheduleRoomUpdate();
+    return roomId;
+  }
+
+  @override
   Future<void> acceptInvite(String roomId) async {
     final room = _requireClient().getRoomById(roomId);
     if (room?.membership != matrix.Membership.invite) {

@@ -294,6 +294,7 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> redactMessage(String roomId, String eventId);
   Future<void> setTyping(String roomId, bool typing);
   Future<void> createDirectChat(String userId);
+  Future<String> createRoom(String name, {required bool encrypted});
   Future<void> acceptInvite(String roomId);
   Future<void> declineInvite(String roomId);
   Future<void> setRoomUnread(String roomId, bool unread);

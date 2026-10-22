@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'created_room_wait.dart';
 import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
 import 'messaging_features.dart';
@@ -38,6 +39,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   void dispose() {
+    _createdRoomWait?.cancel();
     _owner.release();
     super.dispose();
   }
@@ -54,6 +56,10 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _unreadOnly = false;
   bool _invitesOnly = false;
   String? _pendingRoomAction;
+  bool _creatingRoom = false;
+  String? _createdRoomId;
+  CreatedRoomWait? _createdRoomWait;
+  bool _waitingForCreatedRoom = false;
 
   Future<void> _showInvitation(ChatRoom room) async {
     final choice = await showDialog<bool>(
@@ -278,6 +284,63 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
+  Future<void> _createRoom() async {
+    if (_creatingRoom || _createdRoomId != null || !_owner.isCurrent) return;
+    setState(() => _creatingRoom = true);
+    try {
+      final choice = await showDialog<(String, bool)>(
+        context: context,
+        builder: (_) => const _CreateRoomDialog(),
+      );
+      if (!mounted || !_owner.isCurrent || choice == null) return;
+      final roomId = await widget.backend.createRoom(
+        choice.$1,
+        encrypted: choice.$2,
+      );
+      if (!mounted || !_owner.isCurrent) return;
+      setState(() => _createdRoomId = roomId);
+      await _openCreatedRoom();
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        _showError(
+          'Room creation was not confirmed. Check the inbox before trying again.',
+        );
+      }
+    } finally {
+      if (mounted && _owner.isCurrent) setState(() => _creatingRoom = false);
+    }
+  }
+
+  Future<void> _openCreatedRoom() async {
+    final roomId = _createdRoomId;
+    if (roomId == null || _waitingForCreatedRoom || !_owner.isCurrent) return;
+    setState(() => _waitingForCreatedRoom = true);
+    final wait = CreatedRoomWait(
+      backend: widget.backend,
+      roomId: roomId,
+      isCurrent: () => mounted && _owner.isCurrent,
+    );
+    _createdRoomWait = wait;
+    try {
+      final ready = await wait.result;
+      if (!mounted || !_owner.isCurrent) return;
+      if (ready) {
+        setState(() => _createdRoomId = null);
+        _open(roomId);
+      } else {
+        _showError(
+          'Room created. Sync is not ready yet; check the created room again.',
+        );
+      }
+    } finally {
+      wait.cancel();
+      _createdRoomWait = null;
+      if (mounted && _owner.isCurrent) {
+        setState(() => _waitingForCreatedRoom = false);
+      }
+    }
+  }
+
   void _showError(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
@@ -423,6 +486,13 @@ class _InboxScreenState extends State<InboxScreen> {
                           icon: const Icon(Icons.travel_explore_rounded),
                         ),
                         IconButton(
+                          tooltip: 'Create room',
+                          onPressed: _creatingRoom || _createdRoomId != null
+                              ? null
+                              : _createRoom,
+                          icon: const Icon(Icons.add_home_work_outlined),
+                        ),
+                        IconButton(
                           tooltip: 'Settings',
                           iconSize: 25,
                           onPressed: () => Navigator.of(context).push(
@@ -446,6 +516,22 @@ class _InboxScreenState extends State<InboxScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Eyebrow('The good stuff', palette: p),
+                        if (_createdRoomId != null && _owner.isCurrent)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              _waitingForCreatedRoom
+                                  ? 'Waiting for room sync…'
+                                  : 'Room created',
+                            ),
+                            subtitle: SelectableText(_createdRoomId!),
+                            trailing: TextButton(
+                              onPressed: _waitingForCreatedRoom
+                                  ? null
+                                  : _openCreatedRoom,
+                              child: const Text('Open created room'),
+                            ),
+                          ),
                         const SizedBox(height: 3),
                         Row(
                           children: [
@@ -814,6 +900,59 @@ class _InboxScreenState extends State<InboxScreen> {
       },
     );
   }
+}
+
+class _CreateRoomDialog extends StatefulWidget {
+  const _CreateRoomDialog();
+
+  @override
+  State<_CreateRoomDialog> createState() => _CreateRoomDialogState();
+}
+
+class _CreateRoomDialogState extends State<_CreateRoomDialog> {
+  String _name = '';
+  bool _encrypted = true;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Create room'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            autofocus: true,
+            maxLength: 255,
+            onChanged: (value) => setState(() => _name = value),
+            decoration: const InputDecoration(labelText: 'Room name'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Encrypted room'),
+            subtitle: Text(
+              _encrypted
+                  ? 'Private room. Encryption cannot be disabled later.'
+                  : 'Private room without end-to-end encryption.',
+            ),
+            value: _encrypted,
+            onChanged: (value) => setState(() => _encrypted = value),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _name.trim().isEmpty
+            ? null
+            : () => Navigator.pop(context, (_name.trim(), _encrypted)),
+        child: const Text('Create'),
+      ),
+    ],
+  );
 }
 
 class _FilterChip extends StatelessWidget {
