@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
@@ -10,8 +11,11 @@ import 'package:matrix/matrix.dart' as matrix;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
+import 'package:vodozemac/vodozemac.dart' as vod;
 
 import 'chat_backend.dart';
+import 'crypto_setup_policy.dart';
+import 'crypto_signature_validation.dart';
 import 'encrypted_media.dart';
 import 'homeserver_security.dart';
 import 'key_query_validation.dart';
@@ -49,6 +53,7 @@ class MatrixBackend extends ChatBackend {
   int _roomGeneration = 0;
   bool _disposed = false;
   bool _initializing = false;
+  bool _cryptoSetupBusy = false;
   bool _refreshingRooms = false;
   bool _firstSyncCompleted = false;
   int _successfulSyncs = 0;
@@ -220,6 +225,9 @@ class MatrixBackend extends ChatBackend {
     required String username,
     required String password,
   }) async {
+    if (_cryptoSetupBusy) {
+      throw StateError('Wait for encryption setup before changing accounts');
+    }
     final client = _requireClient();
     final url = Uri.parse(homeserver);
     if (!isSecureHomeserver(url)) {
@@ -243,6 +251,9 @@ class MatrixBackend extends ChatBackend {
 
   @override
   Future<void> logout() async {
+    if (_cryptoSetupBusy) {
+      throw StateError('Wait for encryption setup before signing out');
+    }
     final client = _requireClient();
     _clearSecurityPrompts();
     closeRoom(_activeRoomId ?? '');
@@ -988,15 +999,398 @@ class MatrixBackend extends ChatBackend {
 
   @override
   Future<CryptoStatus> cryptoStatus() async {
+    return _inspectCryptoStatus(_requireClient());
+  }
+
+  Future<CryptoStatus> _inspectCryptoStatus(matrix.Client client) async {
+    if (!client.isLogged() || client.encryption == null) {
+      throw StateError('Sign in with encryption enabled first');
+    }
     final state = await encryption.CryptoSetupExtension(
-      _requireClient(),
-    ).getCryptoIdentityState();
+      client,
+    ).getCryptoIdentityState().timeout(const Duration(seconds: 45));
+    if (_disposed || _client != client || !client.isLogged()) {
+      throw StateError('Matrix session changed');
+    }
+    // The SDK's `initialized` flag only means *both* components exist. A
+    // partial identity must never be mistaken for a new account.
+    final userId = client.userID!;
+    final remoteKeys = await client.queryKeys({userId: []}, timeout: 10000);
+    if (remoteKeys.failures?.isNotEmpty == true ||
+        remoteKeys.deviceKeys?[userId] == null) {
+      throw StateError('Could not check existing device keys');
+    }
+    final ownDeviceId = client.deviceID;
+    final ownDevices = remoteKeys.deviceKeys![userId]!;
+    if (ownDeviceId == null || !ownDevices.containsKey(ownDeviceId)) {
+      throw StateError('This device has not published its encryption keys');
+    }
+    final hasOtherDevices = ownDevices.keys.any((id) => id != ownDeviceId);
+    var hasBackup = false;
+    try {
+      await client.getRoomKeysVersionCurrent();
+      hasBackup = true;
+    } on matrix.MatrixException catch (error) {
+      if (error.error != matrix.MatrixError.M_NOT_FOUND) rethrow;
+    }
+    var hasServerStorage = false;
+    String? serverDefaultKeyId;
+    try {
+      final serverDefault = await client.getAccountData(
+        userId,
+        matrix.EventTypes.SecretStorageDefaultKey,
+      );
+      hasServerStorage = true;
+      serverDefaultKeyId = serverDefault['key'] as String?;
+    } on matrix.MatrixException catch (error) {
+      if (error.error != matrix.MatrixError.M_NOT_FOUND) rethrow;
+    }
+    if (_disposed || _client != client || !client.isLogged()) {
+      throw StateError('Matrix session changed');
+    }
+    final ssss = client.encryption!.ssss;
+    final keyId = ssss.defaultKeyId;
+    final defaultMatches = defaultStorageMatchesServer(
+      serverKeyId: serverDefaultKeyId,
+      localKeyId: keyId,
+    );
+    final orphanedStorageKeys = keyId == null
+        ? [
+            for (final type in client.accountData.keys)
+              if (type.startsWith('m.secret_storage.key.') &&
+                  ssss.isKeyValid(
+                    type.substring('m.secret_storage.key.'.length),
+                  ))
+                type.substring('m.secret_storage.key.'.length),
+          ]
+        : const <String>[];
+    final hasOrphanedStorage = orphanedStorageKeys.length == 1;
+    final validStorage =
+        keyId != null && ssss.isKeyValid(keyId) || hasOrphanedStorage;
+    final hasMasterPublic = remoteKeys.masterKeys?.containsKey(userId) == true;
+    final hasSelfSigningPublic =
+        remoteKeys.selfSigningKeys?.containsKey(userId) == true;
+    final hasUserSigningPublic =
+        remoteKeys.userSigningKeys?.containsKey(userId) == true;
+    final masterSecret = ssss.isSecret(matrix.EventTypes.CrossSigningMasterKey);
+    final selfSigningSecret = ssss.isSecret(
+      matrix.EventTypes.CrossSigningSelfSigning,
+    );
+    final userSigningSecret = ssss.isSecret(
+      matrix.EventTypes.CrossSigningUserSigning,
+    );
+    final backupSecret = ssss.isSecret(matrix.EventTypes.MegolmBackup);
+    // A missing private secret alongside an existing public component must
+    // never be 'repaired' by generating a replacement master key or backup.
+    final componentsMatch = canRepairIdentityWithoutRotation(
+      masterPublic: hasMasterPublic,
+      masterSecret: masterSecret,
+      selfSigningPublic: hasSelfSigningPublic,
+      selfSigningSecret: selfSigningSecret,
+      userSigningPublic: hasUserSigningPublic,
+      userSigningSecret: userSigningSecret,
+      backupVersion: hasBackup,
+      backupSecret: backupSecret,
+    );
+    final repairSafe =
+        componentsMatch &&
+        (keyId != null ||
+            (hasOrphanedStorage &&
+                !hasMasterPublic &&
+                !hasSelfSigningPublic &&
+                !hasUserSigningPublic &&
+                !hasBackup));
+    final existingMaterial =
+        state.keyBackupEnabled ||
+        state.crossSigningEnabled ||
+        hasBackup ||
+        hasServerStorage ||
+        keyId != null ||
+        client.accountData.keys.any(
+          (key) =>
+              key.startsWith('m.secret_storage.key.') ||
+              key.startsWith('m.cross_signing.'),
+        ) ||
+        ssss.analyzeEncryptedSecrets().isNotEmpty ||
+        hasMasterPublic ||
+        hasSelfSigningPublic ||
+        hasUserSigningPublic ||
+        client.userDeviceKeys[userId]?.masterKey != null;
     return CryptoStatus(
       initialized: state.initialized,
       connected: state.connected,
       keyBackupEnabled: state.keyBackupEnabled,
       crossSigningEnabled: state.crossSigningEnabled,
+      setupAvailability: defaultMatches
+          ? classifyCryptoSetup(
+              initialized: state.initialized,
+              connected: state.connected,
+              validSecretStorage: validStorage,
+              existingIdentityMaterial: existingMaterial,
+              repairSafe: repairSafe,
+              hasOtherDevices: hasOtherDevices,
+            )
+          : CryptoSetupAvailability.blocked,
     );
+  }
+
+  /// The existence of an encrypted SSSS entry says nothing about whether it
+  /// contains the private half of the *current* server identity. Verify all
+  /// existing parts under the supplied recovery credential before repair.
+  Future<void> _verifyExistingCryptoMaterial(
+    matrix.Client client,
+    String keyOrPassphrase,
+  ) async {
+    final id = client.userID;
+    final ssss = client.encryption?.ssss;
+    final keyId = ssss?.defaultKeyId;
+    if (id == null || ssss == null || keyId == null) {
+      throw StateError('Existing secret storage is unavailable');
+    }
+    final opened = ssss.open(keyId);
+    await opened.unlock(keyOrPassphrase: keyOrPassphrase, postUnlock: false);
+    final keys = await client.queryKeys({id: []}, timeout: 10000);
+    if (keys.failures?.isNotEmpty == true || keys.deviceKeys?[id] == null) {
+      throw StateError('Could not validate existing signing keys');
+    }
+
+    Future<void> checkSigningKey(
+      String type,
+      matrix.MatrixCrossSigningKey? serverKey,
+    ) async {
+      if (serverKey == null && !ssss.isSecret(type)) return;
+      if (serverKey == null || !ssss.isSecret(type)) {
+        throw StateError('Existing signing key is incomplete');
+      }
+      final privateKey = await opened.getStored(type);
+      final publicKey = vod.PkSigning.fromSecretKey(
+        base64Encode(base64.decode(base64.normalize(privateKey))),
+      ).publicKey.toBase64();
+      if (publicKey != serverKey.publicKey) {
+        throw StateError('Existing signing key does not match the server');
+      }
+    }
+
+    await checkSigningKey(
+      matrix.EventTypes.CrossSigningMasterKey,
+      keys.masterKeys?[id],
+    );
+    await checkSigningKey(
+      matrix.EventTypes.CrossSigningSelfSigning,
+      keys.selfSigningKeys?[id],
+    );
+    await checkSigningKey(
+      matrix.EventTypes.CrossSigningUserSigning,
+      keys.userSigningKeys?[id],
+    );
+    final masterPublicKey = keys.masterKeys?[id]?.publicKey;
+    for (final subkey in [
+      keys.selfSigningKeys?[id],
+      keys.userSigningKeys?[id],
+    ]) {
+      if (subkey == null) continue;
+      if (masterPublicKey == null ||
+          !isSubkeySignedByMaster(
+            subkey,
+            userId: id,
+            masterPublicKey: masterPublicKey,
+          )) {
+        throw StateError('Existing signing chain is not trusted');
+      }
+    }
+
+    matrix.GetRoomKeysVersionCurrentResponse? backup;
+    try {
+      backup = await client.getRoomKeysVersionCurrent();
+    } on matrix.MatrixException catch (error) {
+      if (error.error != matrix.MatrixError.M_NOT_FOUND) rethrow;
+    }
+    if (backup != null || ssss.isSecret(matrix.EventTypes.MegolmBackup)) {
+      if (backup == null || !ssss.isSecret(matrix.EventTypes.MegolmBackup)) {
+        throw StateError('Existing key backup is incomplete');
+      }
+      final privateKey = Uint8List.fromList(
+        base64.decode(
+          base64.normalize(
+            await opened.getStored(matrix.EventTypes.MegolmBackup),
+          ),
+        ),
+      );
+      final publicKey = vod.PkDecryption.fromSecretKey(
+        vod.Curve25519PublicKey.fromBytes(privateKey),
+      ).publicKey;
+      if (backup.algorithm !=
+              matrix.BackupAlgorithm.mMegolmBackupV1Curve25519AesSha2 ||
+          backup.authData['public_key'] != publicKey) {
+        throw StateError('Existing key backup does not match the server');
+      }
+    }
+    if (_disposed || _client != client || !client.isLogged()) {
+      throw StateError('Matrix session changed during repair');
+    }
+  }
+
+  @override
+  Future<CryptoSetupResult> createCryptoIdentity(
+    String recoveryPassphrase,
+  ) async {
+    if (recoveryPassphrase.length < 32) {
+      throw ArgumentError('A generated recovery phrase is required');
+    }
+    if (_cryptoSetupBusy) throw StateError('Encryption setup already running');
+    final client = _requireClient();
+    if (_verificationRequest != null) {
+      throw StateError('Finish verification before setting up encryption');
+    }
+    _cryptoSetupBusy = true;
+    final generation = _securityGeneration;
+    try {
+      return await runOnlyWhenCryptoSetupIsSafe(
+        expected: CryptoSetupAvailability.create,
+        inspect: () async =>
+            (await _inspectCryptoStatus(client)).setupAvailability,
+        action: () async {
+          // Explicitly forbid every destructive branch even if discovery was
+          // stale. Do not automatically retry a partial bootstrap as a reset.
+          final key = await encryption.CryptoSetupExtension(client)
+              .initCryptoIdentity(
+                passphrase: recoveryPassphrase,
+                wipeSecureStorage: false,
+                wipeKeyBackup: false,
+                wipeCrossSigning: false,
+                setupMasterKey: true,
+                setupSelfSigningKey: true,
+                setupUserSigningKey: true,
+                setupOnlineKeyBackup: true,
+              );
+          if (_disposed ||
+              _client != client ||
+              generation != _securityGeneration ||
+              !client.isLogged()) {
+            throw StateError('Matrix session changed during setup');
+          }
+          var ready = false;
+          try {
+            final state = await encryption.CryptoSetupExtension(
+              client,
+            ).getCryptoIdentityState().timeout(const Duration(seconds: 45));
+            ready = state.initialized && state.connected;
+          } catch (_) {
+            // Never lose the newly generated recovery key merely because the
+            // follow-up status request failed. The UI must show it either way.
+          }
+          return CryptoSetupResult(recoveryKey: key, ready: ready);
+        },
+      );
+    } finally {
+      _cryptoSetupBusy = false;
+    }
+  }
+
+  @override
+  Future<void> repairCryptoIdentity(String keyOrPassphrase) async {
+    if (keyOrPassphrase.trim().isEmpty) {
+      throw ArgumentError('Existing recovery credential required');
+    }
+    if (_cryptoSetupBusy) throw StateError('Encryption setup already running');
+    final client = _requireClient();
+    _cryptoSetupBusy = true;
+    final generation = _securityGeneration;
+    try {
+      await runOnlyWhenCryptoSetupIsSafe(
+        expected: CryptoSetupAvailability.repair,
+        inspect: () async =>
+            (await _inspectCryptoStatus(client)).setupAvailability,
+        action: () async {
+          final ssss = client.encryption!.ssss;
+          if (ssss.defaultKeyId == null) {
+            final candidates = [
+              for (final type in client.accountData.keys)
+                if (type.startsWith('m.secret_storage.key.') &&
+                    ssss.isKeyValid(
+                      type.substring('m.secret_storage.key.'.length),
+                    ))
+                  type.substring('m.secret_storage.key.'.length),
+            ];
+            if (candidates.length != 1) {
+              throw StateError('Existing storage key is ambiguous');
+            }
+            final keyId = candidates.single;
+            // A failed initial setup can leave a key record before the SDK
+            // writes the default-key pointer. Prove this is the saved key
+            // before adopting it; never create another one.
+            final serverKey = await client.getAccountData(
+              client.userID!,
+              matrix.EventTypes.secretStorageKey(keyId),
+            );
+            final localKey = ssss.getKey(keyId);
+            final serverPhrase = serverKey['passphrase'];
+            if (localKey == null ||
+                serverKey['iv'] != localKey.iv ||
+                serverKey['mac'] != localKey.mac ||
+                serverKey['algorithm'] != localKey.algorithm ||
+                (serverPhrase is Map ? serverPhrase['salt'] : null) !=
+                    localKey.passphrase?.salt) {
+              throw StateError('Storage key changed on the server');
+            }
+            await ssss
+                .open(keyId)
+                .unlock(keyOrPassphrase: keyOrPassphrase, postUnlock: false);
+            if (_disposed ||
+                _client != client ||
+                generation != _securityGeneration ||
+                !client.isLogged()) {
+              throw StateError('Matrix session changed during repair');
+            }
+            if ((await _inspectCryptoStatus(client)).setupAvailability !=
+                CryptoSetupAvailability.repair) {
+              throw StateError('Encryption identity changed during repair');
+            }
+            await ssss.setDefaultKeyId(keyId);
+          }
+          if ((await _inspectCryptoStatus(client)).setupAvailability !=
+              CryptoSetupAvailability.repair) {
+            throw StateError('Encryption identity changed during repair');
+          }
+          await _verifyExistingCryptoMaterial(client, keyOrPassphrase);
+          if ((await _inspectCryptoStatus(client)).setupAvailability !=
+              CryptoSetupAvailability.repair) {
+            throw StateError('Encryption identity changed during repair');
+          }
+          await encryption.CryptoSetupExtension(client).initCryptoIdentity(
+            reuseExistingStorageRecoveryKeyOrPassphrase: keyOrPassphrase,
+            wipeSecureStorage: false,
+            wipeKeyBackup: false,
+            wipeCrossSigning: false,
+            setupMasterKey: !ssss.isSecret(
+              matrix.EventTypes.CrossSigningMasterKey,
+            ),
+            setupSelfSigningKey: !ssss.isSecret(
+              matrix.EventTypes.CrossSigningSelfSigning,
+            ),
+            setupUserSigningKey: !ssss.isSecret(
+              matrix.EventTypes.CrossSigningUserSigning,
+            ),
+            setupOnlineKeyBackup: !ssss.isSecret(
+              matrix.EventTypes.MegolmBackup,
+            ),
+          );
+        },
+      );
+      if (_disposed || _client != client || generation != _securityGeneration) {
+        throw StateError('Matrix session changed during repair');
+      }
+      final state = await encryption.CryptoSetupExtension(
+        client,
+      ).getCryptoIdentityState().timeout(const Duration(seconds: 45));
+      if (!state.initialized || !state.connected) {
+        throw StateError(
+          'Identity is not yet complete; retry with existing key',
+        );
+      }
+    } finally {
+      _cryptoSetupBusy = false;
+    }
   }
 
   @override

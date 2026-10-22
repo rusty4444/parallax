@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'crypto_setup_policy.dart';
 import 'room_details.dart';
 
 enum SessionStatus { loading, signedOut, ready, offline }
@@ -224,11 +225,20 @@ class CryptoStatus {
     required this.connected,
     required this.keyBackupEnabled,
     required this.crossSigningEnabled,
+    required this.setupAvailability,
   });
   final bool initialized;
   final bool connected;
   final bool keyBackupEnabled;
   final bool crossSigningEnabled;
+  final CryptoSetupAvailability setupAvailability;
+}
+
+@immutable
+class CryptoSetupResult {
+  const CryptoSetupResult({required this.recoveryKey, required this.ready});
+  final String recoveryKey;
+  final bool ready;
 }
 
 abstract class ChatBackend extends ChangeNotifier {
@@ -301,6 +311,8 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<String> joinPublicRoom(String roomId);
   Future<MessageSearchPage> searchMessages(String query, {String? nextBatch});
   Future<CryptoStatus> cryptoStatus();
+  Future<CryptoSetupResult> createCryptoIdentity(String recoveryPassphrase);
+  Future<void> repairCryptoIdentity(String keyOrPassphrase);
   Future<void> restoreCryptoIdentity(String keyOrPassphrase);
   Future<void> restoreBackedUpKeys();
 }

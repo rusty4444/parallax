@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -6,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:matrixpress/app_theme.dart';
 import 'package:matrixpress/chat_backend.dart';
+import 'package:matrixpress/crypto_setup_policy.dart';
+import 'package:matrixpress/crypto_setup_screen.dart';
 import 'package:matrixpress/directory_screen.dart';
 import 'package:matrixpress/gallery_bubble.dart';
 import 'package:matrixpress/inbox_screen.dart';
@@ -700,6 +703,7 @@ void main() {
           palette: paletteFor(VisualTheme.ultraviolet),
           style: VisualTheme.ultraviolet,
           onThemeChanged: (_) {},
+          setSecureWindow: (_) async {},
         ),
       ),
     );
@@ -722,6 +726,262 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.lastRecoveryKey, '  synthetic-test-recovery-key  ');
     expect(find.text('Identity connected on this device'), findsOneWidget);
+  });
+
+  testWidgets('secure flag remains through recovery dialog exit animation', (
+    tester,
+  ) async {
+    final calls = <bool>[];
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+          setSecureWindow: (enabled) async => calls.add(enabled),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Enter recovery key'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Enter recovery key'));
+    await tester.pumpAndSettle();
+    expect(calls, [true]);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(calls.last, isTrue);
+    await tester.pumpAndSettle();
+    expect(calls.last, isFalse);
+  });
+
+  testWidgets('recovery dialog entry stays single-flight while securing', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final calls = <bool>[];
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+          setSecureWindow: (enabled) async {
+            calls.add(enabled);
+            if (enabled) await gate.future;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Enter recovery key'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Enter recovery key'));
+    await tester.pump();
+    await tester.tap(find.text('Enter recovery key'));
+    await tester.pump();
+    expect(calls, [true]);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(calls, [true, false]);
+  });
+
+  testWidgets('new account saves a phrase before creating its identity', (
+    tester,
+  ) async {
+    final secureCalls = <bool>[];
+    final backend = FakeBackend()
+      ..setupAvailability = CryptoSetupAvailability.create;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+          setSecureWindow: (enabled) async => secureCalls.add(enabled),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Set up encryption'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Set up encryption'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CryptoSetupScreen), findsOneWidget);
+    expect(secureCalls, [true]);
+    final phrase = tester
+        .widget<SelectableText>(find.byType(SelectableText).first)
+        .data!;
+    expect(phrase.length, greaterThanOrEqualTo(32));
+    expect(backend.lastSetupPhrase, isNull);
+    await tester.tap(find.text('I saved this phrase outside the app'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<CheckboxListTile>(find.byType(CheckboxListTile).first)
+          .value,
+      isTrue,
+    );
+    await tester.enterText(find.byType(TextField), phrase);
+    await tester.ensureVisible(find.text('Create encryption identity'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Create encryption identity'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Create encryption identity'));
+    await tester.pumpAndSettle();
+    expect(backend.lastSetupPhrase, isNotNull);
+    expect(backend.lastSetupPhrase == phrase, isTrue);
+    expect(find.text('synthetic-test-recovery-key'), findsOneWidget);
+    await tester.tap(find.text('I saved my recovery credentials'));
+    await tester.pump();
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile).last).value,
+      isTrue,
+    );
+    await tester.ensureVisible(find.text('Finish setup'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Finish setup'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Finish setup'));
+    await tester.pumpAndSettle();
+    expect(secureCalls.last, false);
+    expect(find.text('Identity connected on this device'), findsOneWidget);
+  });
+
+  testWidgets('existing identity material cannot start a new identity', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..setupAvailability = CryptoSetupAvailability.blocked;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Existing identity needs careful recovery'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Set up encryption'), findsNothing);
+    expect(find.text('Repair with existing key'), findsNothing);
+  });
+
+  testWidgets('new identity setup waits for other devices to sign out', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..setupAvailability = CryptoSetupAvailability.needsSingleDevice;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Other devices are signed in'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Set up encryption'), findsNothing);
+  });
+
+  testWidgets('partial identity can be repaired with its existing key', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..setupAvailability = CryptoSetupAvailability.repair;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+          setSecureWindow: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Repair with existing key'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Repair with existing key'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).last,
+      'synthetic-existing-recovery-key',
+    );
+    await tester.tap(find.text('Restore').last);
+    await tester.pumpAndSettle();
+    expect(backend.lastRepairCredential, 'synthetic-existing-recovery-key');
+    expect(find.text('Identity connected on this device'), findsOneWidget);
+  });
+
+  testWidgets('failed screen protection prevents identity creation', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CryptoSetupScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          setSecureWindow: (enabled) async {
+            if (enabled) throw StateError('native screen guard unavailable');
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Screen protection is unavailable'),
+      findsOneWidget,
+    );
+    expect(find.text('Create encryption identity'), findsNothing);
+    expect(backend.lastSetupPhrase, isNull);
   });
 
   testWidgets('incoming verification requires explicit acceptance', (
@@ -954,6 +1214,10 @@ class FakeBackend extends ChatBackend {
   int avatarLoads = 0;
   String? lastRecoveryKey;
   bool connected = false;
+  CryptoSetupAvailability setupAvailability = CryptoSetupAvailability.restore;
+  String? lastSetupPhrase;
+  String? lastRepairCredential;
+  bool setupReady = true;
   VerificationDetails? shownVerification;
   TrustWarning? shownTrust;
   String? verificationAction;
@@ -1260,11 +1524,41 @@ class FakeBackend extends ChatBackend {
 
   @override
   Future<CryptoStatus> cryptoStatus() async => CryptoStatus(
-    initialized: true,
+    initialized:
+        connected ||
+        setupAvailability == CryptoSetupAvailability.restore ||
+        setupAvailability == CryptoSetupAvailability.connected,
     connected: connected,
-    keyBackupEnabled: true,
-    crossSigningEnabled: true,
+    keyBackupEnabled:
+        connected || setupAvailability == CryptoSetupAvailability.restore,
+    crossSigningEnabled:
+        connected || setupAvailability == CryptoSetupAvailability.restore,
+    setupAvailability: connected
+        ? CryptoSetupAvailability.connected
+        : setupAvailability,
   );
+
+  @override
+  Future<CryptoSetupResult> createCryptoIdentity(
+    String recoveryPassphrase,
+  ) async {
+    lastSetupPhrase = recoveryPassphrase;
+    connected = setupReady;
+    setupAvailability = setupReady
+        ? CryptoSetupAvailability.connected
+        : CryptoSetupAvailability.repair;
+    return CryptoSetupResult(
+      recoveryKey: 'synthetic-test-recovery-key',
+      ready: setupReady,
+    );
+  }
+
+  @override
+  Future<void> repairCryptoIdentity(String keyOrPassphrase) async {
+    lastRepairCredential = keyOrPassphrase;
+    connected = true;
+    setupAvailability = CryptoSetupAvailability.connected;
+  }
 
   @override
   Future<void> restoreCryptoIdentity(String keyOrPassphrase) async {
