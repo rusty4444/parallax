@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'directory_screen.dart';
+import 'feature_settings_scope.dart';
+import 'messaging_features.dart';
+import 'space_browser_screen.dart';
+import 'user_directory_screen.dart';
 import 'message_search_screen.dart';
 import 'room_avatar.dart';
 import 'room_screen.dart';
@@ -27,6 +31,25 @@ class InboxScreen extends StatefulWidget {
 }
 
 class _InboxScreenState extends State<InboxScreen> {
+  late final _owner = BackendSessionOwner(widget.backend);
+  MessagingFeatures? get _features => widget.backend is MessagingFeatures
+      ? widget.backend as MessagingFeatures
+      : null;
+
+  @override
+  void dispose() {
+    _owner.release();
+    super.dispose();
+  }
+
+  bool _favourite(String roomId) {
+    try {
+      return _features?.isFavourite(roomId) ?? false;
+    } catch (_) {
+      return false;
+    } // A bad room projection cannot hide the inbox.
+  }
+
   String _query = '';
   bool _unreadOnly = false;
   bool _invitesOnly = false;
@@ -50,16 +73,16 @@ class _InboxScreenState extends State<InboxScreen> {
         ],
       ),
     );
-    if (choice == null || !mounted) return;
+    if (choice == null || !mounted || !_owner.isCurrent) return;
     try {
       if (choice) {
         await widget.backend.acceptInvite(room.id);
-        if (mounted) _open(room.id);
+        if (mounted && _owner.isCurrent) _open(room.id);
       } else {
         await widget.backend.declineInvite(room.id);
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         _showError(
           choice
               ? 'Couldn’t join this room.'
@@ -97,6 +120,18 @@ class _InboxScreenState extends State<InboxScreen> {
               ),
               onTap: () => Navigator.pop(sheetContext, 'unread'),
             ),
+            if (_features != null)
+              ListTile(
+                leading: Icon(
+                  _favourite(room.id)
+                      ? Icons.star_rounded
+                      : Icons.star_border_rounded,
+                ),
+                title: Text(
+                  _favourite(room.id) ? 'Remove favourite' : 'Add favourite',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'favourite'),
+              ),
             ListTile(
               leading: const Icon(Icons.exit_to_app_rounded),
               title: const Text('Leave room'),
@@ -106,7 +141,12 @@ class _InboxScreenState extends State<InboxScreen> {
         ),
       ),
     );
-    if (!mounted || choice == null || _pendingRoomAction != null) return;
+    if (!mounted ||
+        !_owner.isCurrent ||
+        choice == null ||
+        _pendingRoomAction != null) {
+      return;
+    }
     if (choice == 'leave') {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -128,17 +168,19 @@ class _InboxScreenState extends State<InboxScreen> {
           ],
         ),
       );
-      if (confirmed != true || !mounted) return;
+      if (confirmed != true || !mounted || !_owner.isCurrent) return;
     }
     setState(() => _pendingRoomAction = room.id);
     try {
       if (choice == 'leave') {
         await widget.backend.leaveRoom(room.id);
+      } else if (choice == 'favourite') {
+        await _features!.setFavourite(room.id, !_favourite(room.id));
       } else {
         await widget.backend.setRoomUnread(room.id, !room.manuallyUnread);
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         _showError(
           choice == 'leave'
               ? 'Couldn’t leave this room.'
@@ -146,11 +188,49 @@ class _InboxScreenState extends State<InboxScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _pendingRoomAction = null);
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingRoomAction = null);
+      }
+    }
+  }
+
+  Future<void> _findPeople() async {
+    if (!mounted || !_owner.isCurrent || _features == null) return;
+    final userId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => UserDirectoryScreen(backend: widget.backend),
+      ),
+    );
+    if (!mounted || !_owner.isCurrent || userId == null || userId.isEmpty) {
+      return;
+    }
+    try {
+      await widget.backend.createDirectChat(userId);
+      if (!mounted || !_owner.isCurrent) return;
+      final roomId = widget.backend.activeRoomId;
+      if (roomId != null) _open(roomId);
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        _showError('Couldn’t start this conversation. Try again.');
+      }
+    }
+  }
+
+  Future<void> _browseSpaces() async {
+    if (!mounted || !_owner.isCurrent || _features == null) return;
+    final joinedRoomId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => SpaceBrowserScreen(backend: widget.backend),
+      ),
+    );
+    if (mounted && _owner.isCurrent && joinedRoomId != null) {
+      _open(joinedRoomId);
     }
   }
 
   Future<void> _newConversation() async {
+    if (!mounted || !_owner.isCurrent) return;
+    if (_features != null) return _findPeople();
     final controller = TextEditingController();
     try {
       final userId = await showDialog<String>(
@@ -178,17 +258,21 @@ class _InboxScreenState extends State<InboxScreen> {
           ],
         ),
       );
-      if (!mounted || userId == null || userId.isEmpty) return;
+      if (!mounted || !_owner.isCurrent || userId == null || userId.isEmpty) {
+        return;
+      }
       if (!RegExp(r'^@[^:\s]+:[^:\s]+$').hasMatch(userId)) {
         _showError('Enter a full Matrix user ID, like @alex:example.org.');
         return;
       }
       await widget.backend.createDirectChat(userId);
-      if (!mounted) return;
+      if (!mounted || !_owner.isCurrent) return;
       final roomId = widget.backend.activeRoomId;
       if (roomId != null) _open(roomId);
     } catch (_) {
-      if (mounted) _showError('Couldn’t start this conversation. Try again.');
+      if (mounted && _owner.isCurrent) {
+        _showError('Couldn’t start this conversation. Try again.');
+      }
     } finally {
       controller.dispose();
     }
@@ -198,15 +282,18 @@ class _InboxScreenState extends State<InboxScreen> {
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
 
-  void _open(String id) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => RoomScreen(
-        backend: widget.backend,
-        palette: widget.palette,
-        roomId: id,
+  void _open(String id) {
+    if (!mounted || !_owner.isCurrent) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RoomScreen(
+          backend: widget.backend,
+          palette: widget.palette,
+          roomId: id,
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   Future<void> _explore() async {
     final roomId = await Navigator.of(context).push<String>(
@@ -215,7 +302,7 @@ class _InboxScreenState extends State<InboxScreen> {
             DirectoryScreen(backend: widget.backend, palette: widget.palette),
       ),
     );
-    if (mounted && roomId != null) _open(roomId);
+    if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
   }
 
   Future<void> _searchMessages() async {
@@ -227,7 +314,7 @@ class _InboxScreenState extends State<InboxScreen> {
         ),
       ),
     );
-    if (mounted && roomId != null) _open(roomId);
+    if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
   }
 
   String _time(DateTime? value) {
@@ -245,6 +332,8 @@ class _InboxScreenState extends State<InboxScreen> {
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
+    final compact =
+        FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
     return AnimatedBuilder(
       animation: widget.backend,
       builder: (context, _) {
@@ -255,18 +344,41 @@ class _InboxScreenState extends State<InboxScreen> {
                 RoomSyncState.error => 'SYNC ERROR',
                 RoomSyncState.ready => '0 ROOMS',
               };
+        final failedRooms =
+            _features?.pendingSends
+                .where((item) => item.state == DeliveryState.failed)
+                .map((item) => item.roomId)
+                .toSet() ??
+            <String>{};
+        final favourites = {
+          for (final room in widget.backend.rooms) room.id: _favourite(room.id),
+        };
+        final originalOrder = {
+          for (final (index, room) in widget.backend.rooms.indexed)
+            room.id: index,
+        };
         final rooms = widget.backend.rooms
             .where(
               (room) =>
                   (!_unreadOnly ||
                       room.invited ||
                       room.unread > 0 ||
-                      room.manuallyUnread) &&
+                      room.manuallyUnread ||
+                      failedRooms.contains(room.id)) &&
                   (!_invitesOnly || room.invited) &&
                   (room.name.toLowerCase().contains(_query.toLowerCase()) ||
                       room.id.toLowerCase().contains(_query.toLowerCase())),
             )
             .toList();
+        if (_features != null) {
+          rooms.sort((a, b) {
+            if (a.invited != b.invited) return a.invited ? -1 : 1;
+            final af = favourites[a.id] ?? false;
+            final bf = favourites[b.id] ?? false;
+            if (af != bf) return af ? -1 : 1;
+            return originalOrder[a.id]!.compareTo(originalOrder[b.id]!);
+          });
+        }
         return Scaffold(
           body: GlowBackdrop(
             palette: p,
@@ -329,7 +441,7 @@ class _InboxScreenState extends State<InboxScreen> {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 30, 24, 0),
+                    padding: EdgeInsets.fromLTRB(24, compact ? 12 : 30, 24, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -382,6 +494,22 @@ class _InboxScreenState extends State<InboxScreen> {
                             ),
                           ),
                         ),
+                        if (_features != null)
+                          Wrap(
+                            spacing: 12,
+                            children: [
+                              TextButton.icon(
+                                onPressed: _findPeople,
+                                icon: const Icon(Icons.person_search_outlined),
+                                label: const Text('Find people'),
+                              ),
+                              TextButton.icon(
+                                onPressed: _browseSpaces,
+                                icon: const Icon(Icons.hub_outlined),
+                                label: const Text('Spaces'),
+                              ),
+                            ],
+                          ),
                         const SizedBox(height: 17),
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -518,7 +646,7 @@ class _InboxScreenState extends State<InboxScreen> {
                                         : () => _showRoomActions(room),
                                     borderRadius: BorderRadius.circular(20),
                                     child: Padding(
-                                      padding: const EdgeInsets.all(14),
+                                      padding: EdgeInsets.all(compact ? 9 : 14),
                                       child: Row(
                                         children: [
                                           RoomAvatar(
@@ -548,6 +676,25 @@ class _InboxScreenState extends State<InboxScreen> {
                                                         ),
                                                       ),
                                                     ),
+                                                    if (favourites[room.id] ==
+                                                        true)
+                                                      Icon(
+                                                        Icons.star_rounded,
+                                                        size: 16,
+                                                        color: p.accent,
+                                                      ),
+                                                    if (failedRooms.contains(
+                                                      room.id,
+                                                    ))
+                                                      Tooltip(
+                                                        message:
+                                                            'Message not sent',
+                                                        child: Icon(
+                                                          Icons.error_outline,
+                                                          size: 16,
+                                                          color: p.accent,
+                                                        ),
+                                                      ),
                                                     const SizedBox(width: 6),
                                                     Text(
                                                       _time(room.lastActivity),

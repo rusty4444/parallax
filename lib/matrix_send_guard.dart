@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:http/http.dart' as http;
+import 'package:matrix/matrix.dart' as matrix;
+
+import 'send_cancellation.dart';
 
 /// Fails closed at the final Matrix HTTP boundary if an encrypted send loses
 /// crypto availability during an SDK await or tries to send plaintext content.
@@ -18,7 +21,32 @@ class MatrixSendGuard extends http.BaseClient {
   static final Object _ownerKey = Object();
   static final Object _recipientCheckKey = Object();
   static final Object _sendStateKey = Object();
+  static final Object _cancellationKey = Object();
   int _protectedSends = 0;
+
+  static Future<T> owned<T>(
+    bool Function() ownerCurrent,
+    Future<T> Function() action,
+  ) {
+    if (!ownerCurrent()) throw StateError('Send belongs to an old session');
+    return runZoned(action, zoneValues: {_ownerKey: ownerCurrent});
+  }
+
+  static Future<T> cancellable<T>(
+    SendCancellation cancellation,
+    Future<T> Function() action,
+  ) => runZoned(action, zoneValues: {_cancellationKey: cancellation});
+
+  void _checkCancellation(SendCancellation? cancellation) {
+    if (cancellation?.isCancelled == true) {
+      // The SDK retries ordinary transport exceptions. A forbidden outcome
+      // stops its send loop; the outbox translates it back to cancellation.
+      throw matrix.MatrixException.fromJson({
+        'errcode': 'M_FORBIDDEN',
+        'error': 'This send was cancelled locally.',
+      });
+    }
+  }
 
   static void invalidateCurrentSend() {
     final state = Zone.current[_sendStateKey] as _ProtectedSendState?;
@@ -53,6 +81,8 @@ class MatrixSendGuard extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final cancellation = Zone.current[_cancellationKey] as SendCancellation?;
+    _checkCancellation(cancellation);
     final protectedRoom = Zone.current[_encryptedRoomKey] as String?;
     final sendState = Zone.current[_sendStateKey] as _ProtectedSendState?;
     if (sendState?.invalid == true) {
@@ -60,7 +90,7 @@ class MatrixSendGuard extends http.BaseClient {
     }
     final ownerCurrent = Zone.current[_ownerKey] as bool Function()?;
     if (ownerCurrent != null && !ownerCurrent()) {
-      throw StateError('Encrypted send belongs to an old session');
+      throw StateError('Send belongs to an old session');
     }
     if ((protectedRoom != null || _protectedSends > 0) &&
         !encryptionAvailable()) {
@@ -95,7 +125,12 @@ class MatrixSendGuard extends http.BaseClient {
         throw StateError('Encrypted send changed while checking recipients');
       }
     }
-    return await _inner.send(request);
+    _checkCancellation(cancellation);
+    return await _inner.send(
+      cancellation == null
+          ? request
+          : _CancellableRequest(request, cancellation.whenCancelled),
+    );
   }
 
   @override
@@ -104,4 +139,28 @@ class MatrixSendGuard extends http.BaseClient {
 
 class _ProtectedSendState {
   bool invalid = false;
+}
+
+class _CancellableRequest extends http.BaseRequest with http.Abortable {
+  _CancellableRequest(this.source, Future<void> cancellation)
+    : abortTrigger = source is http.Abortable && source.abortTrigger != null
+          ? Future.any([source.abortTrigger!, cancellation])
+          : cancellation,
+      super(source.method, source.url) {
+    headers.addAll(source.headers);
+    contentLength = source.contentLength;
+    followRedirects = source.followRedirects;
+    maxRedirects = source.maxRedirects;
+    persistentConnection = source.persistentConnection;
+  }
+
+  final http.BaseRequest source;
+  @override
+  final Future<void> abortTrigger;
+
+  @override
+  http.ByteStream finalize() {
+    super.finalize();
+    return source.finalize();
+  }
 }

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'appearance_settings_screen.dart';
+import 'feature_settings_scope.dart';
 import 'chat_backend.dart';
 import 'crypto_setup_policy.dart';
 import 'crypto_setup_screen.dart';
+import 'push_settings_screen.dart';
 import 'secure_window.dart';
 import 'widgets.dart';
 
@@ -26,6 +29,14 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  late final _owner = BackendSessionOwner(widget.backend);
+
+  @override
+  void dispose() {
+    _owner.release();
+    super.dispose();
+  }
+
   late VisualTheme _style = widget.style;
   late Future<CryptoStatus> _cryptoFuture;
   late Future<List<VerificationDevice>> _devicesFuture;
@@ -50,14 +61,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'Enter your existing recovery key or passphrase. '
         'It will not be saved by MatriXpress. Never share it.',
   }) async {
-    if (_credentialDialogOpen) return null;
+    if (!mounted || !_owner.isCurrent || _credentialDialogOpen) return null;
     _credentialDialogOpen = true;
     final setSecure = widget.setSecureWindow ?? SecureWindow.setEnabled;
     var protected = false;
     try {
       await setSecure(true);
       protected = true;
-      if (!mounted) return null;
+      if (!mounted || !_owner.isCurrent) return null;
       final route = DialogRoute<String>(
         context: context,
         builder: (_) => _RecoveryDialog(title: title, description: description),
@@ -68,7 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await route.completed;
       return credential;
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Screen protection is unavailable.')),
         );
@@ -96,29 +107,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
-    if (mounted) _refreshCrypto();
+    if (mounted && _owner.isCurrent) _refreshCrypto();
   }
 
   Future<void> _repairCrypto() async {
-    if (_restoring) return;
+    if (!mounted || !_owner.isCurrent || _restoring) return;
     final credential = await _askRecoveryCredential(
       title: 'Repair incomplete identity',
       description:
           'Enter the existing recovery key or passphrase. '
           'This keeps the current secret storage key and never resets it.',
     );
-    if (credential == null || credential.trim().isEmpty || !mounted) return;
+    if (credential == null ||
+        credential.trim().isEmpty ||
+        !mounted ||
+        !_owner.isCurrent) {
+      return;
+    }
     setState(() => _restoring = true);
     try {
       await widget.backend.repairCryptoIdentity(credential);
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         _refreshCrypto();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Encryption identity repaired.')),
         );
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         _refreshCrypto();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -130,7 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _restoring = false);
+      if (mounted && _owner.isCurrent) setState(() => _restoring = false);
     }
   }
 
@@ -140,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       await widget.backend.startVerification(userId, deviceId: device.id);
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Couldn’t start device verification. Try again.'),
@@ -151,13 +167,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _restoreCrypto() async {
-    if (_restoring) return;
+    if (!mounted || !_owner.isCurrent || _restoring) return;
     final credential = await _askRecoveryCredential();
-    if (credential == null || credential.isEmpty || !mounted) return;
+    if (credential == null ||
+        credential.isEmpty ||
+        !mounted ||
+        !_owner.isCurrent) {
+      return;
+    }
     setState(() => _restoring = true);
     try {
       await widget.backend.restoreCryptoIdentity(credential);
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         _refreshCrypto();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -166,7 +187,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Recovery failed. Check your key or passphrase.'),
@@ -174,12 +195,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _restoring = false);
+      if (mounted && _owner.isCurrent) setState(() => _restoring = false);
     }
   }
 
   Future<void> _restoreHistory() async {
-    if (_restoring) return;
+    if (!mounted || !_owner.isCurrent || _restoring) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -200,23 +221,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted || !_owner.isCurrent) return;
     setState(() => _restoring = true);
     try {
       await widget.backend.restoreBackedUpKeys();
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backed-up message keys restored.')),
         );
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t restore backed-up keys.')),
         );
       }
     } finally {
-      if (mounted) setState(() => _restoring = false);
+      if (mounted && _owner.isCurrent) setState(() => _restoring = false);
     }
   }
 
@@ -241,12 +262,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted || !_owner.isCurrent) return;
     try {
       await widget.backend.logout();
-      if (mounted) Navigator.pop(context);
+      if (mounted && _owner.isCurrent) Navigator.pop(context);
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t sign out. Try again.')),
         );
@@ -257,6 +278,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final p = paletteFor(_style);
+    final features = FeatureSettingsScope.maybeOf(context);
+    final preferences = features?.preferences;
+    final notifications = features?.notifications;
     return Scaffold(
       body: GlowBackdrop(
         palette: p,
@@ -326,6 +350,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 28),
               Eyebrow('Appearance', palette: p),
+              if (notifications != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.notifications_outlined),
+                  title: const Text('Push notifications'),
+                  subtitle: const Text(
+                    'Off by default · use your own services',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PushSettingsScreen(notifications: notifications),
+                    ),
+                  ),
+                ),
+              if (preferences != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.text_fields_rounded),
+                  title: const Text('Reading and media preferences'),
+                  subtitle: const Text(
+                    'Text size, compact layout, media previews and read receipts',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          AppearanceSettingsScreen(preferences: preferences),
+                    ),
+                  ),
+                ),
               const SizedBox(height: 10),
               Text(
                 'Pick your frequency',
@@ -536,7 +592,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'MatriXpress 0.2 · Built for speed, made for people.',
+                'MatriXpress 0.3.0 · Built for speed, made for people.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: p.muted, fontSize: 12),
               ),

@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
 
 permissions:
   contents: write
@@ -99,6 +99,7 @@ jobs:
           overwrite: true
 
       - name: Publish a per-commit test release
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

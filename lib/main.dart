@@ -1,13 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
+import 'appearance_preferences.dart';
 import 'chat_backend.dart';
+import 'feature_settings_scope.dart';
 import 'inbox_screen.dart';
 import 'login_screen.dart';
 import 'matrix_backend.dart';
+import 'message_draft_store.dart';
+import 'push_notifications.dart';
+import 'room_screen.dart';
 import 'security_overlay.dart';
 import 'widgets.dart';
 
@@ -16,137 +22,570 @@ void main() {
   runApp(const MatrixpressApp());
 }
 
+typedef MatrixBackendFactory =
+    MatrixBackend Function({
+      required Future<void> Function() beforeLogout,
+      required bool Function() sendReadReceipts,
+    });
+
 class MatrixpressApp extends StatefulWidget {
-  const MatrixpressApp({super.key, this.backend});
+  const MatrixpressApp({
+    super.key,
+    this.backend,
+    this.preferences,
+    this.draftStore,
+    this.notifications,
+    this.backendFactory,
+    this.notificationsFactory,
+  }) : assert(backend == null || backendFactory == null),
+       assert(notifications == null || notificationsFactory == null);
   final ChatBackend? backend;
+  final AppearancePreferences? preferences;
+  final MessageDraftStore? draftStore;
+
+  /// Borrowed resources are detached, never disposed by this widget.
+  final PushNotifications? notifications;
+
+  /// Factories transfer ownership to the app; useful for lifecycle tests.
+  @visibleForTesting
+  final MatrixBackendFactory? backendFactory;
+  @visibleForTesting
+  final PushNotifications Function()? notificationsFactory;
 
   @override
   State<MatrixpressApp> createState() => _MatrixpressAppState();
 }
 
 class _MatrixpressAppState extends State<MatrixpressApp> {
-  late final ChatBackend _backend = widget.backend ?? MatrixBackend();
+  late final AppearancePreferences _preferences;
+  late final MessageDraftStore _draftStore;
+  late final PushNotifications _notifications;
+  late final ChatBackend _backend;
+  late final bool _ownsPreferences;
+  late final bool _ownsNotifications;
+  late final bool _ownsBackend;
   VisualTheme _style = VisualTheme.ultraviolet;
+  GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  String? _accountKey;
+  String? _userId;
+  bool _authenticated = false;
+  bool _rebuildScheduled = false;
+  int _themeRevision = 0;
+  bool _closing = false;
+  bool _pushReady = false;
+  bool _pushBindingObserved = false;
+  String? _pushSessionKey;
+  PushSession? _pushSession;
+  int _pushGeneration = 0;
+  String? _pushError;
+  String? _startupError;
+  Future<void>? _starting;
+  Future<void>? _pushInitializing;
+  Future<void>? _backendInitializing;
+  bool _backendReady = false;
+  final _startupDeadlines = <Timer, Completer<void>>{};
 
   @override
   void initState() {
     super.initState();
+    // Resource identity and ownership belong to this State, not a later widget
+    // configuration. Use a new widget key to replace an app's injected owners.
+    _ownsPreferences = widget.preferences == null;
+    _ownsNotifications = widget.notifications == null;
+    _ownsBackend = widget.backend == null;
+    _preferences = widget.preferences ?? AppearancePreferences();
+    _draftStore = widget.draftStore ?? MessageDraftStore();
+    _notifications =
+        widget.notifications ??
+        widget.notificationsFactory?.call() ??
+        PushNotifications();
+    _backend =
+        widget.backend ??
+        (widget.backendFactory ?? MatrixBackend.new)(
+          beforeLogout: _notifications.logout,
+          sendReadReceipts: () => _preferences.sendReadReceipts,
+        );
+    _accountKey = BackendSessionOwner.keyFor(_backend);
+    _userId = _backend.userId;
+    _authenticated = _backend.connection == SessionStatus.ready;
+    _backend.addListener(_sessionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_backend.initialize());
+      unawaited(_start());
       unawaited(_loadTheme());
     });
   }
 
+  void _sessionChanged() {
+    final account = BackendSessionOwner.keyFor(_backend);
+    final user = _backend.userId;
+    final signedOut = _backend.connection == SessionStatus.signedOut;
+    final replaced = account != _accountKey || user != _userId;
+    if (_authenticated && (signedOut || replaced)) {
+      // Replacing the navigator removes *all* pushed decrypted routes, rather
+      // than merely changing the home widget underneath a media/thread route.
+      _navigatorKey = GlobalKey<NavigatorState>();
+      _authenticated = false;
+      _scheduleRebuild();
+    }
+    _accountKey = account;
+    _userId = user;
+    if (_backend.connection == SessionStatus.ready) _authenticated = true;
+    _bindPushSession();
+  }
+
+  void _scheduleRebuild() {
+    if (!mounted || _closing || _rebuildScheduled) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      _rebuildScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _rebuildScheduled = false;
+        if (mounted && !_closing) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _start() => _starting ??= _startOnce().whenComplete(() {
+    _starting = null;
+  });
+
+  Future<void> _startOnce() async {
+    // Apply saved privacy preferences before the SDK can restore any room.
+    await _loadAppearance();
+    if (!mounted || _closing) return;
+    // This is local revocation only, NOT Firebase/token initialization. A failed
+    // push store must not trap messaging on its splash screen or permit opt-in.
+    await _initializePush();
+    if (!mounted || _closing) return;
+    await _initialize();
+    if (!mounted || _closing) return;
+    _bindPushSession();
+  }
+
+  Future<void> _initializePush() async {
+    if (_pushReady) return;
+    try {
+      // Retain a timed-out operation: timeout is not cancellation. A retry joins
+      // the same local write instead of racing a late revocation against opt-in.
+      _pushInitializing ??= _notifications.initialize();
+      await _waitForStartup(_pushInitializing!, const Duration(seconds: 15));
+      if (!mounted || _closing) return;
+      _pushReady = true;
+      _pushError = null;
+    } catch (error) {
+      if (!mounted || _closing) return;
+      if (error is! TimeoutException) _pushInitializing = null;
+      _pushError =
+          'Push notifications are unavailable: local notification storage could '
+          'not be cleared. Push stays off. Retry to enable notification settings.';
+    }
+    _scheduleRebuild();
+  }
+
+  Future<void> _retryPush() async {
+    await _initializePush();
+    if (!mounted || _closing || !_pushReady) return;
+    // Explicit retry, not ordinary sync, may reattempt a failed cleanup/bind.
+    _pushBindingObserved = false;
+    _bindPushSession();
+  }
+
+  Future<void> _initialize() async {
+    _startupError = null;
+    _scheduleRebuild();
+    try {
+      _backendInitializing ??= _backend.initialize().whenComplete(() {
+        _backendInitializing = null;
+      });
+      await _waitForStartup(_backendInitializing!, const Duration(seconds: 45));
+      if (!mounted || _closing) return;
+      _backendReady = true;
+    } catch (_) {
+      if (!mounted || _closing) return;
+      // Injected/platform implementations may throw without changing connection.
+      // Render a retry instead of leaving SessionStatus.loading spinning forever.
+      _startupError =
+          'Could not initialize local Matrix storage or encryption. '
+          'Try again; if this continues, check device storage and permissions.';
+      _scheduleRebuild();
+    }
+  }
+
+  /// A deadline only releases the UI waiter, never the underlying storage/SDK
+  /// work. The app retains those original futures for retry and joined teardown.
+  Future<void> _waitForStartup(Future<void> work, Duration budget) {
+    final completion = Completer<void>();
+    late final Timer timer;
+    void finish([Object? error, StackTrace? stack]) {
+      timer.cancel();
+      _startupDeadlines.remove(timer);
+      if (completion.isCompleted) return;
+      if (error == null) {
+        completion.complete();
+      } else {
+        completion.completeError(error, stack);
+      }
+    }
+
+    timer = Timer(
+      budget,
+      () => finish(
+        TimeoutException('Startup is taking too long'),
+        StackTrace.current,
+      ),
+    );
+    _startupDeadlines[timer] = completion;
+    unawaited(
+      work.then<void>(
+        (_) => finish(),
+        onError: (Object error, StackTrace stack) {
+          finish(error, stack);
+        },
+      ),
+    );
+    return completion.future;
+  }
+
+  void _bindPushSession() {
+    final backend = _backend;
+    if (_closing ||
+        !_pushReady ||
+        !_backendReady ||
+        backend is! MatrixBackend) {
+      return;
+    }
+    final key = backend.pushSessionKey;
+    if (_pushBindingObserved && key == _pushSessionKey) return;
+    _pushBindingObserved = true;
+    _pushSessionKey = key;
+    final generation = ++_pushGeneration;
+    try {
+      _pushSession = key == null
+          ? null
+          : backend.createPushSession(_navigatePush);
+      // setSession invalidates synchronously, then joins the prior owner. Do not
+      // queue binding itself behind an await that could leave stale taps current.
+      unawaited(
+        _finishPushBinding(_notifications.setSession(_pushSession), generation),
+      );
+    } catch (_) {
+      _pushSession = null;
+      unawaited(
+        _finishPushBinding(
+          _notifications.setSession(null).then<void>((_) {
+            throw StateError('Could not bind the push session');
+          }),
+          generation,
+        ),
+      );
+    }
+  }
+
+  Future<void> _finishPushBinding(Future<void> binding, int generation) async {
+    try {
+      await binding;
+      if (!mounted || _closing || generation != _pushGeneration) return;
+      _pushError = null;
+    } catch (_) {
+      if (!mounted || _closing || generation != _pushGeneration) return;
+      _pushError =
+          'Push cleanup failed. Retry before enabling push or signing '
+          'out; you may need to remove this device’s pusher on your homeserver.';
+    }
+    _scheduleRebuild();
+  }
+
+  Future<void> _navigatePush(PushNavigationRequest request) async {
+    final backend = _backend;
+    final generation = _pushGeneration;
+    final key = _pushSessionKey;
+    bool current() =>
+        mounted &&
+        !_closing &&
+        request.isCurrent &&
+        generation == _pushGeneration &&
+        backend is MatrixBackend &&
+        key != null &&
+        backend.pushSessionKey == key &&
+        backend.userId == request.userId &&
+        _pushSession?.userId == request.userId &&
+        _pushSession?.deviceId == request.deviceId;
+    if (!current()) return;
+    bool joined() =>
+        backend.rooms.any((room) => room.id == request.roomId && !room.invited);
+    try {
+      if (!joined()) {
+        await backend.refreshRooms().timeout(const Duration(seconds: 20));
+        if (!current()) return;
+      }
+      if (!current()) return;
+      if (!joined()) {
+        _pushError =
+            'This notification’s room is not joined or is unavailable.';
+        _scheduleRebuild();
+        return;
+      }
+      if (_navigatorKey.currentState == null) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!current()) return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (!current() || navigator == null) return;
+      // Complete on dispatch, NOT on pop. Push.logout joins this callback; waiting
+      // for the route lifetime would deadlock sign-out from a notification route.
+      unawaited(
+        navigator
+            .push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => RoomScreen(
+                  backend: backend,
+                  palette: paletteFor(_style),
+                  roomId: request.roomId,
+                ),
+              ),
+            )
+            .then<void>(
+              (_) {},
+              onError: (Object _, StackTrace _) {
+                if (!current()) return;
+                _pushError =
+                    'Could not open the notification’s room. Try again.';
+                _scheduleRebuild();
+              },
+            ),
+      );
+    } catch (_) {
+      if (!current()) return;
+      _pushError =
+          'Could not resolve the notification’s room. Refresh and retry.';
+      _scheduleRebuild();
+    }
+  }
+
+  Future<void> _loadAppearance() async {
+    try {
+      await _preferences.load();
+    } catch (_) {
+      debugPrint('MatriXpress appearance preferences could not be loaded.');
+    }
+  }
+
   Future<void> _loadTheme() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    final saved = prefs.getString('visual_theme');
-    for (final theme in VisualTheme.values) {
-      if (theme.name == saved) setState(() => _style = theme);
+    final revision = _themeRevision;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted || revision != _themeRevision) return;
+      final saved = prefs.getString('visual_theme');
+      for (final theme in VisualTheme.values) {
+        if (theme.name == saved) setState(() => _style = theme);
+      }
+    } catch (_) {
+      debugPrint('MatriXpress theme preference could not be loaded.');
     }
   }
 
   void _changeTheme(VisualTheme style) {
+    _themeRevision++;
     setState(() => _style = style);
     unawaited(_saveTheme(style));
   }
 
   Future<void> _saveTheme(VisualTheme style) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('visual_theme', style.name);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted || _style != style) return;
+      await prefs.setString('visual_theme', style.name);
+    } catch (_) {
+      debugPrint('MatriXpress theme preference could not be saved.');
+    }
   }
 
   @override
   void dispose() {
-    if (widget.backend == null) _backend.dispose();
+    _closing = true;
+    // Cancel UI deadlines synchronously. Accepted storage/SDK work is still
+    // joined below; it is not cancelled or allowed to race a replacement owner.
+    for (final deadline in _startupDeadlines.entries) {
+      deadline.key.cancel();
+      if (!deadline.value.isCompleted) deadline.value.complete();
+    }
+    _startupDeadlines.clear();
+    ++_pushGeneration;
+    _backend.removeListener(_sessionChanged);
+    // Cancel immediately; release the SDK only after all accepted push callbacks
+    // and exact pusher removals have joined. Never dispose borrowed resources.
+    final cleanup = _ownsNotifications
+        ? _notifications.shutdown()
+        : _pushBindingObserved
+        ? _notifications.setSession(null)
+        : Future<void>.value();
+    unawaited(_releaseOwnedResources(cleanup));
+    if (_ownsPreferences) _preferences.dispose();
     super.dispose();
+  }
+
+  Future<void> _releaseOwnedResources(Future<void> cleanup) async {
+    try {
+      await cleanup;
+    } catch (_) {
+      debugPrint('MatriXpress push cleanup failed during teardown.');
+    } finally {
+      // shutdown disposes the notifier, which may enqueue a final cleanup retry.
+      await _notifications.settle();
+      if (_ownsBackend) {
+        try {
+          await _backendInitializing;
+        } catch (_) {
+          // Initialization failed; the backend still needs its final disposal.
+        }
+        _backend.dispose();
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final p = paletteFor(_style);
-    return MaterialApp(
-      title: 'MatriXpress',
-      debugShowCheckedModeBanner: false,
-      theme: themeFor(_style),
-      builder: (context, child) => SecurityOverlay(
-        backend: _backend,
-        child: child ?? const SizedBox.shrink(),
-      ),
-      home: AnimatedBuilder(
-        animation: _backend,
-        builder: (context, _) => switch (_backend.connection) {
-          SessionStatus.loading => Scaffold(
-            body: GlowBackdrop(
-              palette: p,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    BrandMark(palette: p, size: 72),
-                    const SizedBox(height: 20),
-                    Text(
-                      'MatriXpress',
-                      style: TextStyle(
-                        color: p.foreground,
-                        fontSize: 27,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    CircularProgressIndicator(color: p.accent),
-                  ],
-                ),
+    return AnimatedBuilder(
+      animation: _preferences,
+      builder: (context, _) => MaterialApp(
+        navigatorKey: _navigatorKey,
+        title: 'MatriXpress',
+        debugShowCheckedModeBanner: false,
+        theme: themeFor(_style),
+        builder: (context, child) => FeatureSettingsScope(
+          preferences: _preferences,
+          draftStore: _draftStore,
+          notifications: _pushReady ? _notifications : null,
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: _PreferenceTextScaler(
+                MediaQuery.textScalerOf(context),
+                _preferences.textScale,
               ),
             ),
+            child: Column(
+              children: [
+                if (_pushError != null)
+                  SafeArea(
+                    bottom: false,
+                    child: MaterialBanner(
+                      content: Text(_pushError!),
+                      actions: [
+                        TextButton(
+                          onPressed: () => unawaited(_retryPush()),
+                          child: const Text('Retry notifications'),
+                        ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: SecurityOverlay(
+                    backend: _backend,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+            ),
           ),
-          SessionStatus.signedOut => LoginScreen(backend: _backend, palette: p),
-          SessionStatus.ready => InboxScreen(
-            backend: _backend,
-            palette: p,
-            style: _style,
-            onThemeChanged: _changeTheme,
-          ),
-          SessionStatus.offline => Scaffold(
-            body: GlowBackdrop(
-              palette: p,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(28),
+        ),
+        home: AnimatedBuilder(
+          animation: _backend,
+          builder: (context, _) => switch (_startupError == null
+              ? _backend.connection
+              : SessionStatus.offline) {
+            SessionStatus.loading => Scaffold(
+              body: GlowBackdrop(
+                palette: p,
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.error_outline, color: p.accent, size: 48),
-                      const SizedBox(height: 18),
+                      BrandMark(palette: p, size: 72),
+                      const SizedBox(height: 20),
                       Text(
-                        'Couldn’t start MatriXpress',
+                        'MatriXpress',
                         style: TextStyle(
                           color: p.foreground,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 27,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _backend.error ?? 'Something went wrong.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: p.muted),
-                      ),
-                      const SizedBox(height: 24),
-                      AccentButton(
-                        palette: p,
-                        label: 'Try again',
-                        onPressed: () => unawaited(_backend.initialize()),
-                      ),
+                      const SizedBox(height: 18),
+                      CircularProgressIndicator(color: p.accent),
                     ],
                   ),
                 ),
               ),
             ),
-          ),
-        },
+            SessionStatus.signedOut => LoginScreen(
+              backend: _backend,
+              palette: p,
+            ),
+            SessionStatus.ready => InboxScreen(
+              backend: _backend,
+              palette: p,
+              style: _style,
+              onThemeChanged: _changeTheme,
+            ),
+            SessionStatus.offline => Scaffold(
+              body: GlowBackdrop(
+                palette: p,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, color: p.accent, size: 48),
+                        const SizedBox(height: 18),
+                        Text(
+                          'Couldn’t start MatriXpress',
+                          style: TextStyle(
+                            color: p.foreground,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _startupError ??
+                              _backend.error ??
+                              'Something went wrong.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: p.muted),
+                        ),
+                        const SizedBox(height: 24),
+                        AccentButton(
+                          palette: p,
+                          label: 'Try again',
+                          onPressed: () => unawaited(_start()),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          },
+        ),
       ),
     );
   }
+}
+
+/// Preserve platform accessibility's nonlinear scaling at each font size.
+class _PreferenceTextScaler extends TextScaler {
+  const _PreferenceTextScaler(this.platform, this.factor);
+  final TextScaler platform;
+  final double factor;
+
+  @override
+  double scale(double fontSize) => platform.scale(fontSize) * factor;
+
+  @override
+  double get textScaleFactor => scale(14) / 14;
 }

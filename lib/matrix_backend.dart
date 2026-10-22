@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -26,9 +27,55 @@ import 'recipient_trust.dart';
 import 'reaction_summary.dart';
 import 'room_details.dart';
 import 'safe_matrix_database.dart';
+import 'matrix_auth_service.dart';
+import 'matrix_room_features.dart';
+import 'message_outbox.dart';
+import 'messaging_features.dart';
+import 'queued_media_sender.dart';
+import 'push_notifications.dart';
+import 'secure_store.dart';
+import 'send_cancellation.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
-class MatrixBackend extends ChatBackend {
+class MatrixBackend extends ChatBackend implements MessagingFeatures {
+  MatrixBackend({
+    bool Function()? sendReadReceipts,
+    this.localStorage,
+    this.beforeLogout,
+  }) : _sendReadReceipts = sendReadReceipts ?? (() => true);
+
+  @visibleForTesting
+  factory MatrixBackend.withClient(
+    matrix.Client client, {
+    SecureValueStore? localStorage,
+    Future<void> Function()? beforeLogout,
+  }) {
+    final backend = MatrixBackend(
+      localStorage: localStorage,
+      beforeLogout: beforeLogout,
+    );
+    backend._client = client;
+    client.onSoftLogout = backend._refreshAuthentication;
+    backend._connection = client.isLogged()
+        ? SessionStatus.ready
+        : SessionStatus.signedOut;
+    return backend;
+  }
+
+  final bool Function() _sendReadReceipts;
+  final Future<void> Function()? beforeLogout;
+  final SecureValueStore? localStorage;
+  String? _outboxAccount;
+  Future<void>? _outboxRestoring;
+  late final MessageOutbox _outbox = MessageOutbox(
+    storage: localStorage,
+    currentAccount: () =>
+        !_loggingOut && _client?.isLogged() == true ? _outboxIdentity : null,
+    transmit: _transmitQueued,
+    onChanged: () {
+      if (!_disposed) notifyListeners();
+    },
+  );
   matrix.Client? _client;
   MatrixSendGuard? _sendGuard;
   matrix.Timeline? _timeline;
@@ -53,6 +100,9 @@ class MatrixBackend extends ChatBackend {
   int _roomGeneration = 0;
   bool _disposed = false;
   bool _initializing = false;
+  bool _loggingOut = false;
+  bool _passwordLoginBusy = false;
+  bool _requiresReauthentication = false;
   bool _cryptoSetupBusy = false;
   bool _refreshingRooms = false;
   bool _firstSyncCompleted = false;
@@ -116,18 +166,446 @@ class MatrixBackend extends ChatBackend {
   TrustWarning? get trustWarning => _trustWarning;
 
   @override
+  String get accountKey {
+    final client = _client;
+    if (client?.userID == null || client?.homeserver == null) return '';
+    return jsonEncode([client!.homeserver.toString(), client.userID]);
+  }
+
+  // Matrix transaction IDs are device-scoped. Hard re-login must not replay an
+  // ambiguous send from the former device, while drafts remain account-scoped.
+  String? get _outboxIdentity {
+    final client = _client;
+    if (accountKey.isEmpty || client?.deviceID == null) return null;
+    return jsonEncode([
+      client!.homeserver.toString(),
+      client.userID,
+      client.deviceID,
+    ]);
+  }
+
+  String? get pushSessionKey =>
+      !_disposed &&
+          !_loggingOut &&
+          _connection == SessionStatus.ready &&
+          _client?.isLogged() == true
+      ? _outboxIdentity
+      : null;
+
+  PushSession? createPushSession(
+    Future<void> Function(PushNavigationRequest) onNavigate,
+  ) {
+    final client = _client;
+    if (pushSessionKey == null || client == null) return null;
+    final user = client.userID!;
+    final device = client.deviceID!;
+    final generation = _securityGeneration;
+    bool sameCredentials() =>
+        !_disposed &&
+        identical(_client, client) &&
+        client.userID == user &&
+        client.deviceID == device &&
+        client.isLogged();
+    void check() {
+      if (!sameCredentials()) {
+        throw StateError('Push session credentials changed');
+      }
+    }
+
+    return PushSession(
+      userId: user,
+      deviceId: device,
+      registerPusher: (registration) async {
+        check();
+        if (_loggingOut || generation != _securityGeneration) {
+          throw StateError('Push registration belongs to a retired session');
+        }
+        await client.postPusher(registration.pusher, append: false);
+        check();
+        final pushers = await client.getPushers();
+        check();
+        if (!(pushers ?? []).any(
+          (p) =>
+              p.appId == registration.pusher.appId &&
+              p.pushkey == registration.pusher.pushkey &&
+              p.kind == 'http' &&
+              p.data.format == 'event_id_only' &&
+              p.data.url == registration.configuration.gatewayUrl &&
+              p.data.additionalProperties['registration_id'] ==
+                  registration.registrationId,
+        )) {
+          throw StateError('Push registration could not be verified');
+        }
+      },
+      removePusher: (registration) async {
+        // Cleanup survives local invalidation, but never borrows another
+        // account's mutable credentials. Logout joins it before SDK logout.
+        check();
+        await client.deletePusher(registration.pusherId);
+        check();
+        final pushers = await client.getPushers();
+        check();
+        if (pushers == null ||
+            pushers.any(
+              (p) =>
+                  p.appId == registration.pusherId.appId &&
+                  p.pushkey == registration.pusherId.pushkey,
+            )) {
+          throw StateError('Push removal could not be verified');
+        }
+      },
+      onNavigate: onNavigate,
+    );
+  }
+
+  @override
+  List<PendingSend> get pendingSends => [
+    for (final record in _outbox.records)
+      if (record.accountKey == _outboxIdentity)
+        PendingSend(
+          id: record.id,
+          roomId: record.roomId,
+          body: record.body,
+          state: record.state,
+          createdAt: record.createdAt,
+          fileName: record.media?.name,
+          error: record.error,
+          progress: record.progress,
+        ),
+  ];
+
+  MatrixAuthService _authService(matrix.Client client) {
+    final generation = _securityGeneration;
+    return MatrixAuthService(
+      client,
+      storage: localStorage,
+      ownerCurrent: () =>
+          !_disposed &&
+          !_loggingOut &&
+          identical(_client, client) &&
+          _securityGeneration == generation,
+    );
+  }
+
+  Future<void> _refreshAuthentication(matrix.Client client) async {
+    final generation = _securityGeneration;
+    try {
+      await _authService(client).refresh();
+      if (!_disposed &&
+          identical(_client, client) &&
+          generation == _securityGeneration) {
+        _requiresReauthentication = false;
+      }
+    } on ReauthenticationRequired {
+      if (!_disposed &&
+          identical(_client, client) &&
+          generation == _securityGeneration) {
+        _requiresReauthentication = true;
+        _error = 'Sign in again to reconnect the existing Matrix session.';
+        _setStatus(SessionStatus.signedOut);
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<ProviderDiscovery> discoverProvider(String input) {
+    final client = _requireClient();
+    _requireAuthenticationAvailable(client);
+    return _authService(client).discover(input);
+  }
+
+  @override
+  Future<void> loginWithBrowser(
+    ProviderDiscovery discovery, {
+    required bool oidc,
+  }) async {
+    final client = _requireClient();
+    _requireAuthenticationAvailable(client);
+    final generation = _securityGeneration;
+    await _authService(client).browserLogin(discovery, oidc: oidc);
+    if (_disposed ||
+        !identical(_client, client) ||
+        generation != _securityGeneration) {
+      throw StateError('Authentication session changed');
+    }
+    _requiresReauthentication = false;
+    _setStatus(SessionStatus.ready);
+    _scheduleRoomUpdate();
+    _restoreOutboxQuietly();
+  }
+
+  MatrixRoomFeatures _roomFeatures() {
+    final client = _requireClient();
+    final generation = _securityGeneration;
+    return MatrixRoomFeatures(
+      client,
+      ownerCurrent: () =>
+          !_disposed &&
+          identical(_client, client) &&
+          client.isLogged() &&
+          generation == _securityGeneration,
+      mapEvent: (event) => _projectEntry(
+        event,
+        _timeline?.room.id == event.room.id ? _timeline : null,
+      ),
+    );
+  }
+
+  @override
+  Future<List<DirectoryUser>> searchUsers(String query) =>
+      _roomFeatures().searchUsers(query);
+  @override
+  List<SpaceSummary> get spaces =>
+      _client?.isLogged() == true ? _roomFeatures().spaces : const [];
+  @override
+  Future<SpacePage> loadSpace(String spaceId, {String? nextBatch}) =>
+      _roomFeatures().loadSpace(spaceId, nextBatch: nextBatch);
+  @override
+  Future<ThreadPage> loadThread(
+    String roomId,
+    String rootEventId, {
+    String? nextBatch,
+  }) => _roomFeatures().loadThread(roomId, rootEventId, nextBatch: nextBatch);
+  @override
+  Future<List<MessageReader>> messageReaders(String roomId, String eventId) =>
+      _roomFeatures().messageReaders(roomId, eventId);
+  @override
+  bool isFavourite(String roomId) =>
+      _client?.isLogged() == true && _roomFeatures().isFavourite(roomId);
+  @override
+  Future<void> setFavourite(String roomId, bool favourite) async {
+    await _roomFeatures().setFavourite(roomId, favourite);
+    _scheduleRoomUpdate();
+  }
+
+  Future<void> _restoreOutbox() {
+    if (_loggingOut || _client?.isLogged() != true || _outboxIdentity == null) {
+      throw StateError('No signed-in account');
+    }
+    final owner = _outboxIdentity!;
+    if (_outboxAccount == owner && _outboxRestoring != null) {
+      return _outboxRestoring!;
+    }
+    _outboxAccount = owner;
+    final pending = _outbox.restore(owner);
+    _outboxRestoring = pending;
+    unawaited(
+      pending.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {
+          if (identical(_outboxRestoring, pending)) {
+            _outboxAccount = null;
+            _outboxRestoring = null;
+          }
+        },
+      ),
+    );
+    return pending;
+  }
+
+  void _restoreOutboxQuietly() {
+    final owner = _outboxIdentity;
+    final generation = _securityGeneration;
+    unawaited(
+      _restoreOutbox().catchError((Object _) {
+        if (_disposed ||
+            generation != _securityGeneration ||
+            owner != _outboxIdentity) {
+          return;
+        }
+        _error =
+            'The encrypted outbox could not be opened. No saved messages were replaced.';
+        _outboxAccount = null;
+        _outboxRestoring = null;
+        notifyListeners();
+      }),
+    );
+  }
+
+  @override
+  Future<void> queueMessage(
+    String roomId,
+    String text, {
+    String? replyToId,
+    String? editEventId,
+    String? threadRootId,
+  }) async {
+    if (text.trim().isEmpty) return;
+    final owner = _outboxIdentity ?? '';
+    final generation = _securityGeneration;
+    await _restoreOutbox();
+    _requireQueueOwner(owner, generation);
+    await _outbox.enqueueText(
+      owner,
+      roomId,
+      text,
+      replyToId: replyToId,
+      editEventId: editEventId,
+      threadRootId: threadRootId,
+    );
+  }
+
+  @override
+  Future<void> queueMedia(
+    String roomId,
+    MediaSelection media, {
+    String? caption,
+    String? replyToId,
+    String? threadRootId,
+  }) async {
+    final owner = _outboxIdentity ?? '';
+    final generation = _securityGeneration;
+    await _restoreOutbox();
+    _requireQueueOwner(owner, generation);
+    await _outbox.enqueueMedia(
+      owner,
+      roomId,
+      media,
+      caption: caption,
+      replyToId: replyToId,
+      threadRootId: threadRootId,
+    );
+  }
+
+  @override
+  Future<void> retryPending(String id) => _outbox.retry(id);
+  @override
+  Future<void> discardPending(String id) => _outbox.discard(id);
+  @override
+  void cancelPending(String id) => _outbox.cancel(id);
+
+  void _requireQueueOwner(String owner, int generation) {
+    if (_disposed ||
+        _loggingOut ||
+        owner.isEmpty ||
+        owner != _outboxIdentity ||
+        generation != _securityGeneration ||
+        _client?.isLogged() != true) {
+      throw StateError('The account changed before saving this message');
+    }
+  }
+
+  Future<void> _transmitQueued(
+    OutboxRecord record,
+    SendCancellation cancellation,
+    void Function(double) onProgress,
+  ) async {
+    final client = _requireClient();
+    final generation = _securityGeneration;
+    bool current() =>
+        !_disposed &&
+        !_loggingOut &&
+        identical(_client, client) &&
+        generation == _securityGeneration &&
+        record.accountKey == _outboxIdentity &&
+        client.onLoginStateChanged.value == matrix.LoginState.loggedIn;
+    void check() {
+      cancellation.check();
+      if (!current()) {
+        throw StateError('Send belongs to an unavailable session');
+      }
+    }
+
+    check();
+    if (_sending || _cryptoSetupBusy) {
+      throw StateError('Another secure operation is running');
+    }
+    final room = client.getRoomById(record.roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is no longer joined');
+    }
+    _sending = true;
+    notifyListeners();
+    try {
+      await MatrixSendGuard.cancellable(cancellation, () async {
+        final reply = record.replyToId == null
+            ? null
+            : await room.getEventById(record.replyToId!);
+        check();
+        if (record.replyToId != null && (reply == null || reply.redacted)) {
+          throw StateError('Reply target is unavailable');
+        }
+        if (record.editEventId != null) {
+          final edit = await room.getEventById(record.editEventId!);
+          check();
+          if (edit == null ||
+              edit.redacted ||
+              edit.senderId != client.userID ||
+              edit.messageType != matrix.MessageTypes.Text) {
+            throw StateError('Message can no longer be edited');
+          }
+        }
+        await _ensureTrusted(room, cancellation: cancellation);
+        check();
+        _requireEncryptedTransport(room);
+        await MatrixSendGuard.cancellable(
+          cancellation,
+          () => _protectSend(room, () async {
+            final media = record.media;
+            if (media != null) {
+              await sendQueuedAttachment(
+                client: client,
+                room: room,
+                media: media,
+                transactionId: record.id,
+                ownerCurrent: current,
+                cancellation: cancellation,
+                onProgress: onProgress,
+                caption: record.caption,
+                inReplyTo: reply,
+                threadRootId: record.threadRootId,
+              );
+            } else {
+              final eventId = await room.sendTextEvent(
+                record.body,
+                txid: record.id,
+                parseCommands: false,
+                parseMarkdown: false,
+                inReplyTo: reply,
+                editEventId: record.editEventId,
+                threadRootEventId: record.threadRootId,
+              );
+              check();
+              if (eventId == null) {
+                throw StateError('Message was not acknowledged');
+              }
+              onProgress(1);
+            }
+          }),
+        );
+      });
+    } catch (_) {
+      if (cancellation.isCancelled) throw const SendCancelled();
+      rethrow;
+    } finally {
+      if (!_disposed && generation == _securityGeneration) {
+        _sending = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  @override
   Future<void> initialize() async {
-    if (_initializing || _client != null) return;
+    if (_disposed || _initializing || _client != null) return;
     _initializing = true;
     _setStatus(SessionStatus.loading);
     sqlite.Database? openedDatabase;
     matrix.Client? openedClient;
+    void checkStartup() {
+      if (_disposed) throw StateError('Startup owner was disposed');
+    }
+
     try {
       await vodozemac.init();
+      checkStartup();
       final directory = await getApplicationSupportDirectory();
+      checkStartup();
       openedDatabase = await sqlite.openDatabase(
         path.join(directory.path, 'matrixpress.db'),
       );
+      checkStartup();
       final sdkDatabase = SafeMatrixDatabase(
         'matrixpress',
         database: openedDatabase,
@@ -137,6 +615,7 @@ class MatrixBackend extends ChatBackend {
       final storedUrl = (await sdkDatabase.getClient(
         'MatriXpress',
       ))?['homeserver_url'];
+      checkStartup();
       if (storedUrl != null &&
           (storedUrl is! String ||
               !isSecureHomeserver(Uri.tryParse(storedUrl)))) {
@@ -152,7 +631,12 @@ class MatrixBackend extends ChatBackend {
         'MatriXpress',
         database: sdkDatabase,
         httpClient: sendGuard,
-        supportedLoginTypes: {matrix.AuthenticationTypes.password},
+        supportedLoginTypes: {
+          matrix.AuthenticationTypes.password,
+          matrix.AuthenticationTypes.sso,
+          matrix.AuthenticationTypes.token,
+        },
+        onSoftLogout: _refreshAuthentication,
         verificationMethods: {
           encryption.KeyVerificationMethod.emoji,
           encryption.KeyVerificationMethod.numbers,
@@ -180,18 +664,32 @@ class MatrixBackend extends ChatBackend {
         waitForFirstSync: false,
         waitUntilLoadCompletedLoaded: true,
       );
-      _loginSubscription = client.onLoginStateChanged.stream.listen((_) {
+      checkStartup();
+      _loginSubscription = client.onLoginStateChanged.stream.listen((
+        loginState,
+      ) {
         if (_disposed) return;
         if (!client.isLogged()) _resetSessionView();
+        if (loginState == matrix.LoginState.loggedIn) {
+          _requiresReauthentication = false;
+        }
         _setStatus(
-          client.isLogged() ? SessionStatus.ready : SessionStatus.signedOut,
+          client.isLogged() && !_requiresReauthentication
+              ? SessionStatus.ready
+              : SessionStatus.signedOut,
         );
         _scheduleRoomUpdate();
+        if (loginState == matrix.LoginState.loggedIn) _restoreOutboxQuietly();
       });
       _setStatus(
-        client.isLogged() ? SessionStatus.ready : SessionStatus.signedOut,
+        client.isLogged() && !_requiresReauthentication
+            ? SessionStatus.ready
+            : SessionStatus.signedOut,
       );
       _scheduleRoomUpdate();
+      if (client.onLoginStateChanged.value == matrix.LoginState.loggedIn) {
+        _restoreOutboxQuietly();
+      }
     } catch (_) {
       await _syncSubscription?.cancel();
       await _syncStatusSubscription?.cancel();
@@ -212,6 +710,7 @@ class MatrixBackend extends ChatBackend {
       }
       _client = null;
       _sendGuard = null;
+      if (_disposed) return;
       _error = 'Could not initialise local Matrix storage or encryption.';
       _setStatus(SessionStatus.offline);
     } finally {
@@ -225,41 +724,96 @@ class MatrixBackend extends ChatBackend {
     required String username,
     required String password,
   }) async {
-    if (_cryptoSetupBusy) {
-      throw StateError('Wait for encryption setup before changing accounts');
-    }
     final client = _requireClient();
-    final url = Uri.parse(homeserver);
-    if (!isSecureHomeserver(url)) {
-      throw const FormatException('An HTTPS homeserver URL is required.');
+    _requireAuthenticationAvailable(client);
+    _passwordLoginBusy = true;
+    final generation = _securityGeneration;
+    void check() {
+      if (_disposed ||
+          _loggingOut ||
+          !identical(_client, client) ||
+          generation != _securityGeneration) {
+        throw StateError('Authentication session changed');
+      }
     }
-    await client.checkHomeserver(url);
-    if (!isSecureHomeserver(client.homeserver)) {
-      throw const FormatException('The discovered homeserver must use HTTPS.');
+
+    try {
+      final url = Uri.parse(homeserver);
+      if (!isSecureHomeserver(url)) {
+        throw const FormatException('An HTTPS homeserver URL is required.');
+      }
+      if (client.onLoginStateChanged.value == matrix.LoginState.softLoggedOut) {
+        if (url != client.homeserver) {
+          throw StateError(
+            'Re-authentication must use the existing homeserver',
+          );
+        }
+        await _authService(client).reauthenticatePassword(username, password);
+        check();
+      } else {
+        if (client.isLogged()) {
+          throw StateError('Sign out before replacing an account');
+        }
+        final discovery = await _authService(client).discover(homeserver);
+        check();
+        _firstSyncCompleted = false;
+        _roomSyncState = RoomSyncState.loading;
+        _roomSyncIssue = null;
+        await _authService(client).passwordLogin(discovery, username, password);
+        check();
+      }
+      _requiresReauthentication = false;
+      _setStatus(SessionStatus.ready);
+      _scheduleRoomUpdate();
+      _restoreOutboxQuietly();
+    } finally {
+      _passwordLoginBusy = false;
     }
-    _firstSyncCompleted = false;
-    _roomSyncState = RoomSyncState.loading;
-    _roomSyncIssue = null;
-    await client.login(
-      matrix.LoginType.mLoginPassword,
-      identifier: matrix.AuthenticationUserIdentifier(user: username),
-      password: password,
-    );
-    _setStatus(SessionStatus.ready);
-    _scheduleRoomUpdate();
+  }
+
+  void _requireAuthenticationAvailable(matrix.Client client) {
+    if (_disposed ||
+        _loggingOut ||
+        _cryptoSetupBusy ||
+        _passwordLoginBusy ||
+        _authService(client).busy ||
+        MatrixAuthService.isApplyingSession(client)) {
+      throw StateError('Wait for the current account operation to finish');
+    }
   }
 
   @override
   Future<void> logout() async {
-    if (_cryptoSetupBusy) {
-      throw StateError('Wait for encryption setup before signing out');
-    }
     final client = _requireClient();
-    _clearSecurityPrompts();
-    closeRoom(_activeRoomId ?? '');
-    await client.logout();
-    _resetSessionView();
-    _setStatus(SessionStatus.signedOut);
+    if (_loggingOut ||
+        _cryptoSetupBusy ||
+        _passwordLoginBusy ||
+        MatrixAuthService.isApplyingSession(client)) {
+      throw StateError(
+        'Wait for the current account operation before signing out',
+      );
+    }
+    _loggingOut = true;
+    try {
+      // Invalidate synchronously, then join sends and push cleanup before the
+      // SDK may erase/change credentials used by those operations.
+      _clearSecurityPrompts();
+      await _outbox.closeAccount();
+      _outboxAccount = null;
+      _outboxRestoring = null;
+      _sending = false;
+      await beforeLogout?.call();
+      if (_disposed || !identical(client, _client)) {
+        throw StateError('Session changed during logout');
+      }
+      closeRoom(_activeRoomId ?? '');
+      await client.logout();
+      _resetSessionView();
+      _setStatus(SessionStatus.signedOut);
+    } finally {
+      _loggingOut = false;
+      if (!_disposed) notifyListeners();
+    }
   }
 
   @override
@@ -294,7 +848,7 @@ class MatrixBackend extends ChatBackend {
     }
     _timeline = created;
     _refreshMessages(created);
-    if (room.isUnread && created.events.isNotEmpty) {
+    if (_sendReadReceipts() && room.isUnread && created.events.isNotEmpty) {
       final eventId = created.events.first.eventId;
       if (eventId.isNotEmpty) {
         // Receipt delivery must never hold the timeline's first frame hostage.
@@ -356,7 +910,8 @@ class MatrixBackend extends ChatBackend {
   }) async {
     if (_sending) throw StateError('A send is already in progress');
     if (text.trim().isEmpty) return;
-    final room = _requireClient().getRoomById(roomId);
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
     if (room == null || room.membership != matrix.Membership.join) {
       throw StateError('Room is not joined');
     }
@@ -369,46 +924,53 @@ class MatrixBackend extends ChatBackend {
       throw StateError('Message unavailable');
     }
     final generation = _securityGeneration;
+    final owner = _sendOwnership(client, room, generation);
     _sending = true;
     notifyListeners();
     try {
-      final reply = replyToId == null
-          ? null
-          : await timeline!.getEventById(replyToId);
-      if (replyToId != null && (reply == null || reply.redacted)) {
-        throw StateError('Reply target unavailable');
-      }
-      if (editEventId != null) {
-        final original = await timeline!.getEventById(editEventId);
-        if (original == null ||
-            original.redacted ||
-            original.senderId != _requireClient().userID ||
-            original.type != matrix.EventTypes.Message ||
-            original.messageType != matrix.MessageTypes.Text) {
-          throw StateError('Message cannot be edited');
+      await MatrixSendGuard.owned(owner, () async {
+        final reply = replyToId == null
+            ? null
+            : await timeline!.getEventById(replyToId);
+        _checkSendOwner(owner);
+        if (replyToId != null && (reply == null || reply.redacted)) {
+          throw StateError('Reply target unavailable');
         }
-      }
-      if ((replyToId != null || editEventId != null) &&
-          (_activeRoomId != roomId || _timeline != timeline)) {
-        throw StateError('Room changed before sending');
-      }
-      await _ensureTrusted(room);
-      if ((replyToId != null || editEventId != null) &&
-          (_activeRoomId != roomId || _timeline != timeline)) {
-        throw StateError('Room changed before sending');
-      }
-      _requireEncryptedTransport(room);
-      final sentId = await _protectSend(
-        room,
-        () => room.sendTextEvent(
-          text.trim(),
-          parseCommands: false,
-          parseMarkdown: false,
-          inReplyTo: reply,
-          editEventId: editEventId,
-        ),
-      );
-      if (sentId == null) throw StateError('Message was not sent');
+        if (editEventId != null) {
+          final original = await timeline!.getEventById(editEventId);
+          _checkSendOwner(owner);
+          if (original == null ||
+              original.redacted ||
+              original.senderId != _requireClient().userID ||
+              original.type != matrix.EventTypes.Message ||
+              original.messageType != matrix.MessageTypes.Text) {
+            throw StateError('Message cannot be edited');
+          }
+        }
+        if ((replyToId != null || editEventId != null) &&
+            (_activeRoomId != roomId || _timeline != timeline)) {
+          throw StateError('Room changed before sending');
+        }
+        await _ensureTrusted(room);
+        _checkSendOwner(owner);
+        if ((replyToId != null || editEventId != null) &&
+            (_activeRoomId != roomId || _timeline != timeline)) {
+          throw StateError('Room changed before sending');
+        }
+        _requireEncryptedTransport(room);
+        final sentId = await _protectSend(
+          room,
+          () => room.sendTextEvent(
+            text.trim(),
+            parseCommands: false,
+            parseMarkdown: false,
+            inReplyTo: reply,
+            editEventId: editEventId,
+          ),
+          ownerCurrent: owner,
+        );
+        if (sentId == null) throw StateError('Message was not sent');
+      });
     } finally {
       if (_securityGeneration == generation) {
         _sending = false;
@@ -432,45 +994,53 @@ class MatrixBackend extends ChatBackend {
       throw StateError('Encrypted uploads are unavailable');
     }
     final generation = _securityGeneration;
+    final owner = _sendOwnership(client, room, generation);
     _sending = true;
     notifyListeners();
     try {
-      for (final image in images) {
-        final size = await image.length();
-        if (size == 0 || size > 20 * 1024 * 1024) {
-          throw ArgumentError('Each image must be under 20 MB');
+      await MatrixSendGuard.owned(owner, () async {
+        for (final image in images) {
+          final size = await image.length();
+          _checkSendOwner(owner);
+          if (size == 0 || size > 20 * 1024 * 1024) {
+            throw ArgumentError('Each image must be under 20 MB');
+          }
         }
-      }
-      await _ensureTrusted(room);
-      for (final image in images) {
-        final bytes = await image.readAsBytes();
-        _requireEncryptedTransport(room);
-        final matrixFile = matrix.MatrixImageFile(
-          bytes: bytes,
-          name: image.name,
-        );
-        if (room.encrypted) {
-          await _protectSend(
-            room,
-            () => sendEncryptedMedia(
-              client: client,
-              room: room,
-              file: matrixFile,
-              shrinkImageMaxDimension: 1600,
-              canSend: () =>
-                  _securityGeneration == generation &&
-                  _client == client &&
-                  client.isLogged(),
-            ),
+        await _ensureTrusted(room);
+        for (final image in images) {
+          final bytes = await _readSendMedia(image, owner);
+          _checkSendOwner(owner);
+          _requireEncryptedTransport(room);
+          final matrixFile = matrix.MatrixImageFile(
+            bytes: bytes,
+            name: image.name,
           );
-        } else {
-          final sentId = await room.sendFileEvent(
-            matrixFile,
-            shrinkImageMaxDimension: 1600,
-          );
-          if (sentId == null) throw StateError('Image was not sent');
+          if (room.encrypted) {
+            await _protectSend(
+              room,
+              () => sendEncryptedMedia(
+                client: client,
+                room: room,
+                file: matrixFile,
+                shrinkImageMaxDimension: 1600,
+                canSend: () =>
+                    _securityGeneration == generation &&
+                    _client == client &&
+                    client.isLogged(),
+              ),
+              ownerCurrent: owner,
+            );
+          } else {
+            final sentId = await _protectSend(
+              room,
+              () =>
+                  room.sendFileEvent(matrixFile, shrinkImageMaxDimension: 1600),
+              ownerCurrent: owner,
+            );
+            if (sentId == null) throw StateError('Image was not sent');
+          }
         }
-      }
+      });
     } finally {
       if (_securityGeneration == generation) {
         _sending = false;
@@ -491,37 +1061,47 @@ class MatrixBackend extends ChatBackend {
       throw StateError('Encrypted uploads are unavailable');
     }
     final generation = _securityGeneration;
+    final owner = _sendOwnership(client, room, generation);
     _sending = true;
     notifyListeners();
     try {
-      final size = await file.length();
-      if (size <= 0 || size > 20 * 1024 * 1024) {
-        throw ArgumentError('Choose a file smaller than 20 MB');
-      }
-      await _ensureTrusted(room);
-      final bytes = await file.readAsBytes();
-      _requireEncryptedTransport(room);
-      final matrixFile = matrix.MatrixFile.fromMimeType(
-        bytes: bytes,
-        name: file.name,
-      );
-      if (room.encrypted) {
-        await _protectSend(
-          room,
-          () => sendEncryptedMedia(
-            client: client,
-            room: room,
-            file: matrixFile,
-            canSend: () =>
-                _securityGeneration == generation &&
-                _client == client &&
-                client.isLogged(),
-          ),
+      await MatrixSendGuard.owned(owner, () async {
+        final size = await file.length();
+        _checkSendOwner(owner);
+        if (size <= 0 || size > 20 * 1024 * 1024) {
+          throw ArgumentError('Choose a file smaller than 20 MB');
+        }
+        await _ensureTrusted(room);
+        final bytes = await _readSendMedia(file, owner);
+        _checkSendOwner(owner);
+        _requireEncryptedTransport(room);
+        final matrixFile = matrix.MatrixFile.fromMimeType(
+          bytes: bytes,
+          name: file.name,
         );
-      } else {
-        final sentId = await room.sendFileEvent(matrixFile);
-        if (sentId == null) throw StateError('Attachment was not sent');
-      }
+        if (room.encrypted) {
+          await _protectSend(
+            room,
+            () => sendEncryptedMedia(
+              client: client,
+              room: room,
+              file: matrixFile,
+              canSend: () =>
+                  _securityGeneration == generation &&
+                  _client == client &&
+                  client.isLogged(),
+            ),
+            ownerCurrent: owner,
+          );
+        } else {
+          final sentId = await _protectSend(
+            room,
+            () => room.sendFileEvent(matrixFile),
+            ownerCurrent: owner,
+          );
+          if (sentId == null) throw StateError('Attachment was not sent');
+        }
+      });
     } finally {
       if (_securityGeneration == generation) {
         _sending = false;
@@ -1673,7 +2253,11 @@ class MatrixBackend extends ChatBackend {
 
   void _resetSessionView() {
     if (_disposed) return;
+    _requiresReauthentication = false;
     _clearSecurityPrompts();
+    _outbox.closeAccount();
+    _outboxAccount = null;
+    _outboxRestoring = null;
     _roomUpdateTimer?.cancel();
     _roomGeneration++;
     _timeline?.cancelSubscriptions();
@@ -1698,18 +2282,63 @@ class MatrixBackend extends ChatBackend {
 
   void _requireEncryptedTransport(matrix.Room room) {
     final client = _requireClient();
-    if (!client.isLogged() || (room.encrypted && !client.encryptionEnabled)) {
+    if (client.onLoginStateChanged.value != matrix.LoginState.loggedIn ||
+        (room.encrypted && !client.encryptionEnabled)) {
       throw StateError('Encrypted messaging is unavailable');
     }
   }
 
-  Future<T> _protectSend<T>(matrix.Room room, Future<T> Function() action) {
-    if (!room.encrypted) return action();
+  void _checkSendOwner(bool Function() current) {
+    if (!current()) throw StateError('Send belongs to a retired account');
+  }
+
+  Future<Uint8List> _readSendMedia(XFile file, bool Function() current) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in file.openRead()) {
+      _checkSendOwner(current);
+      if (bytes.length + chunk.length > 20 * 1024 * 1024) {
+        throw ArgumentError('Attachment exceeds the 20 MB limit');
+      }
+      bytes.add(chunk);
+    }
+    _checkSendOwner(current);
+    if (bytes.isEmpty) throw ArgumentError('The attachment is empty');
+    return bytes.takeBytes();
+  }
+
+  bool Function() _sendOwnership(
+    matrix.Client client,
+    matrix.Room room,
+    int generation,
+  ) {
+    final user = client.userID;
+    final device = client.deviceID;
+    final encrypted = room.encrypted;
+    return () =>
+        !_disposed &&
+        !_loggingOut &&
+        identical(_client, client) &&
+        user == client.userID &&
+        device == client.deviceID &&
+        generation == _securityGeneration &&
+        room.encrypted == encrypted &&
+        room.membership == matrix.Membership.join &&
+        client.onLoginStateChanged.value == matrix.LoginState.loggedIn;
+  }
+
+  Future<T> _protectSend<T>(
+    matrix.Room room,
+    Future<T> Function() action, {
+    bool Function()? ownerCurrent,
+  }) {
+    final client = _requireClient();
+    final generation = _securityGeneration;
+    final current = ownerCurrent ?? _sendOwnership(client, room, generation);
+    if (!current()) throw StateError('Send session changed');
+    if (!room.encrypted) return MatrixSendGuard.owned(current, action);
     _requireEncryptedTransport(room);
     final guard = _sendGuard;
     if (guard == null) throw StateError('Encrypted send guard unavailable');
-    final client = _requireClient();
-    final generation = _securityGeneration;
     final approvedRoster = _validatedRoster[room.id];
     if (approvedRoster == null) {
       throw StateError('Encrypted recipients were not checked');
@@ -1717,11 +2346,7 @@ class MatrixBackend extends ChatBackend {
     return guard.protect(
       room.id,
       action,
-      ownerCurrent: () =>
-          !_disposed &&
-          _client == client &&
-          client.isLogged() &&
-          generation == _securityGeneration,
+      ownerCurrent: current,
       validateRecipients: () async {
         await _untrustedRecipients(room);
         final currentRoster = _validatedRoster[room.id];
@@ -1840,7 +2465,10 @@ class MatrixBackend extends ChatBackend {
     return recipients;
   }
 
-  Future<void> _ensureTrusted(matrix.Room room) async {
+  Future<void> _ensureTrusted(
+    matrix.Room room, {
+    SendCancellation? cancellation,
+  }) async {
     if (!room.encrypted) return;
     _requireEncryptedTransport(room);
     final client = _requireClient();
@@ -1851,8 +2479,10 @@ class MatrixBackend extends ChatBackend {
           !_disposed &&
           _client == client &&
           client.isLogged() &&
+          cancellation?.isCancelled != true &&
           generation == _securityGeneration,
       askUser: (recipients) async {
+        cancellation?.check();
         if (_trustDecision != null) {
           throw StateError('Another trust decision is in progress');
         }
@@ -1863,7 +2493,15 @@ class MatrixBackend extends ChatBackend {
           recipients: List.unmodifiable(recipients),
         );
         notifyListeners();
-        return decision.future;
+        if (cancellation == null) return decision.future;
+        try {
+          return await Future.any([
+            decision.future,
+            cancellation.whenCancelled.then((_) => false),
+          ]);
+        } finally {
+          if (identical(_trustDecision, decision)) respondToTrustWarning(false);
+        }
       },
       trustKey: (recipient) async {
         final key = client.userDeviceKeys[recipient.userId]?.masterKey;
@@ -2049,69 +2687,73 @@ class MatrixBackend extends ChatBackend {
   void _refreshMessages(matrix.Timeline timeline) {
     final client = _client;
     if (_disposed || timeline != _timeline || client == null) return;
+    final queuedIds = _outbox.records.map((record) => record.id).toSet();
     _messages = List.unmodifiable(
       timeline.events
           .take(_visibleMessageLimit)
           .where(
             (event) =>
-                event.type == matrix.EventTypes.Message ||
-                event.type == matrix.EventTypes.Encrypted,
+                (event.type == matrix.EventTypes.Message ||
+                    event.type == matrix.EventTypes.Encrypted ||
+                    event.type == matrix.EventTypes.Sticker) &&
+                event.relationshipType != matrix.RelationshipTypes.edit &&
+                event.relationshipType != matrix.RelationshipTypes.thread &&
+                (event.status.isSynced ||
+                    !queuedIds.contains(event.transactionId ?? event.eventId)),
           )
-          .map((event) {
-            final display = event.getDisplayEvent(timeline);
-            final replyToId = event.inReplyToEventId(includingFallback: false);
-            final reactions = event.redacted
-                ? const <ChatReaction>[]
-                : summarizeReactions(
-                    event
-                        .aggregatedEvents(
-                          timeline,
-                          matrix.RelationshipTypes.reaction,
-                        )
-                        .where((reaction) => !reaction.redacted)
-                        .map(
-                          (reaction) => ReactionVote(
-                            ((reaction.content['m.relates_to'] as Map?)?['key']
-                                    as String?) ??
-                                '',
-                            reaction.senderId,
-                          ),
-                        ),
-                    client.userID,
-                  );
-            return ChatEntry(
-              id: event.eventId,
-              sender: event.senderId,
-              body: event.redacted
-                  ? 'Message removed'
-                  : display.type == matrix.EventTypes.Encrypted
-                  ? '🔒 Unable to decrypt this message'
-                  : visibleMessageBody(
-                      display.body,
-                      isReply: replyToId != null,
-                    ),
-              time: event.originServerTs,
-              mine: event.senderId == client.userID,
-              isImage:
-                  !event.redacted &&
-                  display.messageType == matrix.MessageTypes.Image,
-              isAttachment:
-                  !event.redacted &&
-                  {
-                    matrix.MessageTypes.File,
-                    matrix.MessageTypes.Audio,
-                    matrix.MessageTypes.Video,
-                  }.contains(display.messageType),
-              replyToId: replyToId,
-              redacted: event.redacted,
-              edited: display.eventId != event.eventId,
-              reactions: reactions,
-            );
-          })
+          .map((event) => _projectEntry(event, timeline))
           .toList()
           .reversed,
     );
     notifyListeners();
+  }
+
+  ChatEntry _projectEntry(matrix.Event event, matrix.Timeline? timeline) {
+    final client = _requireClient();
+    final display = timeline == null ? event : event.getDisplayEvent(timeline);
+    final replyToId = event.inReplyToEventId(includingFallback: false);
+    final reactions = event.redacted || timeline == null
+        ? const <ChatReaction>[]
+        : summarizeReactions(
+            event
+                .aggregatedEvents(timeline, matrix.RelationshipTypes.reaction)
+                .where((reaction) => !reaction.redacted)
+                .map(
+                  (reaction) => ReactionVote(
+                    ((reaction.content['m.relates_to'] as Map?)?['key']
+                            as String?) ??
+                        '',
+                    reaction.senderId,
+                  ),
+                ),
+            client.userID,
+          );
+    return ChatEntry(
+      id: event.eventId,
+      sender: event.senderId,
+      body: event.redacted
+          ? 'Message removed'
+          : display.type == matrix.EventTypes.Encrypted
+          ? '🔒 Unable to decrypt this message'
+          : visibleMessageBody(display.body, isReply: replyToId != null),
+      time: event.originServerTs,
+      mine: event.senderId == client.userID,
+      isImage:
+          !event.redacted &&
+          (display.messageType == matrix.MessageTypes.Image ||
+              display.type == matrix.EventTypes.Sticker),
+      isAttachment:
+          !event.redacted &&
+          {
+            matrix.MessageTypes.File,
+            matrix.MessageTypes.Audio,
+            matrix.MessageTypes.Video,
+          }.contains(display.messageType),
+      replyToId: replyToId,
+      redacted: event.redacted,
+      edited: display.eventId != event.eventId,
+      reactions: reactions,
+    );
   }
 
   @override
@@ -2126,8 +2768,18 @@ class MatrixBackend extends ChatBackend {
     _verificationSubscription?.cancel();
     _timeline?.cancelSubscriptions();
     final client = _client;
-    if (client != null) unawaited(client.dispose());
+    final startupOwnsClient = _initializing;
     _sendGuard?.close();
+    unawaited(
+      () async {
+        try {
+          await _outbox.dispose();
+        } finally {
+          // Startup owns its partial client until its uncancellable init settles.
+          if (client != null && !startupOwnsClient) await client.dispose();
+        }
+      }().catchError((Object _) {}),
+    );
     super.dispose();
   }
 }

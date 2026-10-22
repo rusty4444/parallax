@@ -6,6 +6,13 @@ import 'package:image_picker/image_picker.dart';
 import 'app_theme.dart';
 import 'attachment_picker.dart';
 import 'chat_backend.dart';
+import 'feature_settings_scope.dart';
+import 'media_viewer.dart';
+import 'message_draft_store.dart';
+import 'message_receipts_sheet.dart';
+import 'messaging_features.dart';
+import 'rich_message_composer.dart';
+import 'thread_screen.dart';
 import 'gallery_bubble.dart';
 import 'message_image.dart';
 import 'message_groups.dart';
@@ -13,27 +20,85 @@ import 'photo_picker.dart';
 import 'room_avatar.dart';
 import 'room_background_store.dart';
 import 'room_details_screen.dart';
+import 'room_draft_owner.dart';
 import 'widgets.dart';
 
-class RoomScreen extends StatefulWidget {
+class RoomScreen extends StatelessWidget {
   const RoomScreen({
     super.key,
     required this.backend,
     required this.palette,
     required this.roomId,
     this.backgroundStore,
+    this.draftStore,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final String roomId;
   final RoomBackgroundStore? backgroundStore;
+  final MessageDraftStore? draftStore;
 
   @override
-  State<RoomScreen> createState() => _RoomScreenState();
+  Widget build(BuildContext context) => _OwnedRoomScreen(
+    key: ValueKey((
+      backend,
+      BackendSessionOwner.keyFor(backend),
+      backend.userId,
+      roomId,
+    )),
+    backend: backend,
+    palette: palette,
+    roomId: roomId,
+    backgroundStore: backgroundStore,
+    draftStore: draftStore,
+  );
 }
 
-class _RoomScreenState extends State<RoomScreen> {
+/// Changing the room/backend replaces the entire owner, including pending
+/// reads, edit buffers and timers, even when a caller reuses the public widget.
+class _OwnedRoomScreen extends StatefulWidget {
+  const _OwnedRoomScreen({
+    super.key,
+    required this.backend,
+    required this.palette,
+    required this.roomId,
+    this.backgroundStore,
+    this.draftStore,
+  });
+  final ChatBackend backend;
+  final AppPalette palette;
+  final String roomId;
+  final RoomBackgroundStore? backgroundStore;
+  final MessageDraftStore? draftStore;
+
+  @override
+  State<_OwnedRoomScreen> createState() => _RoomScreenState();
+}
+
+class _RoomScreenState extends State<_OwnedRoomScreen>
+    with WidgetsBindingObserver {
   final _draft = TextEditingController();
+  late final _owner = BackendSessionOwner(widget.backend);
+  MessageDraftStore? _draftStore;
+  RoomDraftOwner? _draftOwner;
+  Future<void>? _draftLoading;
+  Timer? _draftTimer;
+  bool _draftLoaded = false;
+  bool _draftReadFailed = false;
+  bool _draftDirty = false;
+  bool _settingDraft = false;
+  bool _draftStarted = false;
+  bool _sending = false;
+  int _draftRevision = 0;
+  int _normalRevision = 0;
+  int _composerContext = 0;
+  String _normalDraft = '';
+  String _lastDraftText = '';
+  final _pendingActions = <String>{};
+
+  MessagingFeatures? get _features => widget.backend is MessagingFeatures
+      ? widget.backend as MessagingFeatures
+      : null;
   Timer? _typingStopTimer;
   DateTime? _lastTypingSent;
   bool _typing = false;
@@ -49,16 +114,201 @@ class _RoomScreenState extends State<RoomScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _draft.addListener(_draftChanged);
     _loadBackground();
-    _open();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _owner.isCurrent) unawaited(_open());
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_draftStarted || _features == null) return;
+    _draftStarted = true;
+    _draftStore =
+        widget.draftStore ??
+        FeatureSettingsScope.maybeOf(context)?.draftStore ??
+        MessageDraftStore();
+    final account = _owner.accountKey;
+    if (account != null && account.isNotEmpty) {
+      _draftOwner = RoomDraftOwner.claim(account, widget.roomId);
+    }
+    unawaited(_loadDraft());
+  }
+
+  Future<void> _loadDraft() => _draftLoading ??= _readDraft().whenComplete(() {
+    _draftLoading = null;
+  });
+
+  Future<void> _readDraft() async {
+    final account = _owner.accountKey;
+    final store = _draftStore;
+    final draftOwner = _draftOwner;
+    if (!mounted ||
+        !_owner.isCurrent ||
+        account == null ||
+        account.isEmpty ||
+        store == null ||
+        draftOwner == null ||
+        !draftOwner.isCurrent) {
+      return;
+    }
+    final revision = _draftRevision;
+    final normalRevision = _normalRevision;
+    try {
+      final saved = await draftOwner.read(store) ?? '';
+      if (!_owner.isCurrent || !draftOwner.isCurrent) return;
+      _draftLoaded = true;
+      _draftReadFailed = false;
+      // An outstanding send retains ownership past route disposal. It can now
+      // clear the accepted text without touching a disposed controller.
+      if (!mounted) return;
+      if (revision == _draftRevision && _editing == null) {
+        _normalDraft = saved;
+        if (_draft.text != saved) _draftRevision++;
+        _setDraft(saved);
+      } else if (_editing == null) {
+        _draftDirty = true;
+        _scheduleDraft();
+      } else if (normalRevision == _normalRevision) {
+        _normalDraft = saved;
+      }
+      setState(() {});
+    } catch (_) {
+      if (mounted && _owner.isCurrent && draftOwner.isCurrent) {
+        setState(() => _draftReadFailed = true);
+      }
+    }
+  }
+
+  void _setDraft(String text) {
+    _settingDraft = true;
+    _lastDraftText = text;
+    _draft.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    _settingDraft = false;
+  }
+
+  void _draftChanged() {
+    if (_settingDraft || !_owner.isCurrent || _lastDraftText == _draft.text) {
+      return;
+    }
+    _lastDraftText = _draft.text;
+    _draftRevision++;
+    if (_editing != null) return;
+    _normalRevision++;
+    _draftOwner?.revise();
+    _normalDraft = _draft.text;
+    _draftDirty = true;
+    _scheduleDraft();
+  }
+
+  void _scheduleDraft() {
+    _draftTimer?.cancel();
+    if (!_draftLoaded || _draftReadFailed) return;
+    _draftTimer = Timer(const Duration(milliseconds: 350), () {
+      unawaited(_flushDraft());
+    });
+  }
+
+  Future<void> _flushDraft({bool accepted = false}) async {
+    _draftTimer?.cancel();
+    final account = _owner.accountKey;
+    final store = _draftStore;
+    final draftOwner = _draftOwner;
+    if (!_owner.isCurrent ||
+        !_draftLoaded ||
+        _draftReadFailed ||
+        !_draftDirty ||
+        account == null ||
+        store == null ||
+        draftOwner == null ||
+        !draftOwner.isCurrent) {
+      return;
+    }
+    // Acceptance may remove the durable snapshot, but must not replace the
+    // live buffer before the composer's acknowledgement. A context change
+    // during this write can then re-persist even an identical visible body.
+    final text = accepted ? '' : _normalDraft;
+    final revision = draftOwner.revision;
+    _draftDirty = false;
+    final owner = _owner;
+    owner.retain();
+    try {
+      await draftOwner.write(
+        store,
+        text,
+        revision: revision,
+        sessionIsCurrent: () => owner.isCurrent,
+      );
+    } catch (_) {
+      final current =
+          owner.isCurrent &&
+          draftOwner.isCurrent &&
+          draftOwner.revision == revision;
+      if (current) _draftDirty = true;
+      if (mounted && current) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t save this draft on this device.'),
+          ),
+        );
+      }
+    } finally {
+      owner.release();
+    }
+  }
+
+  void _cancelComposerContext() {
+    if (!mounted || !_owner.isCurrent) return;
+    setState(() {
+      _advanceComposerContext();
+      if (_editing != null) _setDraft(_normalDraft);
+      _replyingTo = null;
+      _editing = null;
+    });
+  }
+
+  void _advanceComposerContext() {
+    _composerContext++;
+    _draftOwner?.revise();
+    _draftDirty = true;
+    _scheduleDraft();
+  }
+
+  Object? _sendContext() =>
+      mounted && _owner.isCurrent && (_draftOwner?.isCurrent ?? true)
+      ? _composerContext
+      : null;
+
+  void _acknowledgeComposer(int contextRevision, bool textCleared) {
+    if (!textCleared ||
+        !mounted ||
+        !_owner.isCurrent ||
+        contextRevision != _composerContext) {
+      return;
+    }
+    setState(() {
+      // Run after the composer's clear, while edits remain isolated from the
+      // ordinary draft. Equal text must not become a second clear.
+      if (_editing != null) _setDraft(_normalDraft);
+      _editing = null;
+      _replyingTo = null;
+      _composerContext++;
+    });
+    _stopTyping();
   }
 
   Future<void> _loadBackground() async {
     try {
       final file = await _backgroundStore.fileFor(widget.roomId);
-      if (mounted) setState(() => _background = file);
+      if (mounted && _owner.isCurrent) setState(() => _background = file);
     } catch (_) {
-      if (mounted) _showBackgroundError();
+      if (mounted && _owner.isCurrent) _showBackgroundError();
     }
   }
 
@@ -67,39 +317,39 @@ class _RoomScreenState extends State<RoomScreen> {
   );
 
   Future<void> _chooseBackground() async {
-    if (_backgroundBusy) return;
+    if (!mounted || !_owner.isCurrent || _backgroundBusy) return;
     try {
       final selection = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         requestFullMetadata: false,
       );
-      if (selection == null || !mounted) return;
+      if (selection == null || !mounted || !_owner.isCurrent) return;
       setState(() => _backgroundBusy = true);
       final file = await _backgroundStore.replace(widget.roomId, selection);
       await FileImage(file).evict();
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         setState(() {
           _background = file;
           _backgroundVersion++;
         });
       }
     } catch (_) {
-      if (mounted) _showBackgroundError();
+      if (mounted && _owner.isCurrent) _showBackgroundError();
     } finally {
-      if (mounted) setState(() => _backgroundBusy = false);
+      if (mounted && _owner.isCurrent) setState(() => _backgroundBusy = false);
     }
   }
 
   Future<void> _clearBackground() async {
-    if (_backgroundBusy) return;
+    if (!mounted || !_owner.isCurrent || _backgroundBusy) return;
     setState(() => _backgroundBusy = true);
     try {
       await _backgroundStore.clear(widget.roomId);
-      if (mounted) setState(() => _background = null);
+      if (mounted && _owner.isCurrent) setState(() => _background = null);
     } catch (_) {
-      if (mounted) _showBackgroundError();
+      if (mounted && _owner.isCurrent) _showBackgroundError();
     } finally {
-      if (mounted) setState(() => _backgroundBusy = false);
+      if (mounted && _owner.isCurrent) setState(() => _backgroundBusy = false);
     }
   }
 
@@ -107,47 +357,134 @@ class _RoomScreenState extends State<RoomScreen> {
     try {
       await widget.backend.openRoom(widget.roomId);
     } catch (_) {
-      if (mounted) setState(() => _error = 'Couldn’t load this room.');
+      if (mounted && _owner.isCurrent) {
+        setState(() => _error = 'Couldn’t load this room.');
+      }
     } finally {
-      if (mounted) setState(() => _opening = false);
+      if (mounted && _owner.isCurrent) setState(() => _opening = false);
     }
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) unawaited(_flushDraft());
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _draftTimer?.cancel();
+    unawaited(_flushDraft());
+    _draftOwner?.release();
     _typingStopTimer?.cancel();
     _stopTyping();
-    widget.backend.closeRoom(widget.roomId);
+    if (_owner.isCurrent) widget.backend.closeRoom(widget.roomId);
+    _owner.release();
+    _draft.removeListener(_draftChanged);
     _draft.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    final body = _draft.text.trim();
-    if (body.isEmpty || widget.backend.sending) return;
+  Future<void> _send() => _sendContent(_draft.text, null);
+
+  Future<void> _sendContent(String text, MediaSelection? media) async {
+    final body = text.trim();
+    if (!mounted ||
+        !_owner.isCurrent ||
+        _sending ||
+        widget.backend.sending ||
+        (body.isEmpty && media == null)) {
+      return;
+    }
+    if (_editing != null && media != null) {
+      throw StateError('Attachments cannot replace a text edit.');
+    }
+    final owner = _owner;
+    owner.retain();
+    final draftOwner = _draftOwner;
+    draftOwner?.retain();
+    final sharedRevision = draftOwner?.revision;
+    final features = _features;
+    final roomId = widget.roomId;
+    final backend = widget.backend;
+    final revision = _draftRevision;
+    final composerContext = _composerContext;
     final reply = _replyingTo;
     final edit = _editing;
+    _draftTimer?.cancel();
+    setState(() => _sending = true);
     try {
-      await widget.backend.sendText(
-        widget.roomId,
-        body,
-        replyToId: reply?.id,
-        editEventId: edit?.id,
-      );
-      if (mounted && _draft.text.trim() == body) {
-        _draft.clear();
-        setState(() {
-          _replyingTo = null;
-          _editing = null;
-        });
-        _stopTyping();
+      // Join an in-flight read before queueing: a late hydration must never
+      // restore an already accepted outgoing message as a fresh draft.
+      if (features != null && _draftLoading != null) await _draftLoading;
+      if (!owner.isCurrent) throw StateError('This session has ended.');
+      if (features != null) {
+        if (media == null) {
+          await features.queueMessage(
+            roomId,
+            body,
+            replyToId: reply?.id,
+            editEventId: edit?.id,
+          );
+        } else {
+          await features.queueMedia(
+            roomId,
+            media,
+            caption: body.isEmpty ? null : body,
+            replyToId: reply?.id,
+          );
+        }
+      } else {
+        await backend.sendText(
+          roomId,
+          body,
+          replyToId: reply?.id,
+          editEventId: edit?.id,
+        );
+      }
+      if (owner.isCurrent &&
+          revision == _draftRevision &&
+          composerContext == _composerContext &&
+          (draftOwner == null ||
+              (draftOwner.isCurrent &&
+                  draftOwner.revision == sharedRevision))) {
+        // Queue acceptance, not delivery, owns this text now. Clear storage
+        // even when the route closed while enqueue was suspended.
+        if (edit == null) {
+          _draftDirty = true;
+          await _flushDraft(accepted: true);
+        }
+        // Rich input acknowledges and restores buffers only after its own
+        // revision-aware clear. The legacy input has no composer ack phase.
+        if (features == null &&
+            mounted &&
+            owner.isCurrent &&
+            composerContext == _composerContext &&
+            _draftRevision == revision) {
+          setState(() {
+            _setDraft(edit == null ? '' : _normalDraft);
+            _replyingTo = null;
+            _editing = null;
+          });
+          _stopTyping();
+        }
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted &&
+          owner.isCurrent &&
+          composerContext == _composerContext &&
+          revision == _draftRevision) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Message not sent. Try again.')),
         );
+        _scheduleDraft();
       }
+      // Reject acknowledgement so the rich composer retains staged media.
+      if (features != null) rethrow;
+    } finally {
+      if (mounted && _owner.isCurrent) setState(() => _sending = false);
+      owner.release();
+      draftOwner?.release();
     }
   }
 
@@ -156,6 +493,7 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Future<void> _react(ChatEntry entry, String emoji) async {
+    if (!mounted || !_owner.isCurrent) return;
     if (widget.backend.rooms.any(
       (room) => room.id == widget.roomId && room.encrypted,
     )) {
@@ -169,7 +507,7 @@ class _RoomScreenState extends State<RoomScreen> {
     try {
       await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t react to this message.')),
         );
@@ -178,6 +516,7 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   void _onDraftChanged(String text) {
+    if (!mounted || !_owner.isCurrent || _settingDraft) return;
     _typingStopTimer?.cancel();
     if (text.trim().isEmpty) {
       _stopTyping();
@@ -200,6 +539,7 @@ class _RoomScreenState extends State<RoomScreen> {
     _typingStopTimer?.cancel();
     if (!_typing) return;
     _typing = false;
+    if (!_owner.isCurrent) return;
     _lastTypingSent = null;
     unawaited(
       widget.backend.setTyping(widget.roomId, false).catchError((Object _) {}),
@@ -207,7 +547,7 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Future<void> _showActions(ChatEntry entry) async {
-    if (entry.redacted) return;
+    if (!mounted || !_owner.isCurrent || entry.redacted) return;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -238,6 +578,30 @@ class _RoomScreenState extends State<RoomScreen> {
                   title: Text('React $emoji'),
                   onTap: () => Navigator.pop(sheetContext, emoji),
                 ),
+            if (_features != null) ...[
+              ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: const Text('Open thread'),
+                onTap: () => Navigator.pop(sheetContext, 'thread'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.done_all_rounded),
+                title: const Text('Read receipts'),
+                onTap: () => Navigator.pop(sheetContext, 'receipts'),
+              ),
+            ],
+            if (entry.isImage || entry.isAttachment)
+              ListTile(
+                leading: const Icon(Icons.open_in_full_rounded),
+                title: const Text('Open media'),
+                onTap: () => Navigator.pop(sheetContext, 'media'),
+              ),
+            if (entry.isAttachment)
+              ListTile(
+                leading: const Icon(Icons.download_rounded),
+                title: const Text('Save attachment'),
+                onTap: () => Navigator.pop(sheetContext, 'save'),
+              ),
             if (entry.mine && !entry.isImage && !entry.isAttachment)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -254,12 +618,38 @@ class _RoomScreenState extends State<RoomScreen> {
         ),
       ),
     );
-    if (!mounted || choice == null) return;
-    if (choice == 'verify') {
+    if (!mounted || !_owner.isCurrent || choice == null) return;
+    if (choice == 'thread') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ThreadScreen(
+            backend: widget.backend,
+            roomId: widget.roomId,
+            root: entry,
+          ),
+        ),
+      );
+    } else if (choice == 'receipts') {
+      await showMessageReceipts(
+        context,
+        backend: widget.backend,
+        roomId: widget.roomId,
+        eventId: entry.id,
+      );
+    } else if (choice == 'media') {
+      await openMediaViewer(
+        context,
+        backend: widget.backend,
+        roomId: widget.roomId,
+        eventId: entry.id,
+      );
+    } else if (choice == 'save') {
+      await saveAttachment(context, widget.backend, widget.roomId, entry.id);
+    } else if (choice == 'verify') {
       try {
         await widget.backend.startVerification(entry.sender);
       } catch (_) {
-        if (mounted) {
+        if (mounted && _owner.isCurrent) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Couldn’t start verification.')),
           );
@@ -267,15 +657,18 @@ class _RoomScreenState extends State<RoomScreen> {
       }
     } else if (choice == 'reply') {
       setState(() {
+        _advanceComposerContext();
+        if (_editing != null) _setDraft(_normalDraft);
         _replyingTo = entry;
         _editing = null;
       });
     } else if (choice == 'edit') {
-      _draft.text = entry.body;
-      _draft.selection = TextSelection.collapsed(offset: _draft.text.length);
+      unawaited(_flushDraft());
       setState(() {
+        _advanceComposerContext();
         _editing = entry;
         _replyingTo = null;
+        _setDraft(entry.body);
       });
     } else if (choice == 'delete') {
       final confirmed = await showDialog<bool>(
@@ -297,11 +690,11 @@ class _RoomScreenState extends State<RoomScreen> {
           ],
         ),
       );
-      if (confirmed != true || !mounted) return;
+      if (confirmed != true || !mounted || !_owner.isCurrent) return;
       try {
         await widget.backend.redactMessage(widget.roomId, entry.id);
       } catch (_) {
-        if (mounted) {
+        if (mounted && _owner.isCurrent) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Couldn’t delete this message.')),
           );
@@ -316,7 +709,7 @@ class _RoomScreenState extends State<RoomScreen> {
     try {
       await widget.backend.loadOlder(widget.roomId);
     } catch (_) {
-      if (mounted) {
+      if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t load older messages.')),
         );
@@ -324,9 +717,112 @@ class _RoomScreenState extends State<RoomScreen> {
     }
   }
 
+  Future<void> _pendingAction(PendingSend pending, String action) async {
+    final features = _features;
+    if (!mounted ||
+        !_owner.isCurrent ||
+        features == null ||
+        !_pendingActions.add(pending.id)) {
+      return;
+    }
+    setState(() {});
+    try {
+      // The backend owns the stable transaction ID and retry payload. Never
+      // rebuild an outgoing message from its display-only PendingSend summary.
+      if (action == 'retry') {
+        await features.retryPending(pending.id);
+      } else if (action == 'discard') {
+        await features.discardPending(pending.id);
+      } else {
+        features.cancelPending(pending.id);
+      }
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t update this pending message.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingActions.remove(pending.id));
+      }
+    }
+  }
+
+  Widget _pendingPanel(AppPalette palette) {
+    final pending = _features!.pendingSends
+        .where((item) => item.roomId == widget.roomId)
+        .toList();
+    if (pending.isEmpty) return const SizedBox.shrink();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 160),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: pending.length,
+        itemBuilder: (context, index) {
+          final item = pending[index];
+          final busy = _pendingActions.contains(item.id);
+          final active =
+              item.state == DeliveryState.queued ||
+              item.state == DeliveryState.sending;
+          return Padding(
+            key: ValueKey('pending-${item.id}'),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.fileName ?? item.body,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: palette.foreground),
+                ),
+                if (item.progress != null)
+                  LinearProgressIndicator(value: item.progress!.clamp(0, 1)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(switch (item.state) {
+                        DeliveryState.queued => 'Queued',
+                        DeliveryState.sending => 'Sending…',
+                        DeliveryState.failed => 'Not sent. Retry or discard.',
+                        DeliveryState.sent => 'Sent',
+                      }, style: TextStyle(color: palette.muted, fontSize: 12)),
+                    ),
+                    if (item.state == DeliveryState.failed)
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => _pendingAction(item, 'retry'),
+                        child: const Text('Retry'),
+                      ),
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => _pendingAction(
+                              item,
+                              active ? 'cancel' : 'discard',
+                            ),
+                      child: Text(active ? 'Cancel' : 'Discard'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
+    final preferences = FeatureSettingsScope.maybeOf(context)?.preferences;
+    final compact = preferences?.compact ?? false;
+    final composerContext = _composerContext;
     return AnimatedBuilder(
       animation: widget.backend,
       builder: (context, _) {
@@ -532,7 +1028,12 @@ class _RoomScreenState extends State<RoomScreen> {
                           )
                         : ListView.builder(
                             reverse: true,
-                            padding: const EdgeInsets.fromLTRB(16, 20, 16, 18),
+                            padding: EdgeInsets.fromLTRB(
+                              16,
+                              compact ? 8 : 20,
+                              16,
+                              compact ? 8 : 18,
+                            ),
                             itemCount:
                                 rows.length +
                                 (widget.backend.canLoadOlder ? 1 : 0),
@@ -596,6 +1097,24 @@ class _RoomScreenState extends State<RoomScreen> {
                             },
                           ),
                   ),
+                  if (_features != null) _pendingPanel(p),
+                  if (_draftReadFailed)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Saved draft unavailable. Not overwriting storage.',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _loadDraft,
+                            child: const Text('Retry draft'),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (widget.backend.typingUsers.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(18, 5, 18, 5),
@@ -637,97 +1156,126 @@ class _RoomScreenState extends State<RoomScreen> {
                           ),
                           IconButton(
                             tooltip: 'Cancel reply or edit',
-                            onPressed: () => setState(() {
-                              _replyingTo = null;
-                              _editing = null;
-                            }),
+                            onPressed: _cancelComposerContext,
                             icon: const Icon(Icons.close_rounded),
                           ),
                         ],
                       ),
                     ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: p.surface,
-                      border: Border(top: BorderSide(color: p.stroke)),
+                  if (_features != null) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed:
+                            _sending ||
+                                widget.backend.sending ||
+                                _editing != null
+                            ? null
+                            : () => pickAndSendImages(
+                                context,
+                                widget.backend,
+                                widget.roomId,
+                              ),
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text('Send a photo gallery'),
+                      ),
                     ),
-                    padding: EdgeInsets.fromLTRB(
-                      14,
-                      12,
-                      14,
-                      12 + MediaQuery.paddingOf(context).bottom * 0.25,
+                    RichMessageComposer(
+                      controller: _draft,
+                      sendContext: _sendContext,
+                      onAcknowledged: (textCleared) =>
+                          _acknowledgeComposer(composerContext, textCleared),
+                      sending:
+                          _sending ||
+                          widget.backend.sending ||
+                          !_owner.isCurrent,
+                      onChanged: _onDraftChanged,
+                      onSend: _sendContent,
+                      onCancel: _cancelComposerContext,
                     ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: 'Attach file',
-                          onPressed: widget.backend.sending
-                              ? null
-                              : () => pickAndSendAttachment(
-                                  context,
-                                  widget.backend,
-                                  widget.roomId,
-                                ),
-                          icon: Icon(
-                            Icons.attach_file_rounded,
-                            color: p.secondary,
+                  ] else
+                    Container(
+                      decoration: BoxDecoration(
+                        color: p.surface,
+                        border: Border(top: BorderSide(color: p.stroke)),
+                      ),
+                      padding: EdgeInsets.fromLTRB(
+                        14,
+                        12,
+                        14,
+                        12 + MediaQuery.paddingOf(context).bottom * 0.25,
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Attach file',
+                            onPressed: widget.backend.sending
+                                ? null
+                                : () => pickAndSendAttachment(
+                                    context,
+                                    widget.backend,
+                                    widget.roomId,
+                                  ),
+                            icon: Icon(
+                              Icons.attach_file_rounded,
+                              color: p.secondary,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'Attach photos',
-                          onPressed: widget.backend.sending
-                              ? null
-                              : () => pickAndSendImages(
-                                  context,
-                                  widget.backend,
-                                  widget.roomId,
-                                ),
-                          icon: Icon(
-                            Icons.add_photo_alternate_outlined,
-                            color: p.secondary,
+                          IconButton(
+                            tooltip: 'Attach photos',
+                            onPressed: widget.backend.sending
+                                ? null
+                                : () => pickAndSendImages(
+                                    context,
+                                    widget.backend,
+                                    widget.roomId,
+                                  ),
+                            icon: Icon(
+                              Icons.add_photo_alternate_outlined,
+                              color: p.secondary,
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _draft,
-                            onChanged: _onDraftChanged,
-                            minLines: 1,
-                            maxLines: 5,
-                            textCapitalization: TextCapitalization.sentences,
-                            keyboardType: TextInputType.multiline,
-                            onSubmitted: (_) => _send(),
-                            decoration: const InputDecoration(
-                              hintText: 'Write a message…',
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 13,
+                          Expanded(
+                            child: TextField(
+                              controller: _draft,
+                              onChanged: _onDraftChanged,
+                              minLines: 1,
+                              maxLines: 5,
+                              textCapitalization: TextCapitalization.sentences,
+                              keyboardType: TextInputType.multiline,
+                              onSubmitted: (_) => _send(),
+                              decoration: const InputDecoration(
+                                hintText: 'Write a message…',
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 13,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 9),
-                        IconButton.filled(
-                          tooltip: 'Send message',
-                          style: IconButton.styleFrom(
-                            backgroundColor: p.accent,
-                            foregroundColor: p.accentOn,
-                            minimumSize: const Size(48, 48),
+                          const SizedBox(width: 9),
+                          IconButton.filled(
+                            tooltip: 'Send message',
+                            style: IconButton.styleFrom(
+                              backgroundColor: p.accent,
+                              foregroundColor: p.accentOn,
+                              minimumSize: const Size(48, 48),
+                            ),
+                            onPressed: widget.backend.sending ? null : _send,
+                            icon: widget.backend.sending
+                                ? SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: p.accentOn,
+                                    ),
+                                  )
+                                : const Icon(Icons.arrow_upward_rounded),
                           ),
-                          onPressed: widget.backend.sending ? null : _send,
-                          icon: widget.backend.sending
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: p.accentOn,
-                                  ),
-                                )
-                              : const Icon(Icons.arrow_upward_rounded),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -764,6 +1312,8 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mine = entry.mine;
+    final compact =
+        FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -771,7 +1321,7 @@ class _MessageBubble extends StatelessWidget {
           maxWidth: MediaQuery.sizeOf(context).width * 0.83,
         ),
         child: Padding(
-          padding: EdgeInsets.only(top: group ? 3 : 14),
+          padding: EdgeInsets.only(top: group ? 3 : (compact ? 7 : 14)),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: mine ? palette.bubble : palette.surface,
@@ -784,7 +1334,12 @@ class _MessageBubble extends StatelessWidget {
               border: mine ? null : Border.all(color: palette.stroke),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+              padding: EdgeInsets.fromLTRB(
+                14,
+                compact ? 6 : 10,
+                14,
+                compact ? 5 : 8,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -846,11 +1401,11 @@ class _MessageBubble extends StatelessWidget {
                         ],
                         if (entry.isAttachment)
                           InkWell(
-                            onTap: () => saveAttachment(
+                            onTap: () => openMediaViewer(
                               context,
-                              backend,
-                              roomId,
-                              entry.id,
+                              backend: backend,
+                              roomId: roomId,
+                              eventId: entry.id,
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 5),

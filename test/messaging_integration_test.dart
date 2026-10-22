@@ -1,0 +1,942 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:matrixpress/app_theme.dart';
+import 'package:matrixpress/appearance_preferences.dart';
+import 'package:matrixpress/appearance_settings_screen.dart';
+import 'package:matrixpress/chat_backend.dart';
+import 'package:matrixpress/feature_settings_scope.dart';
+import 'package:matrixpress/inbox_screen.dart';
+import 'package:matrixpress/main.dart';
+import 'package:matrixpress/media_viewer.dart';
+import 'package:matrixpress/message_draft_store.dart';
+import 'package:matrixpress/message_image.dart';
+import 'package:matrixpress/messaging_features.dart';
+import 'package:matrixpress/rich_message_composer.dart';
+import 'package:matrixpress/room_screen.dart';
+import 'package:matrixpress/space_browser_screen.dart';
+import 'package:matrixpress/thread_screen.dart';
+import 'package:matrixpress/user_directory_screen.dart';
+
+import 'widget_test.dart' show FakeBackend, FakeBackgroundStore;
+
+const roomId = '!r:example.org';
+
+class Drafts extends MessageDraftStore {
+  final values = <String, String>{};
+  final writes = <String>[];
+  Completer<String>? readGate;
+  bool failRead = false;
+
+  String key(String account, String room) => '$account/$room';
+
+  @override
+  Future<String> read(String accountKey, String roomId) async {
+    if (failRead) throw StateError('locked');
+    return readGate?.future ?? values[key(accountKey, roomId)] ?? '';
+  }
+
+  @override
+  Future<void> write(String accountKey, String roomId, String text) async {
+    writes.add(text);
+    values[key(accountKey, roomId)] = text;
+  }
+
+  @override
+  Future<void> clearAccount(String accountKey) async {
+    values.removeWhere((key, _) => key.startsWith('$accountKey/'));
+  }
+}
+
+class FeaturesBackend extends FakeBackend implements MessagingFeatures {
+  String account = 'account-a';
+  SessionStatus status = SessionStatus.ready;
+  Completer<void>? queueGate;
+  List<PendingSend> outbox = [];
+  String? queuedText;
+  String? queuedReply;
+  String? queuedEdit;
+  MediaSelection? queuedMedia;
+  String? retried;
+  String? discarded;
+  String? cancelled;
+  String? directUser;
+  String? favouriteFailure;
+  String? receiptEvent;
+  final favourites = <String>{};
+
+  @override
+  SessionStatus get connection => status;
+  @override
+  String get accountKey => account;
+  @override
+  List<PendingSend> get pendingSends => outbox;
+  @override
+  Future<void> queueMessage(
+    String roomId,
+    String text, {
+    String? replyToId,
+    String? editEventId,
+    String? threadRootId,
+  }) async {
+    queuedText = text;
+    queuedReply = replyToId;
+    queuedEdit = editEventId;
+    await queueGate?.future;
+  }
+
+  @override
+  Future<void> queueMedia(
+    String roomId,
+    MediaSelection media, {
+    String? caption,
+    String? replyToId,
+    String? threadRootId,
+  }) async {
+    queuedMedia = media;
+    queuedText = caption;
+    queuedReply = replyToId;
+    await queueGate?.future;
+  }
+
+  @override
+  Future<void> retryPending(String id) async => retried = id;
+  @override
+  Future<void> discardPending(String id) async => discarded = id;
+  @override
+  void cancelPending(String id) => cancelled = id;
+  @override
+  bool isFavourite(String roomId) {
+    if (favouriteFailure == roomId) throw StateError('broken room');
+    return favourites.contains(roomId);
+  }
+
+  @override
+  Future<void> setFavourite(String roomId, bool favourite) async {
+    favourite ? favourites.add(roomId) : favourites.remove(roomId);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> createDirectChat(String userId) async {
+    directUser = userId;
+    activeId = roomId;
+    notifyListeners();
+  }
+
+  @override
+  List<SpaceSummary> get spaces => [];
+  @override
+  Future<List<DirectoryUser>> searchUsers(String query) async => [];
+  @override
+  Future<SpacePage> loadSpace(String spaceId, {String? nextBatch}) async =>
+      const SpacePage([]);
+  @override
+  Future<ThreadPage> loadThread(
+    String roomId,
+    String rootEventId, {
+    String? nextBatch,
+  }) async => const ThreadPage([]);
+  @override
+  Future<List<MessageReader>> messageReaders(
+    String roomId,
+    String eventId,
+  ) async {
+    receiptEvent = eventId;
+    return [];
+  }
+
+  @override
+  Future<ProviderDiscovery> discoverProvider(String input) async =>
+      throw UnimplementedError();
+  @override
+  Future<void> loginWithBrowser(
+    ProviderDiscovery discovery, {
+    required bool oidc,
+  }) async => throw UnimplementedError();
+}
+
+Widget room(
+  FeaturesBackend backend,
+  Drafts drafts, {
+  AppearancePreferences? preferences,
+  String id = roomId,
+}) => FeatureSettingsScope(
+  preferences: preferences ?? AppearancePreferences(),
+  draftStore: drafts,
+  child: MaterialApp(
+    home: RoomScreen(
+      backend: backend,
+      palette: paletteFor(VisualTheme.ultraviolet),
+      roomId: id,
+      draftStore: drafts,
+      backgroundStore: FakeBackgroundStore(),
+    ),
+  ),
+);
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('scoped draft loads, debounces and flushes on route disposal', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend();
+    final drafts = Drafts()..values['account-a/$roomId'] = 'Saved draft';
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    expect(find.byType(RichMessageComposer), findsOneWidget);
+    expect(find.text('Saved draft'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Changed');
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(drafts.values['account-a/$roomId'], 'Changed');
+    await tester.enterText(find.byType(TextField).last, 'Flushed');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(drafts.values['account-a/$roomId'], 'Flushed');
+  });
+
+  testWidgets('room and account replacements load only their own drafts', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend();
+    final drafts = Drafts()
+      ..values['account-a/$roomId'] = 'Room one'
+      ..values['account-a/!other:s'] = 'Room two'
+      ..values['account-b/!other:s'] = 'Account B';
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    expect(find.text('Room one'), findsOneWidget);
+    await tester.pumpWidget(room(backend, drafts, id: '!other:s'));
+    await tester.pumpAndSettle();
+    expect(find.text('Room two'), findsOneWidget);
+    expect(find.text('Room one'), findsNothing);
+    backend.account = 'account-b';
+    backend.notifyListeners();
+    await tester.pumpWidget(room(backend, drafts, id: '!other:s'));
+    await tester.pumpAndSettle();
+    expect(find.text('Account B'), findsOneWidget);
+    expect(find.text('Room two'), findsNothing);
+  });
+
+  testWidgets(
+    'send joins pending draft hydration and clears after closed route',
+    (tester) async {
+      final backend = FeaturesBackend();
+      final drafts = Drafts()..readGate = Completer<String>();
+      await tester.pumpWidget(room(backend, drafts));
+      await tester.pump();
+      await tester.enterText(
+        find.byType(TextField).last,
+        'Accepted while loading',
+      );
+      final send = tester
+          .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+          .onSend('Accepted while loading', null);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(backend.queuedText, isNull);
+      drafts.readGate!.complete('Earlier persisted draft');
+      await send;
+      expect(backend.queuedText, 'Accepted while loading');
+      expect(drafts.values['account-a/$roomId'], '');
+    },
+  );
+
+  testWidgets('late draft read never overwrites new typing', (tester) async {
+    final drafts = Drafts()..readGate = Completer<String>();
+    await tester.pumpWidget(room(FeaturesBackend(), drafts));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).last, 'New typing');
+    drafts.readGate!.complete('Old storage');
+    await tester.pumpAndSettle();
+    expect(find.text('New typing'), findsOneWidget);
+    expect(find.text('Old storage'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('failed draft read cannot overwrite unread secure storage', (
+    tester,
+  ) async {
+    final drafts = Drafts()..failRead = true;
+    await tester.pumpWidget(room(FeaturesBackend(), drafts));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Do not overwrite');
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(drafts.writes, isEmpty);
+  });
+
+  testWidgets('queue acceptance clears the draft even after route close', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()..queueGate = Completer<void>();
+    final drafts = Drafts();
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Queue this');
+    final composer = tester.widget<RichMessageComposer>(
+      find.byType(RichMessageComposer),
+    );
+    final send = composer.onSend('Queue this', null);
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    backend.queueGate!.complete();
+    await send;
+    expect(drafts.values['account-a/$roomId'], '');
+    expect(backend.queuedText, 'Queue this');
+    expect(backend.lastMessage, isNull);
+  });
+
+  testWidgets(
+    'queued send captures reply and preserves a newer composer context',
+    (tester) async {
+      final backend = FeaturesBackend()
+        ..queueGate = Completer<void>()
+        ..entries = [
+          ChatEntry(
+            id: 'original',
+            sender: '@friend:s',
+            body: 'Original',
+            time: DateTime(2026),
+            mine: false,
+          ),
+        ];
+      final drafts = Drafts();
+      await tester.pumpWidget(room(backend, drafts));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Original'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Reply body');
+      final send = tester
+          .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+          .onSend('Reply body', null);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Cancel reply or edit'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).last, 'New message');
+      backend.queueGate!.complete();
+      await send;
+      await tester.pump();
+      expect(backend.queuedReply, 'original');
+      expect(find.text('New message'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('edits never replace the normal draft', (tester) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'mine',
+          sender: '@me:s',
+          body: 'Old text',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    final drafts = Drafts()..values['account-a/$roomId'] = 'Normal draft';
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Edit message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Edit message'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Edited text');
+    await tester.pump(const Duration(seconds: 1));
+    expect(drafts.values['account-a/$roomId'], 'Normal draft');
+    await tester.tap(find.byTooltip('Cancel reply or edit'));
+    await tester.pump();
+    expect(find.text('Normal draft'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('session replacement rejects late draft and send completion', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()..queueGate = Completer<void>();
+    final drafts = Drafts();
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Account A');
+    final send = tester
+        .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+        .onSend('Account A', null);
+    await tester.pump();
+    backend.account = 'account-b';
+    backend.notifyListeners();
+    backend.queueGate!.complete();
+    await send;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(drafts.values['account-b/$roomId'], isNull);
+    expect(drafts.writes, isNot(contains('')));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pending controls forward the exact transaction ID', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..outbox = [
+        PendingSend(
+          id: 'tx-stable',
+          roomId: roomId,
+          body: 'Failed body',
+          state: DeliveryState.failed,
+          createdAt: DateTime(2026),
+          error: 'Offline',
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    expect(backend.retried, 'tx-stable');
+    await tester.tap(find.text('Discard'));
+    await tester.pump();
+    expect(backend.discarded, 'tx-stable');
+    backend.outbox = [
+      PendingSend(
+        id: 'tx-upload',
+        roomId: roomId,
+        body: '',
+        fileName: 'clip.mp4',
+        state: DeliveryState.sending,
+        createdAt: DateTime(2026),
+        progress: .25,
+      ),
+    ];
+    backend.notifyListeners();
+    await tester.pump();
+    await tester.tap(find.text('Cancel'));
+    expect(backend.cancelled, 'tx-upload');
+  });
+
+  testWidgets(
+    'successful rich send clears UI and stored draft, not network retry',
+    (tester) async {
+      final backend = FeaturesBackend();
+      final drafts = Drafts();
+      await tester.pumpWidget(room(backend, drafts));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Accepted text');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pumpAndSettle();
+      expect(backend.queuedText, 'Accepted text');
+      expect(
+        tester
+            .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+            .controller
+            .text,
+        '',
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(drafts.values['account-a/$roomId'], '');
+      await tester.pumpWidget(room(backend, drafts));
+      await tester.pumpAndSettle();
+      expect(find.text('Accepted text'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'queued media captures caption and reply without legacy sending',
+    (tester) async {
+      final backend = FeaturesBackend()
+        ..entries = [
+          ChatEntry(
+            id: 'reply-target',
+            sender: '@a:s',
+            body: 'Reply here',
+            time: DateTime(2026),
+            mine: false,
+          ),
+        ];
+      await tester.pumpWidget(room(backend, Drafts()));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Reply here'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Photo caption');
+      final selection = MediaSelection(
+        bytes: Uint8List.fromList([1, 2, 3]),
+        name: 'photo.jpg',
+        mimeType: 'image/jpeg',
+      );
+      tester
+          .widget<TextField>(find.byType(TextField).last)
+          .contentInsertionConfiguration!
+          .onContentInserted(
+            KeyboardInsertedContent(
+              mimeType: selection.mimeType,
+              uri: 'content://keyboard/image',
+              data: selection.bytes,
+            ),
+          );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pumpAndSettle();
+      expect(backend.queuedMedia!.bytes, selection.bytes);
+      expect(backend.queuedReply, 'reply-target');
+      expect(backend.queuedText, 'Photo caption');
+      expect(backend.lastMessage, isNull);
+      expect(find.textContaining('Replying to'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'background flush and edit cancellation preserve ordinary draft',
+    (tester) async {
+      final drafts = Drafts();
+      await tester.pumpWidget(room(FeaturesBackend(), drafts));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'Background draft');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      expect(drafts.values['account-a/$roomId'], 'Background draft');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'favourites stay behind invites and a failed favourite lookup hides no room',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final backend = FeaturesBackend()
+        ..roomList = [
+          const ChatRoom(
+            id: '!first:s',
+            name: 'First',
+            preview: '',
+            lastActivity: null,
+          ),
+          const ChatRoom(
+            id: '!broken:s',
+            name: 'Broken projection',
+            preview: '',
+            lastActivity: null,
+          ),
+          const ChatRoom(
+            id: '!fav:s',
+            name: 'Favourite',
+            preview: '',
+            lastActivity: null,
+          ),
+          const ChatRoom(
+            id: '!invite:s',
+            name: 'Invitation',
+            preview: '',
+            lastActivity: null,
+            invited: true,
+          ),
+        ]
+        ..favouriteFailure = '!broken:s';
+      backend.favourites.add('!fav:s');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InboxScreen(
+            backend: backend,
+            palette: paletteFor(VisualTheme.ultraviolet),
+            style: VisualTheme.ultraviolet,
+            onThemeChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.text('Invitation')).dy,
+        lessThan(tester.getTopLeft(find.text('Favourite')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Favourite')).dy,
+        lessThan(tester.getTopLeft(find.text('First')).dy),
+      );
+      expect(find.text('Broken projection'), findsOneWidget);
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add favourite'));
+      await tester.pumpAndSettle();
+      expect(backend.favourites, contains('!first:s'));
+    },
+  );
+
+  testWidgets('failed send rooms remain reachable in unread filter', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..roomList = [
+        const ChatRoom(
+          id: roomId,
+          name: 'Failed room',
+          preview: '',
+          lastActivity: null,
+        ),
+        const ChatRoom(
+          id: '!quiet:s',
+          name: 'Quiet room',
+          preview: '',
+          lastActivity: null,
+        ),
+      ]
+      ..outbox = [
+        PendingSend(
+          id: 'same-tx',
+          roomId: roomId,
+          body: 'Unsent',
+          state: DeliveryState.failed,
+          createdAt: DateTime(2026),
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Unread'));
+    await tester.pump();
+    expect(find.text('Failed room'), findsOneWidget);
+    expect(find.text('Quiet room'), findsNothing);
+    expect(find.byTooltip('Message not sent'), findsOneWidget);
+  });
+
+  testWidgets(
+    'directory selection creates a DM and Spaces returns a room route',
+    (tester) async {
+      final backend = FeaturesBackend();
+      await tester.pumpWidget(
+        FeatureSettingsScope(
+          preferences: AppearancePreferences(),
+          draftStore: Drafts(),
+          child: MaterialApp(
+            home: InboxScreen(
+              backend: backend,
+              palette: paletteFor(VisualTheme.ultraviolet),
+              style: VisualTheme.ultraviolet,
+              onThemeChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Find people'));
+      await tester.pumpAndSettle();
+      expect(find.byType(UserDirectoryScreen), findsOneWidget);
+      Navigator.pop(
+        tester.element(find.byType(UserDirectoryScreen)),
+        '@selected:example.org',
+      );
+      await tester.pumpAndSettle();
+      expect(backend.directUser, '@selected:example.org');
+      expect(tester.widget<RoomScreen>(find.byType(RoomScreen)).roomId, roomId);
+      await tester.tap(find.byTooltip('Back to rooms'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Spaces'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SpaceBrowserScreen), findsOneWidget);
+      Navigator.pop(
+        tester.element(find.byType(SpaceBrowserScreen)),
+        '!space-room:s',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<RoomScreen>(find.byType(RoomScreen)).roomId,
+        '!space-room:s',
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('thread and receipt actions keep the selected event identity', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'selected-event',
+          sender: '@a:s',
+          body: 'Thread root',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Thread root'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Open thread'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Open thread'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<ThreadScreen>(find.byType(ThreadScreen)).root.id,
+      'selected-event',
+    );
+    Navigator.pop(tester.element(find.byType(ThreadScreen)));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Thread root'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Read receipts'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Read receipts'));
+    await tester.pumpAndSettle();
+    expect(backend.receiptEvent, 'selected-event');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets(
+    'preview preference prevents thumbnail fetch and image tap opens original',
+    (tester) async {
+      final preferences = AppearancePreferences();
+      await preferences.setAutoLoadMedia(false);
+      final backend = FeaturesBackend()
+        ..currentUserId = '@me:s'
+        ..entries = [
+          ChatEntry(
+            id: 'image-event',
+            sender: '@a:s',
+            body: 'photo.jpg',
+            time: DateTime(2026),
+            mine: false,
+            isImage: true,
+          ),
+        ];
+      await tester.pumpWidget(
+        room(backend, Drafts(), preferences: preferences),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(MessageImage), findsOneWidget);
+      expect(backend.imageLoads, 0);
+      await tester.tap(find.text('Tap to open image'));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<MediaViewer>(find.byType(MediaViewer)).eventId,
+        'image-event',
+      );
+      Navigator.pop(tester.element(find.byType(MediaViewer)));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Tap to open image'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reply'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'shared appearance preferences affect app text scale and settings route',
+    (tester) async {
+      final preferences = AppearancePreferences();
+      await preferences.setTextScale(1.3);
+      final backend = FeaturesBackend();
+      await tester.pumpWidget(
+        MatrixpressApp(
+          backend: backend,
+          preferences: preferences,
+          draftStore: Drafts(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        MediaQuery.textScalerOf(
+          tester.element(find.text('Messages')),
+        ).scale(20),
+        closeTo(20 * preferences.textScale, 0.001),
+      );
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Reading and media preferences'));
+      await tester.tap(find.text('Reading and media preferences'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<AppearanceSettingsScreen>(
+              find.byType(AppearanceSettingsScreen),
+            )
+            .preferences,
+        same(preferences),
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('compact preference changes the actual message layout', (
+    tester,
+  ) async {
+    final preferences = AppearancePreferences();
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'compact-event',
+          sender: '@a:s',
+          body: 'Compact message',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts(), preferences: preferences));
+    await tester.pumpAndSettle();
+    final normalHeight = tester
+        .getSize(find.byKey(const ValueKey('compact-event')))
+        .height;
+    await preferences.setCompact(true);
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const ValueKey('compact-event'))).height,
+      lessThan(normalHeight),
+    );
+  });
+
+  testWidgets('rejected queue acknowledgement keeps the rich draft for retry', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()..queueGate = Completer<void>();
+    final drafts = Drafts();
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Keep queued draft');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    backend.queueGate!.completeError(StateError('storage unavailable'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+          .controller
+          .text,
+      'Keep queued draft',
+    );
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(drafts.values['account-a/$roomId'], 'Keep queued draft');
+  });
+
+  testWidgets('queued edit preserves the normal draft and original edit ID', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'edit-id',
+          sender: '@me:s',
+          body: 'Edit original',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    final drafts = Drafts()..values['account-a/$roomId'] = 'Keep normal draft';
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Edit original'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Edit message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Edit message'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'New edit body');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(backend.queuedEdit, 'edit-id');
+    expect(backend.queuedText, 'New edit body');
+    expect(
+      tester
+          .widget<RichMessageComposer>(find.byType(RichMessageComposer))
+          .controller
+          .text,
+      'Keep normal draft',
+    );
+    expect(drafts.values['account-a/$roomId'], 'Keep normal draft');
+  });
+
+  for (final logout in [true, false]) {
+    testWidgets(
+      '${logout ? 'hard logout' : 'account replacement'} removes all decrypted routes',
+      (tester) async {
+        final backend = FeaturesBackend()
+          ..roomList = [
+            const ChatRoom(
+              id: roomId,
+              name: 'Private room',
+              preview: '',
+              lastActivity: null,
+            ),
+          ];
+        await tester.pumpWidget(
+          MatrixpressApp(
+            backend: backend,
+            preferences: AppearancePreferences(),
+            draftStore: Drafts(),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Private room'));
+        await tester.pumpAndSettle();
+        final context = tester.element(find.byType(RoomScreen));
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('Decrypted attachment')),
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (logout) {
+          backend.status = SessionStatus.signedOut;
+        } else {
+          backend.account = 'account-b';
+        }
+        backend.notifyListeners();
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Decrypted attachment', skipOffstage: false),
+          findsNothing,
+        );
+        expect(find.byType(RoomScreen, skipOffstage: false), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+}
