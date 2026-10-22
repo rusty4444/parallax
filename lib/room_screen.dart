@@ -156,29 +156,29 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       return;
     }
     final revision = _draftRevision;
-    final normalRevision = _normalRevision;
     try {
       final saved = await draftOwner.read(store) ?? '';
       if (!_owner.isCurrent || !draftOwner.isCurrent) return;
       _draftLoaded = true;
       _draftReadFailed = false;
-      // An outstanding send retains ownership past route disposal. It can now
-      // clear the accepted text without touching a disposed controller.
+      // Hydration (including a retry) never replaces a user-edited normal
+      // buffer. Keep the saved buffer available to detached flush/edit owners
+      // without accessing the controller after route disposal.
+      final restoreNormal = _normalRevision == 0;
+      if (restoreNormal) _normalDraft = saved;
       if (!mounted) return;
-      if (revision == _draftRevision && _editing == null) {
-        _normalDraft = saved;
+      if (restoreNormal && revision == _draftRevision && _editing == null) {
         if (_draft.text != saved) _draftRevision++;
         _setDraft(saved);
       } else if (_editing == null) {
         _draftDirty = true;
         _scheduleDraft();
-      } else if (normalRevision == _normalRevision) {
-        _normalDraft = saved;
       }
       setState(() {});
     } catch (_) {
-      if (mounted && _owner.isCurrent && draftOwner.isCurrent) {
-        setState(() => _draftReadFailed = true);
+      if (_owner.isCurrent && draftOwner.isCurrent) {
+        _draftReadFailed = true;
+        if (mounted) setState(() {});
       }
     }
   }
@@ -215,7 +215,27 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     });
   }
 
-  Future<void> _flushDraft({bool accepted = false}) async {
+  Future<void> _flushClosingDraft() async {
+    // State.dispose cannot await hydration. Capture the ordinary buffer now,
+    // and retain both owners through the read and its fenced storage write.
+    // A replacement route/session can revoke this work even for identical text.
+    final text = _normalDraft;
+    final edited = _normalRevision != 0;
+    final owner = _owner;
+    final draftOwner = _draftOwner;
+    owner.retain();
+    draftOwner?.retain();
+    try {
+      final loading = _draftLoading;
+      if (loading != null) await loading;
+      await _flushDraft(snapshot: edited ? text : null);
+    } finally {
+      draftOwner?.release();
+      owner.release();
+    }
+  }
+
+  Future<void> _flushDraft({bool accepted = false, String? snapshot}) async {
     _draftTimer?.cancel();
     final account = _owner.accountKey;
     final store = _draftStore;
@@ -233,7 +253,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     // Acceptance may remove the durable snapshot, but must not replace the
     // live buffer before the composer's acknowledgement. A context change
     // during this write can then re-persist even an identical visible body.
-    final text = accepted ? '' : _normalDraft;
+    final text = accepted ? '' : snapshot ?? _normalDraft;
     final revision = draftOwner.revision;
     _draftDirty = false;
     final owner = _owner;
@@ -374,7 +394,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _draftTimer?.cancel();
-    unawaited(_flushDraft());
+    unawaited(_flushClosingDraft());
     _draftOwner?.release();
     _typingStopTimer?.cancel();
     _stopTyping();
@@ -385,16 +405,29 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     super.dispose();
   }
 
-  Future<void> _send() => _sendContent(_draft.text, null);
+  Future<void> _send() async {
+    // Legacy button/submission callbacks have no acknowledgement consumer.
+    // The send boundary still rejects nonacceptance; consume only at this UI.
+    try {
+      await _sendContent(_draft.text, null);
+    } catch (_) {
+      // Owned send failures already show a snackbar in _sendContent.
+    }
+  }
 
   Future<void> _sendContent(String text, MediaSelection? media) async {
     final body = text.trim();
     if (!mounted ||
         !_owner.isCurrent ||
+        !(_draftOwner?.isCurrent ?? true) ||
         _sending ||
         widget.backend.sending ||
         (body.isEmpty && media == null)) {
-      return;
+      // A completed Future<void> means acceptance to RichMessageComposer.
+      // Busy, stale and empty submissions must never acknowledge its buffer.
+      throw StateError(
+        'Message not accepted: the room is busy or unavailable.',
+      );
     }
     if (_editing != null && media != null) {
       throw StateError('Attachments cannot replace a text edit.');
@@ -418,6 +451,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       // restore an already accepted outgoing message as a fresh draft.
       if (features != null && _draftLoading != null) await _draftLoading;
       if (!owner.isCurrent) throw StateError('This session has ended.');
+      if (backend.sending || !(draftOwner?.isCurrent ?? true)) {
+        throw StateError(
+          'Message not accepted: the room is busy or unavailable.',
+        );
+      }
       if (features != null) {
         if (media == null) {
           await features.queueMessage(
@@ -480,7 +518,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         _scheduleDraft();
       }
       // Reject acknowledgement so the rich composer retains staged media.
-      if (features != null) rethrow;
+      rethrow;
     } finally {
       if (mounted && _owner.isCurrent) setState(() => _sending = false);
       owner.release();
