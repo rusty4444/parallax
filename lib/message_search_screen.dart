@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'feature_settings_scope.dart';
 import 'widgets.dart';
 
 class MessageSearchScreen extends StatefulWidget {
@@ -20,6 +21,8 @@ class MessageSearchScreen extends StatefulWidget {
 }
 
 class _MessageSearchScreenState extends State<MessageSearchScreen> {
+  final _queryController = TextEditingController();
+  late BackendSessionOwner _owner;
   Timer? _debounce;
   int _generation = 0;
   String _query = '';
@@ -27,49 +30,97 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
   String? _error;
   bool _loading = false;
   bool _loadingMore = false;
+  bool _expired = false;
   List<MessageHit> _hits = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _bind();
+  }
+
+  void _bind() {
+    _owner = BackendSessionOwner(widget.backend);
+    widget.backend.addListener(_accountChanged);
+  }
+
+  bool _current(int generation) =>
+      mounted && generation == _generation && _owner.isCurrent;
+
+  void _resetSearch() {
+    _generation++;
+    _debounce?.cancel();
+    _queryController.clear();
+    _query = '';
+    _hits = const [];
+    _nextBatch = null;
+    _loading = false;
+    _loadingMore = false;
+    _error = null;
+  }
+
+  void _accountChanged() {
+    if (_expired || _owner.isCurrent) return;
+    setState(() {
+      _resetSearch();
+      _expired = true;
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant MessageSearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backend == widget.backend) return;
+    oldWidget.backend.removeListener(_accountChanged);
+    _owner.release();
+    _resetSearch();
+    _expired = false;
+    _bind();
+  }
 
   @override
   void dispose() {
     _generation++;
     _debounce?.cancel();
+    widget.backend.removeListener(_accountChanged);
+    _owner.release();
+    _queryController.dispose();
     super.dispose();
   }
 
   void _onChanged(String text) {
-    _query = text.trim();
+    if (_expired || !_owner.isCurrent) return;
+    final query = text.trim();
     final generation = ++_generation;
     _debounce?.cancel();
-    if (_query.length < 2) {
-      setState(() {
-        _hits = const [];
-        _nextBatch = null;
-        _loading = false;
-        _error = null;
-      });
-      return;
-    }
     setState(() {
-      _loading = true;
+      _query = query;
+      _hits = const [];
+      _nextBatch = null;
+      _loading = query.length >= 2;
+      // A retired page does not own the new query's pagination guard.
+      _loadingMore = false;
       _error = null;
     });
+    if (query.length < 2) return;
     _debounce = Timer(
       const Duration(milliseconds: 350),
-      () => _search(_query, generation),
+      () => _search(query, generation),
     );
   }
 
   Future<void> _search(String query, int generation) async {
+    if (!_current(generation)) return;
     try {
       final page = await widget.backend.searchMessages(query);
-      if (!mounted || generation != _generation) return;
+      if (!_current(generation)) return;
       setState(() {
         _hits = page.hits;
         _nextBatch = page.nextBatch;
         _loading = false;
       });
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (_current(generation)) {
         setState(() {
           _loading = false;
           _error = 'Couldn’t search messages on this server.';
@@ -80,15 +131,13 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
 
   Future<void> _more() async {
     final token = _nextBatch;
-    if (token == null || _loadingMore) return;
+    if (token == null || _loading || _loadingMore || !_owner.isCurrent) return;
     final generation = _generation;
+    final query = _query;
     setState(() => _loadingMore = true);
     try {
-      final page = await widget.backend.searchMessages(
-        _query,
-        nextBatch: token,
-      );
-      if (!mounted || generation != _generation) return;
+      final page = await widget.backend.searchMessages(query, nextBatch: token);
+      if (!_current(generation)) return;
       setState(() {
         final known = _hits.map((hit) => hit.id).toSet();
         _hits = [
@@ -99,19 +148,20 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
         _nextBatch = page.nextBatch;
       });
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (mounted && _current(generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Couldn’t load more matches.')),
         );
       }
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (_current(generation)) setState(() => _loadingMore = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
+    final generation = _generation;
     return Scaffold(
       body: GlowBackdrop(
         palette: p,
@@ -149,6 +199,8 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
                     Eyebrow('Across joined rooms', palette: p),
                     const SizedBox(height: 8),
                     TextField(
+                      controller: _queryController,
+                      enabled: !_expired,
                       onChanged: _onChanged,
                       decoration: const InputDecoration(
                         hintText: 'Search message text',
@@ -169,7 +221,14 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
                 ),
               ),
               Expanded(
-                child: _loading
+                child: _expired
+                    ? Center(
+                        child: Text(
+                          'Account changed. Reopen message search.',
+                          style: TextStyle(color: p.muted),
+                        ),
+                      )
+                    : _loading
                     ? Center(child: CircularProgressIndicator(color: p.accent))
                     : _error != null
                     ? Center(
@@ -204,7 +263,11 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
                             margin: const EdgeInsets.only(bottom: 9),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
-                              onTap: () => Navigator.pop(context, hit.roomId),
+                              onTap: () {
+                                if (_current(generation)) {
+                                  Navigator.pop(context, hit.roomId);
+                                }
+                              },
                               child: Padding(
                                 padding: const EdgeInsets.all(16),
                                 child: Column(
