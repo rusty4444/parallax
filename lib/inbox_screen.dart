@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'created_room_wait.dart';
+import 'room_creation_request.dart';
 import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
 import 'messaging_features.dart';
@@ -33,6 +34,23 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> {
   late final _owner = BackendSessionOwner(widget.backend);
+  late final _creation = RoomCreationRequest.forBackend(widget.backend);
+
+  @override
+  void initState() {
+    super.initState();
+    _creation.addListener(_creationChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _creationChanged());
+  }
+
+  void _creationChanged() {
+    if (!mounted || !_owner.isCurrent) return;
+    setState(() {});
+    if (_createdRoomId != null && ModalRoute.of(context)?.isCurrent == true) {
+      _openCreatedRoom();
+    }
+  }
+
   MessagingFeatures? get _features => widget.backend is MessagingFeatures
       ? widget.backend as MessagingFeatures
       : null;
@@ -40,6 +58,7 @@ class _InboxScreenState extends State<InboxScreen> {
   @override
   void dispose() {
     _createdRoomWait?.cancel();
+    _creation.detach(_creationChanged);
     _owner.release();
     super.dispose();
   }
@@ -57,7 +76,7 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _invitesOnly = false;
   String? _pendingRoomAction;
   bool _creatingRoom = false;
-  String? _createdRoomId;
+  String? get _createdRoomId => _creation.roomId;
   CreatedRoomWait? _createdRoomWait;
   bool _waitingForCreatedRoom = false;
 
@@ -285,7 +304,7 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   Future<void> _createRoom() async {
-    if (_creatingRoom || _createdRoomId != null || !_owner.isCurrent) return;
+    if (_creatingRoom || _creation.active || !_owner.isCurrent) return;
     setState(() => _creatingRoom = true);
     try {
       final choice = await showDialog<(String, bool)>(
@@ -293,13 +312,7 @@ class _InboxScreenState extends State<InboxScreen> {
         builder: (_) => const _CreateRoomDialog(),
       );
       if (!mounted || !_owner.isCurrent || choice == null) return;
-      final roomId = await widget.backend.createRoom(
-        choice.$1,
-        encrypted: choice.$2,
-      );
-      if (!mounted || !_owner.isCurrent) return;
-      setState(() => _createdRoomId = roomId);
-      await _openCreatedRoom();
+      _creation.start(choice.$1, encrypted: choice.$2);
     } catch (_) {
       if (mounted && _owner.isCurrent) {
         _showError(
@@ -325,7 +338,10 @@ class _InboxScreenState extends State<InboxScreen> {
       final ready = await wait.result;
       if (!mounted || !_owner.isCurrent) return;
       if (ready) {
-        setState(() => _createdRoomId = null);
+        // A user may have opened settings/another room while sync was pending.
+        // Keep the acknowledged ID rather than navigating above that route.
+        if (ModalRoute.of(context)?.isCurrent != true) return;
+        setState(() => _creation.acknowledgeOpened(roomId));
         _open(roomId);
       } else {
         _showError(
@@ -487,7 +503,7 @@ class _InboxScreenState extends State<InboxScreen> {
                         ),
                         IconButton(
                           tooltip: 'Create room',
-                          onPressed: _creatingRoom || _createdRoomId != null
+                          onPressed: _creatingRoom || _creation.active
                               ? null
                               : _createRoom,
                           icon: const Icon(Icons.add_home_work_outlined),
@@ -516,6 +532,22 @@ class _InboxScreenState extends State<InboxScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Eyebrow('The good stuff', palette: p),
+                        if (_creation.active &&
+                            _createdRoomId == null &&
+                            _owner.isCurrent)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              _creation.uncertain
+                                  ? 'Room creation not confirmed'
+                                  : 'Waiting for room acknowledgement…',
+                            ),
+                            subtitle: const Text(
+                              'The request may already have created a room. '
+                              'Check the inbox; no second request will be sent. '
+                              'A late acknowledgement will be retained.',
+                            ),
+                          ),
                         if (_createdRoomId != null && _owner.isCurrent)
                           ListTile(
                             contentPadding: EdgeInsets.zero,

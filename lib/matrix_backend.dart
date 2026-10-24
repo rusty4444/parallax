@@ -1362,6 +1362,7 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
     if (encrypted && !client.encryptionEnabled) {
       throw StateError('Encryption is unavailable');
     }
+    final generation = _securityGeneration;
     // Always pass the choice explicitly: the SDK otherwise decides whether to
     // encrypt a private room based on the client configuration.
     final roomId = await client.createGroupChat(
@@ -1375,6 +1376,7 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
     );
     if (_disposed ||
         _loggingOut ||
+        generation != _securityGeneration ||
         !identical(_client, client) ||
         client.userID != userId ||
         client.deviceID != deviceId ||

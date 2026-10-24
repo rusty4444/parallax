@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Private room creation with an explicit encryption choice, enabled by default.
+- Bounded visible acknowledgement and sync waits. A missing acknowledgement becomes uncertain after ten seconds without cancelling or replacing the original request. Session-owned request/room-ID retention survives inbox disposal; late acknowledgement cannot navigate an expired session. Ambiguous transport failures keep creation blocked rather than risking duplicate POSTs. This ownership is not persisted across process restart; use ordinary sync to check for a room before creating again.
+- Deterministic SDK transport/widget coverage holds response headers, releases late acknowledgements, and exercises route disposal, account replacement and same-account logout/login. These are not live Android/two-client interoperability results.
+
 ## 0.3.0 — messaging expansion preview
 
 ### Added

@@ -23,6 +23,119 @@ const createdRoom = ChatRoom(
 );
 
 void main() {
+  test(
+    'SDK held headers outlive a zero body timeout and acknowledge late',
+    () async {
+      final transport = _HeldHeadersTransport();
+      final backend = MatrixBackend.withClient(_Client(transport));
+      addTearDown(backend.dispose);
+      addTearDown(transport.acknowledge);
+      var settled = false;
+      final request = backend.createRoom('Name', encrypted: false);
+      final observed = request.then((id) {
+        settled = true;
+        return id;
+      });
+      await transport.started.future;
+      // Allow zero-duration timers to fire, without a wall-clock sleep. The SDK's
+      // body timeout cannot begin until send() supplies the response headers.
+      await Future<void>(() {});
+      expect(settled, isFalse);
+      expect(transport.creates, 1);
+      transport.acknowledge();
+      expect(await observed.timeout(const Duration(seconds: 1)), createdId);
+      expect(transport.creates, 1);
+    },
+  );
+
+  testWidgets(
+    'held acknowledgement becomes visibly uncertain and late acknowledgement uses one POST',
+    (tester) async {
+      final backend = _HeldAcknowledgementBackend();
+      addTearDown(backend.transport.acknowledge);
+      await _startCreation(tester, backend);
+      expect(backend.transport.creates, 1);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(find.text('Room creation not confirmed'), findsOneWidget);
+      expect(_createButton(tester).onPressed, isNull);
+      expect(backend.activeRoomId, isNull);
+      backend.transport.acknowledge();
+      await tester.pumpAndSettle();
+      expect(find.text(createdId), findsOneWidget);
+      backend.roomList.add(createdRoom);
+      backend.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(backend.activeRoomId, createdId);
+      expect(backend.transport.creates, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'pending headers survive route disposal without duplicate create',
+    (tester) async {
+      final backend = _HeldAcknowledgementBackend();
+      addTearDown(backend.transport.acknowledge);
+      await _startCreation(tester, backend);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      backend.transport.acknowledge();
+      await tester.pump();
+      expect(backend.activeRoomId, isNull);
+      await _mountInbox(tester, backend);
+      await tester.pumpAndSettle();
+      expect(find.text(createdId), findsOneWidget);
+      expect(_createButton(tester).onPressed, isNull);
+      backend.roomList.add(createdRoom);
+      backend.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(backend.activeRoomId, createdId);
+      expect(backend.transport.creates, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final change in ['account replacement', 'same-account logout/login']) {
+    testWidgets('late headers are ignored after $change', (tester) async {
+      final backend = _HeldAcknowledgementBackend()
+        ..currentUserId = '@alice:example.org';
+      addTearDown(backend.transport.acknowledge);
+      await _startCreation(tester, backend);
+      await tester.pump(const Duration(seconds: 11));
+      if (change == 'account replacement') {
+        backend.currentUserId = '@bob:example.org';
+        backend.notifyListeners();
+      } else {
+        backend.status = SessionStatus.signedOut;
+        backend.notifyListeners();
+        backend.status = SessionStatus.ready;
+        backend.notifyListeners();
+      }
+      backend.transport.acknowledge();
+      backend.roomList.add(createdRoom);
+      backend.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(backend.activeRoomId, isNull);
+      expect(find.text(createdId), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('ambiguous transport failure never enables another POST', (
+    tester,
+  ) async {
+    final backend = _HeldAcknowledgementBackend();
+    await _startCreation(tester, backend);
+    backend.transport.headers.completeError(StateError('connection lost'));
+    await tester.pumpAndSettle();
+    expect(find.text('Room creation not confirmed'), findsOneWidget);
+    expect(_createButton(tester).onPressed, isNull);
+    expect(backend.transport.creates, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final encrypted in [true, false]) {
     test(
       'SDK creates explicit encrypted=$encrypted room without waiting for sync',
@@ -204,7 +317,8 @@ void main() {
     await _startCreation(tester, backend);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
-    expect(backend.hasActiveListeners, isFalse);
+    // Only the session-owned create record remains, not the route/sync wait.
+    expect(backend.listenerCount, 1);
     backend.roomList.add(createdRoom);
     backend.notifyListeners();
     await tester.pump();
@@ -227,10 +341,23 @@ void main() {
   });
 }
 
-Future<void> _startCreation(
-  WidgetTester tester,
-  _DelayedBackend backend,
-) async {
+Future<void> _startCreation(WidgetTester tester, ChatBackend backend) async {
+  await _mountInbox(tester, backend);
+  await tester.tap(find.byTooltip('Create room'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField).last, 'Created group');
+  await tester.pump();
+  await tester.tap(find.text('Create'));
+  await tester.pumpAndSettle();
+}
+
+IconButton _createButton(WidgetTester tester) => tester.widget<IconButton>(
+  find.byWidgetPredicate(
+    (widget) => widget is IconButton && widget.tooltip == 'Create room',
+  ),
+);
+
+Future<void> _mountInbox(WidgetTester tester, ChatBackend backend) async {
   await tester.pumpWidget(
     MaterialApp(
       home: InboxScreen(
@@ -241,16 +368,67 @@ Future<void> _startCreation(
       ),
     ),
   );
-  await tester.tap(find.byTooltip('Create room'));
-  await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField).last, 'Created group');
-  await tester.pump();
-  await tester.tap(find.text('Create'));
-  await tester.pumpAndSettle();
 }
 
 class _ListeningBackend extends FakeBackend {
   bool get hasActiveListeners => hasListeners;
+  int listenerCount = 0;
+  @override
+  void addListener(VoidCallback listener) {
+    listenerCount++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    listenerCount--;
+    super.removeListener(listener);
+  }
+}
+
+class _HeldAcknowledgementBackend extends _ListeningBackend {
+  final transport = _HeldAcknowledgement();
+  SessionStatus status = SessionStatus.ready;
+  @override
+  SessionStatus get connection => status;
+  @override
+  Future<String> createRoom(String name, {required bool encrypted}) {
+    transport.creates++;
+    return transport.headers.future;
+  }
+}
+
+class _HeldAcknowledgement {
+  final headers = Completer<String>();
+  int creates = 0;
+  void acknowledge() {
+    if (!headers.isCompleted) headers.complete(createdId);
+  }
+}
+
+class _HeldHeadersTransport extends http.BaseClient {
+  final headers = Completer<http.StreamedResponse>();
+  final started = Completer<void>();
+  int creates = 0;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    expect(request.url.path, '/_matrix/client/v3/createRoom');
+    creates++;
+    started.complete();
+    return headers.future; // No headers: SDK body-stream timeout cannot start.
+  }
+
+  void acknowledge() {
+    if (!headers.isCompleted) {
+      headers.complete(
+        http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode({'room_id': createdId}))),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+    }
+  }
 }
 
 class _DelayedBackend extends _ListeningBackend {
@@ -266,7 +444,12 @@ class _Database extends Fake implements matrix.DatabaseApi {}
 
 class _Client extends matrix.Client {
   _Client(http.Client transport)
-    : super('room-creation', database: _Database(), httpClient: transport) {
+    : super(
+        'room-creation',
+        database: _Database(),
+        httpClient: transport,
+        defaultNetworkRequestTimeout: Duration.zero,
+      ) {
     homeserver = Uri.parse('https://matrix.example');
     accessToken = 'test-token';
   }
