@@ -9,6 +9,25 @@ enum RoomSyncState { loading, ready, error }
 
 enum RoomSyncIssue { network, homeserver, processing }
 
+enum RoomCreationFailureKind { notSubmitted, rejected }
+
+/// Definitive evidence that this attempt did not create a room. Other errors
+/// do not prove non-delivery and must not release non-idempotent admission.
+@immutable
+class RoomCreationFailure implements Exception {
+  const RoomCreationFailure.notSubmitted(this.message)
+    : kind = RoomCreationFailureKind.notSubmitted;
+
+  const RoomCreationFailure.rejected()
+    : kind = RoomCreationFailureKind.rejected,
+      message =
+          'The server rejected this room request. '
+          'Check your settings or permissions, then try again.';
+
+  final RoomCreationFailureKind kind;
+  final String message;
+}
+
 enum VerificationStage { accept, waiting, choose, compare, secret, done, error }
 
 @immutable
@@ -294,6 +313,9 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> redactMessage(String roomId, String eventId);
   Future<void> setTyping(String roomId, bool typing);
   Future<void> createDirectChat(String userId);
+
+  /// Throws [RoomCreationFailure] only for definite non-creation; any other
+  /// failure leaves delivery uncertain and must not be automatically retried.
   Future<String> createRoom(String name, {required bool encrypted});
   Future<void> acceptInvite(String roomId);
   Future<void> declineInvite(String roomId);

@@ -11,6 +11,7 @@ import 'package:matrixpress/chat_backend.dart';
 import 'package:matrixpress/created_room_wait.dart';
 import 'package:matrixpress/inbox_screen.dart';
 import 'package:matrixpress/matrix_backend.dart';
+import 'package:matrixpress/room_creation_request.dart';
 
 import 'widget_test.dart' show FakeBackend;
 
@@ -23,11 +24,136 @@ const createdRoom = ChatRoom(
 );
 
 void main() {
+  testWidgets(
+    'unavailable default encryption releases admission for corrected unencrypted create',
+    (tester) async {
+      var posts = 0;
+      final client = _Client(
+        MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/_matrix/client/v3/createRoom');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['name'], 'Corrected group');
+          expect(body['initial_state'] ?? [], isEmpty);
+          posts++;
+          return http.Response(jsonEncode({'room_id': createdId}), 200);
+        }),
+      )..cryptoAvailable = false;
+      final sdkBackend = MatrixBackend.withClient(client);
+      addTearDown(sdkBackend.dispose);
+      final backend = _SdkCreationBackend(sdkBackend);
+      await _startCreation(tester, backend);
+      expect(posts, 0);
+      expect(find.text('Room not created'), findsOneWidget);
+      expect(find.textContaining('Encryption is unavailable'), findsOneWidget);
+      expect(find.text('Room creation not confirmed'), findsNothing);
+      expect(_createButton(tester).onPressed, isNotNull);
+      final creation = RoomCreationRequest.forBackend(backend);
+      expect(creation.active, isFalse);
+      expect(creation.originalRequest, isNull);
+      expect(creation.uncertain, isFalse);
+      expect(creation.failure?.kind, RoomCreationFailureKind.notSubmitted);
+      await _submitCreation(tester, name: 'Corrected group', encrypted: false);
+      await _settleSdkCreation(tester, backend);
+      expect(RoomCreationRequest.forBackend(backend), same(creation));
+      expect(posts, 1);
+      expect(find.text('Room not created'), findsNothing);
+      expect(find.text(createdId), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'explicit Matrix rejection permits a corrected same-session create',
+    (tester) async {
+      var posts = 0;
+      final sdkBackend = MatrixBackend.withClient(
+        _Client(
+          MockClient((request) async {
+            expect(request.method, 'POST');
+            expect(request.url.path, '/_matrix/client/v3/createRoom');
+            posts++;
+            if (posts == 1) {
+              return http.Response(
+                jsonEncode({
+                  'errcode': 'M_FORBIDDEN',
+                  'error': 'Server details must not be displayed',
+                }),
+                403,
+              );
+            }
+            expect(
+              (jsonDecode(request.body) as Map)['name'],
+              'Corrected group',
+            );
+            return http.Response(jsonEncode({'room_id': createdId}), 200);
+          }),
+        ),
+      );
+      addTearDown(sdkBackend.dispose);
+      final backend = _SdkCreationBackend(sdkBackend);
+      await _startCreation(tester, backend);
+      expect(posts, 1);
+      await _settleSdkCreation(tester, backend);
+      expect(find.text('Room not created'), findsOneWidget);
+      expect(find.textContaining('server rejected'), findsOneWidget);
+      expect(find.textContaining('Server details'), findsNothing);
+      expect(_createButton(tester).onPressed, isNotNull);
+      final creation = RoomCreationRequest.forBackend(backend);
+      expect(creation.originalRequest, isNull);
+      expect(creation.uncertain, isFalse);
+      expect(creation.failure?.kind, RoomCreationFailureKind.rejected);
+      await _submitCreation(tester, name: 'Corrected group');
+      await _settleSdkCreation(tester, backend);
+      expect(RoomCreationRequest.forBackend(backend), same(creation));
+      expect(posts, 2);
+      expect(find.text(createdId), findsOneWidget);
+      expect(find.text('Room not created'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('unknown server failure retains the original uncertain request', (
+    tester,
+  ) async {
+    var posts = 0;
+    final sdkBackend = MatrixBackend.withClient(
+      _Client(
+        MockClient((_) async {
+          posts++;
+          return http.Response(
+            jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'failed'}),
+            500,
+          );
+        }),
+      ),
+    );
+    addTearDown(sdkBackend.dispose);
+    final backend = _SdkCreationBackend(sdkBackend);
+    await _startCreation(tester, backend);
+    final creation = RoomCreationRequest.forBackend(backend);
+    final original = creation.originalRequest;
+    expect(original, isNotNull);
+    await _settleSdkCreation(tester, backend);
+    expect(creation.active, isTrue);
+    expect(creation.uncertain, isTrue);
+    expect(find.text('Room creation not confirmed'), findsOneWidget);
+    expect(find.text('Room not created'), findsNothing);
+    creation.start('Do not resend', encrypted: false);
+    await tester.pumpAndSettle();
+    expect(creation.originalRequest, same(original));
+    expect(_createButton(tester).onPressed, isNull);
+    expect(posts, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   test(
     'SDK held headers outlive a zero body timeout and acknowledge late',
     () async {
       final transport = _HeldHeadersTransport();
-      final backend = MatrixBackend.withClient(_Client(transport));
+      final backend = MatrixBackend.withClient(
+        _Client(transport, timeout: Duration.zero),
+      );
       addTearDown(backend.dispose);
       addTearDown(transport.acknowledge);
       var settled = false;
@@ -55,8 +181,11 @@ void main() {
       addTearDown(backend.transport.acknowledge);
       await _startCreation(tester, backend);
       expect(backend.transport.creates, 1);
+      final creation = RoomCreationRequest.forBackend(backend);
+      final original = creation.originalRequest;
       await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
+      expect(creation.originalRequest, same(original));
       expect(find.text('Room creation not confirmed'), findsOneWidget);
       expect(_createButton(tester).onPressed, isNull);
       expect(backend.activeRoomId, isNull);
@@ -128,8 +257,13 @@ void main() {
   ) async {
     final backend = _HeldAcknowledgementBackend();
     await _startCreation(tester, backend);
+    final creation = RoomCreationRequest.forBackend(backend);
+    final original = creation.originalRequest;
     backend.transport.headers.completeError(StateError('connection lost'));
     await tester.pumpAndSettle();
+    expect(creation.originalRequest, same(original));
+    expect(creation.failure, isNull);
+    creation.start('Do not resend', encrypted: false);
     expect(find.text('Room creation not confirmed'), findsOneWidget);
     expect(_createButton(tester).onPressed, isNull);
     expect(backend.transport.creates, 1);
@@ -184,17 +318,35 @@ void main() {
       )..cryptoAvailable = false;
       final backend = MatrixBackend.withClient(client);
       addTearDown(backend.dispose);
+      final notSubmitted = throwsA(
+        isA<RoomCreationFailure>().having(
+          (failure) => failure.kind,
+          'kind',
+          RoomCreationFailureKind.notSubmitted,
+        ),
+      );
       await expectLater(
         backend.createRoom('Name', encrypted: true),
-        throwsStateError,
+        notSubmitted,
       );
       await expectLater(
         backend.createRoom(' ', encrypted: false),
-        throwsArgumentError,
+        notSubmitted,
       );
       await expectLater(
         backend.createRoom('a' * 256, encrypted: false),
-        throwsArgumentError,
+        notSubmitted,
+      );
+      client.accessToken = null;
+      await expectLater(
+        backend.createRoom('Name', encrypted: false),
+        notSubmitted,
+      );
+      final missingClient = MatrixBackend();
+      addTearDown(missingClient.dispose);
+      await expectLater(
+        missingClient.createRoom('Name', encrypted: false),
+        notSubmitted,
       );
       expect(requests, 0);
     },
@@ -228,6 +380,37 @@ void main() {
       expect(backend.activeRoomId, isNull);
     });
   }
+
+  testWidgets('post-create session StateError does not prove non-creation', (
+    tester,
+  ) async {
+    final response = Completer<http.Response>();
+    var posts = 0;
+    final client = _Client(
+      MockClient((_) {
+        posts++;
+        return response.future;
+      }),
+    );
+    final sdkBackend = MatrixBackend.withClient(client);
+    addTearDown(sdkBackend.dispose);
+    final backend = _SdkCreationBackend(sdkBackend);
+    await _startCreation(tester, backend);
+    final creation = RoomCreationRequest.forBackend(backend);
+    final original = creation.originalRequest;
+    client.currentDevice = 'OTHER';
+    response.complete(http.Response(jsonEncode({'room_id': createdId}), 200));
+    await _settleSdkCreation(tester, backend);
+    expect(creation.originalRequest, same(original));
+    expect(creation.active, isTrue);
+    expect(creation.uncertain, isTrue);
+    expect(creation.failure, isNull);
+    expect(find.text('Room creation not confirmed'), findsOneWidget);
+    expect(_createButton(tester).onPressed, isNull);
+    creation.start('Do not resend', encrypted: false);
+    expect(posts, 1);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('sync wait times out, cancels and does not retain listeners', (
     tester,
@@ -341,11 +524,39 @@ void main() {
   });
 }
 
+Future<void> _settleSdkCreation(
+  WidgetTester tester,
+  ChatBackend backend,
+) async {
+  final original = RoomCreationRequest.forBackend(backend).originalRequest;
+  var settled = original == null;
+  original?.then<void>(
+    (_) => settled = true,
+    onError: (Object _, StackTrace _) => settled = true,
+  );
+  // Drain both real stream events and the widget scheduler without sleeps.
+  for (var i = 0; i < 20 && !settled; i++) {
+    await tester.runAsync(() => Future<void>(() {}));
+    await tester.pump(const Duration(milliseconds: 1));
+  }
+  expect(settled, isTrue);
+  await tester.pumpAndSettle();
+}
+
 Future<void> _startCreation(WidgetTester tester, ChatBackend backend) async {
   await _mountInbox(tester, backend);
+  await _submitCreation(tester);
+}
+
+Future<void> _submitCreation(
+  WidgetTester tester, {
+  String name = 'Created group',
+  bool encrypted = true,
+}) async {
   await tester.tap(find.byTooltip('Create room'));
   await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField).last, 'Created group');
+  await tester.enterText(find.byType(TextField).last, name);
+  if (!encrypted) await tester.tap(find.text('Encrypted room'));
   await tester.pump();
   await tester.tap(find.text('Create'));
   await tester.pumpAndSettle();
@@ -384,6 +595,15 @@ class _ListeningBackend extends FakeBackend {
     listenerCount--;
     super.removeListener(listener);
   }
+}
+
+// Keep inbox sync presentation ready while exercising the real SDK create path.
+class _SdkCreationBackend extends _ListeningBackend {
+  _SdkCreationBackend(this.sdkBackend);
+  final MatrixBackend sdkBackend;
+  @override
+  Future<String> createRoom(String name, {required bool encrypted}) =>
+      sdkBackend.createRoom(name, encrypted: encrypted);
 }
 
 class _HeldAcknowledgementBackend extends _ListeningBackend {
@@ -443,13 +663,15 @@ class _DelayedBackend extends _ListeningBackend {
 class _Database extends Fake implements matrix.DatabaseApi {}
 
 class _Client extends matrix.Client {
-  _Client(http.Client transport)
-    : super(
-        'room-creation',
-        database: _Database(),
-        httpClient: transport,
-        defaultNetworkRequestTimeout: Duration.zero,
-      ) {
+  _Client(
+    http.Client transport, {
+    Duration timeout = const Duration(seconds: 35),
+  }) : super(
+         'room-creation',
+         database: _Database(),
+         httpClient: transport,
+         defaultNetworkRequestTimeout: timeout,
+       ) {
     homeserver = Uri.parse('https://matrix.example');
     accessToken = 'test-token';
   }

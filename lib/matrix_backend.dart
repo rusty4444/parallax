@@ -1351,29 +1351,67 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
   Future<String> createRoom(String name, {required bool encrypted}) async {
     final value = name.trim();
     if (value.isEmpty || value.length > 255) {
-      throw ArgumentError('Room name must be between 1 and 255 characters');
+      throw const RoomCreationFailure.notSubmitted(
+        'Room name must be between 1 and 255 characters. Try again.',
+      );
     }
-    final client = _requireClient();
-    if (_disposed || _loggingOut || !client.isLogged()) {
-      throw StateError('Sign in first');
+    final client = _client;
+    if (client == null ||
+        _connection == SessionStatus.offline ||
+        _disposed ||
+        _loggingOut ||
+        !client.isLogged()) {
+      throw const RoomCreationFailure.notSubmitted(
+        'Sign in and connect before creating a room, then try again.',
+      );
     }
     final userId = client.userID;
     final deviceId = client.deviceID;
     if (encrypted && !client.encryptionEnabled) {
-      throw StateError('Encryption is unavailable');
+      throw const RoomCreationFailure.notSubmitted(
+        'Encryption is unavailable. Set up encryption or explicitly turn off '
+        'Encrypted room, then try again.',
+      );
     }
     final generation = _securityGeneration;
     // Always pass the choice explicitly: the SDK otherwise decides whether to
     // encrypt a private room based on the client configuration.
-    final roomId = await client.createGroupChat(
-      groupName: value,
-      preset: matrix.CreateRoomPreset.privateChat,
-      enableEncryption: encrypted,
-      // Keep the acknowledged ID even if the subsequent sync stalls. The UI
-      // reconciles that ID with a bounded, cancellable wait instead of creating
-      // a second room when sync cannot finish.
-      waitForSync: false,
-    );
+    late final String roomId;
+    try {
+      roomId = await client.createGroupChat(
+        groupName: value,
+        preset: matrix.CreateRoomPreset.privateChat,
+        enableEncryption: encrypted,
+        // Keep the acknowledged ID even if the subsequent sync stalls. The UI
+        // reconciles that ID with a bounded, cancellable wait instead of creating
+        // a second room when sync cannot finish.
+        waitForSync: false,
+      );
+    } on matrix.MatrixException catch (error) {
+      // The SDK does not retain the HTTP status on generated API errors.
+      // Only explicit refusal codes prove non-creation; M_UNKNOWN, generic
+      // server errors, malformed replies and transport failures stay uncertain.
+      if (!const {
+        'M_FORBIDDEN',
+        'M_UNAUTHORIZED',
+        'M_UNKNOWN_TOKEN',
+        'M_MISSING_TOKEN',
+        'M_USER_DEACTIVATED',
+        'M_GUEST_ACCESS_FORBIDDEN',
+        'M_LIMIT_EXCEEDED',
+        'M_RESOURCE_LIMIT_EXCEEDED',
+        'M_BAD_JSON',
+        'M_NOT_JSON',
+        'M_MISSING_PARAM',
+        'M_INVALID_PARAM',
+        'M_UNSUPPORTED_ROOM_VERSION',
+        'M_ROOM_IN_USE',
+        'M_EXCLUSIVE',
+      }.contains(error.errcode)) {
+        rethrow;
+      }
+      throw const RoomCreationFailure.rejected();
+    }
     if (_disposed ||
         _loggingOut ||
         generation != _securityGeneration ||

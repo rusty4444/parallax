@@ -6,7 +6,8 @@ import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 
 /// Session-owned, non-idempotent POST. A visible deadline is NOT cancellation.
-/// Keep the original future and admission lock across inbox route disposal.
+/// Pending/uncertain requests retain their future and lock across route disposal.
+/// Only a typed definite non-creation failure permits a corrected submission.
 class RoomCreationRequest extends ChangeNotifier {
   RoomCreationRequest._(this.backend) : _owner = BackendSessionOwner(backend);
 
@@ -24,6 +25,7 @@ class RoomCreationRequest extends ChangeNotifier {
   Timer? _timer;
   Future<String>? originalRequest;
   String? roomId;
+  RoomCreationFailure? failure;
   bool uncertain = false;
   bool _retired = false;
 
@@ -31,6 +33,8 @@ class RoomCreationRequest extends ChangeNotifier {
 
   void start(String name, {required bool encrypted}) {
     if (active || !_owner.isCurrent || _retired) return;
+    failure = null;
+    uncertain = false;
     // Future.sync also observes synchronous admission/validation failures.
     originalRequest = Future.sync(
       () => backend.createRoom(name, encrypted: encrypted),
@@ -48,9 +52,16 @@ class RoomCreationRequest extends ChangeNotifier {
         uncertain = false;
         notifyListeners();
       },
-      onError: (Object _, StackTrace _) {
+      onError: (Object error, StackTrace _) {
         _timer?.cancel();
         if (_retired || !_owner.isCurrent) return;
+        if (error is RoomCreationFailure) {
+          originalRequest = null;
+          failure = error;
+          uncertain = false;
+          notifyListeners();
+          return;
+        }
         // A transport failure can happen after delivery. Without an ID there
         // is no safe correlation/retry for createRoom; never issue another POST.
         uncertain = true;

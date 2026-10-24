@@ -532,6 +532,12 @@ class _InboxScreenState extends State<InboxScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Eyebrow('The good stuff', palette: p),
+                        if (_creation.failure != null && _owner.isCurrent)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Room not created'),
+                            subtitle: Text(_creation.failure!.message),
+                          ),
                         if (_creation.active &&
                             _createdRoomId == null &&
                             _owner.isCurrent)
