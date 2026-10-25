@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Bound Space child-room and directory join waits to 30 seconds with explicit stop/check-again controls, session-owned acknowledgement retention and processed-membership recovery. Cancelling a wait does not undo a server join; uncertain requests are not automatically repeated in the same session. Records do not survive process restart.
+- This is one prerequisite for issue #5, not Space graph administration or live Element X acceptance. Invitation acceptance remains a separate SDK flow.
+
 ## 0.3.0 — messaging expansion preview
 
 ### Added

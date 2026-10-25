@@ -26,6 +26,7 @@ import 'message_text.dart';
 import 'recipient_trust.dart';
 import 'reaction_summary.dart';
 import 'room_details.dart';
+import 'room_join.dart';
 import 'safe_matrix_database.dart';
 import 'matrix_auth_service.dart';
 import 'matrix_room_features.dart';
@@ -37,7 +38,8 @@ import 'secure_store.dart';
 import 'send_cancellation.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
-class MatrixBackend extends ChatBackend implements MessagingFeatures {
+class MatrixBackend extends ChatBackend
+    implements MessagingFeatures, RecoverableRoomJoining {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     this.localStorage,
@@ -1521,17 +1523,38 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
     );
   }
 
-  @override
-  Future<String> joinPublicRoom(String roomId) async {
+  RoomJoinOwner? _roomJoins;
+  int _joinSessionGeneration = 0;
+
+  RoomJoinOwner _joinOwner() {
     final client = _requireClient();
-    if (client.getRoomById(roomId)?.membership == matrix.Membership.join) {
-      return roomId;
-    }
-    final joinedId = await client.joinRoomById(roomId);
-    await client.waitForRoomInSync(joinedId, join: true);
-    _scheduleRoomUpdate();
-    return joinedId;
+    final existing = _roomJoins;
+    if (existing != null && existing.ownerCurrent()) return existing;
+    final generation = _joinSessionGeneration;
+    final user = client.userID;
+    final device = client.deviceID;
+    final homeserver = client.homeserver;
+    bool current() =>
+        !_disposed &&
+        !_loggingOut &&
+        client.isLogged() &&
+        identical(client, _client) &&
+        generation == _joinSessionGeneration &&
+        user == client.userID &&
+        device == client.deviceID &&
+        homeserver == client.homeserver;
+    if (!current()) throw StateError('Join session unavailable');
+    return _roomJoins = RoomJoinOwner(client, ownerCurrent: current);
   }
+
+  @override
+  Future<String> waitForRoomJoin(
+    String roomId,
+    SendCancellation cancellation,
+  ) => _joinOwner().join(roomId, cancellation: cancellation);
+
+  @override
+  Future<String> joinPublicRoom(String roomId) => _joinOwner().join(roomId);
 
   @override
   Future<MessageSearchPage> searchMessages(
@@ -2253,6 +2276,8 @@ class MatrixBackend extends ChatBackend implements MessagingFeatures {
 
   void _resetSessionView() {
     if (_disposed) return;
+    _joinSessionGeneration++;
+    _roomJoins = null;
     _requiresReauthentication = false;
     _clearSecurityPrompts();
     _outbox.closeAccount();
