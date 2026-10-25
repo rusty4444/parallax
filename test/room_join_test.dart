@@ -118,6 +118,47 @@ void main() {
   );
 
   test(
+    'confirmed membership then late transport error permits leave and rejoin',
+    () async {
+      var posts = 0;
+      final started = Completer<void>();
+      final acknowledgement = Completer<http.Response>();
+      final client = _Client(
+        MockClient((_) {
+          posts++;
+          if (posts == 1) {
+            started.complete();
+            return acknowledgement.future;
+          }
+          return Future.value(http.Response('{"room_id":"$roomId"}', 200));
+        }),
+      );
+      final owner = RoomJoinOwner(client, ownerCurrent: () => true);
+      final first = owner.join(roomId);
+      await started.future;
+      _joined(client);
+      expect(await first.timeout(const Duration(seconds: 1)), roomId);
+
+      acknowledgement.completeError(StateError('connection lost'));
+      await Future<void>.delayed(Duration.zero);
+      client.rooms.clear();
+      await expectLater(
+        owner.join(roomId, deadline: const Duration(milliseconds: 10)),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(
+        posts,
+        2,
+        reason:
+            'confirmed membership settles delivery even if its reply is lost',
+      );
+      _joined(client);
+      expect(await owner.join(roomId), roomId);
+      expect(posts, 2);
+    },
+  );
+
+  test(
     'real SDK Room.join without sync returns acknowledgement only',
     () async {
       final client = _Client(

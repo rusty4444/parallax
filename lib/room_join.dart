@@ -59,15 +59,17 @@ class RoomJoinOwner {
               onError: (Object error) {
                 record.error = error;
                 record.settled = true;
-                // Only definite Matrix rejections allow corrected submission. Transport,
-                // malformed responses and server failures retain uncertain ownership.
-                if (error is matrix.MatrixException &&
-                    {
-                      'M_FORBIDDEN',
-                      'M_NOT_FOUND',
-                      'M_BAD_JSON',
-                      'M_INVALID_PARAM',
-                    }.contains(error.errcode)) {
+                // Confirmed membership settles delivery even if its reply is lost.
+                // Otherwise only definite Matrix rejections permit another POST;
+                // transport, malformed responses and server failures stay uncertain.
+                if ((record.membershipConfirmed && ownerCurrent()) ||
+                    (error is matrix.MatrixException &&
+                        {
+                          'M_FORBIDDEN',
+                          'M_NOT_FOUND',
+                          'M_BAD_JSON',
+                          'M_INVALID_PARAM',
+                        }.contains(error.errcode))) {
                   _retire(roomId, record);
                 }
               },
