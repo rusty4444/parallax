@@ -52,6 +52,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     _debounce?.cancel();
     setState(() {
       _loading = true;
+      // Retire pagination immediately, even if the old request never settles.
+      _loadingMore = false;
+      _nextBatch = null;
       _error = null;
     });
     _debounce = Timer(
@@ -82,7 +85,7 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
 
   Future<void> _more() async {
     final token = _nextBatch;
-    if (token == null || _loadingMore) return;
+    if (!mounted || _loading || token == null || _loadingMore) return;
     final generation = _generation;
     setState(() => _loadingMore = true);
     try {
@@ -107,7 +110,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && generation == _generation) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 

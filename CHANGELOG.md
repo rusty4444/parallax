@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Isolate public-directory pagination by query generation. Query changes retire the old page guard/cursor immediately; stale success, error and cleanup cannot affect current results or admit duplicate page requests. Controlled widget regressions cover held obsolete requests, repeated terms/cursors, retry, debounce and route disposal; this is not live server or device acceptance.
 - Bound Space child-room and directory join waits to 30 seconds with explicit stop/check-again controls, session-owned acknowledgement retention and processed-membership recovery. Cancelling a wait does not undo a server join; uncertain requests are not automatically repeated in the same session. Records do not survive process restart.
 - This is one prerequisite for issue #5, not Space graph administration or live Element X acceptance. Invitation acceptance remains a separate SDK flow.
 
