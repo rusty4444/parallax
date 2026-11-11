@@ -3,35 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'chat_backend.dart';
+import 'features/media/animated_media_image.dart';
 import 'media_player_owner.dart';
 import 'messaging_features.dart';
 
+export 'features/media/media_viewer_pager.dart'
+    show openMediaViewer, MediaViewerPager, MediaViewerItem;
+
 export 'media_player_owner.dart'
     show MediaLoader, MediaFileFactory, MediaPlayerFactory, MediaImageDecoder;
-
-Future<void> openMediaViewer(
-  BuildContext context, {
-  required ChatBackend backend,
-  required String roomId,
-  required String eventId,
-}) async {
-  final key = GlobalKey<_MediaViewerState>();
-  final route = MaterialPageRoute<void>(
-    fullscreenDialog: true,
-    builder: (_) => MediaViewer(
-      key: key,
-      backend: backend,
-      roomId: roomId,
-      eventId: eventId,
-    ),
-  );
-  await Navigator.of(context).push<void>(route);
-  // PopScope starts shutdown even during the reverse route animation. Retain
-  // the join independently of State so late native/file work is still owned.
-  final cleanup = key.currentState?._shutdown();
-  await route.completed;
-  await cleanup;
-}
 
 /// Original attachment viewer. Factories are injectable: widget tests never
 /// need platform channels or real filesystem work in a fake-async zone.
@@ -46,6 +26,9 @@ class MediaViewer extends StatefulWidget {
     this.playerFactory = createNativeMediaPlayer,
     this.imageDecoder = decodeMediaImage,
     this.initializationTimeout = const Duration(seconds: 20),
+    this.embedded = false,
+    this.onCleanup,
+    this.onZoomChanged,
   });
   final ChatBackend backend;
   final String roomId;
@@ -56,11 +39,30 @@ class MediaViewer extends StatefulWidget {
   final MediaImageDecoder imageDecoder;
   final Duration initializationTimeout;
 
+  /// A page inside [MediaViewerPager]: no route chrome or pop handling of its
+  /// own; the pager owns the app bar and joins [onCleanup] futures.
+  final bool embedded;
+
+  /// Receives every resource cleanup this viewer starts, so an owner (the
+  /// pager route) can join native disposal before temp files disappear.
+  final void Function(Future<void> cleanup)? onCleanup;
+
+  /// Reports whether the image is zoomed in (the pager locks swiping).
+  final ValueChanged<bool>? onZoomChanged;
+
   @override
   State<MediaViewer> createState() => _MediaViewerState();
 }
 
+/// Joins a viewer page's cleanup. Used by [MediaViewerPager].
+Future<void>? shutdownMediaViewerPage(GlobalKey key) {
+  final state = key.currentState;
+  return state is _MediaViewerState ? state._shutdown() : null;
+}
+
 class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
+  final _transform = TransformationController();
+  bool _zoomed = false;
   MediaPlayerOwner? _owner;
   MediaPlaybackController? _listeningPlayer;
   Object? _identity;
@@ -94,6 +96,7 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     _identity = _accountIdentity();
     widget.backend.addListener(_sessionChanged);
+    _transform.addListener(_transformChanged);
     if (_sessionValid) {
       unawaited(_load());
     } else {
@@ -140,7 +143,15 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
     _listeningPlayer = null;
   }
 
+  void _transformChanged() {
+    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+    if (zoomed == _zoomed) return;
+    _zoomed = zoomed;
+    widget.onZoomChanged?.call(zoomed);
+  }
+
   void _observeCleanup(Future<void> cleanup) {
+    widget.onCleanup?.call(cleanup);
     unawaited(
       cleanup.catchError((Object error, StackTrace stack) {
         // Never include the decrypted file's path or server error in user-facing
@@ -269,6 +280,8 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
     widget.backend.removeListener(_sessionChanged);
     WidgetsBinding.instance.removeObserver(this);
     _shutdown();
+    _transform.removeListener(_transformChanged);
+    _transform.dispose();
     super.dispose();
   }
 
@@ -310,15 +323,24 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
     final owner = _owner!;
     final image = owner.image;
     if (image != null) {
+      final label = 'Image: ${owner.name ?? 'Attachment'}. Pinch to zoom.';
+      final animated = owner.animatedSource;
       return Center(
         child: InteractiveViewer(
+          transformationController: _transform,
           minScale: 1,
           maxScale: 8,
-          child: Semantics(
-            label: 'Image: ${owner.name ?? 'Attachment'}. Pinch to zoom.',
-            image: true,
-            child: RawImage(image: image, fit: BoxFit.contain),
-          ),
+          child: animated == null
+              ? Semantics(
+                  label: label,
+                  image: true,
+                  child: RawImage(image: image, fit: BoxFit.contain),
+                )
+              : AnimatedMediaImage(
+                  bytes: animated,
+                  poster: image,
+                  semanticLabel: label,
+                ),
         ),
       );
     }
@@ -379,31 +401,33 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope<void>(
-    onPopInvokedWithResult: (didPop, _) {
-      if (didPop) {
-        _shutdown();
-        if (mounted) setState(() {});
-      }
-    },
-    child: Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Close media',
-          icon: const Icon(Icons.close),
-          onPressed: () {
-            _shutdown();
-            setState(() {});
-            Navigator.of(context).maybePop();
+  Widget build(BuildContext context) => widget.embedded
+      ? _content()
+      : PopScope<void>(
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) {
+              _shutdown();
+              if (mounted) setState(() {});
+            }
           },
-        ),
-        title: Text(
-          _ended ? 'Media' : _owner?.name ?? 'Media',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      body: SafeArea(child: _content()),
-    ),
-  );
+          child: Scaffold(
+            appBar: AppBar(
+              leading: IconButton(
+                tooltip: 'Close media',
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  _shutdown();
+                  setState(() {});
+                  Navigator.of(context).maybePop();
+                },
+              ),
+              title: Text(
+                _ended ? 'Media' : _owner?.name ?? 'Media',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            body: SafeArea(child: _content()),
+          ),
+        );
 }

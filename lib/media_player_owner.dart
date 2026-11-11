@@ -45,6 +45,9 @@ abstract class MediaPlaybackController extends ChangeNotifier {
   Future<void> play();
   Future<void> pause();
   Future<void> seek(Duration position);
+
+  /// Playback rate (1.0 = normal). Players without rate control ignore it.
+  Future<void> setSpeed(double speed) async {}
   Widget buildVideo(BuildContext context);
   Future<void> disposePlayer();
 }
@@ -79,12 +82,18 @@ class MediaPlayerOwner {
   MediaTempFile? _file;
   MediaPlaybackController? _player;
   ui.Image? _image;
+  Uint8List? _animatedSource;
   String? _name;
   String? _mimeType;
 
   bool get closed => _closed;
   MediaPlaybackController? get player => _ready && !_closed ? _player : null;
   ui.Image? get image => _ready && !_closed ? _image : null;
+
+  /// Encoded bytes of a possibly animated GIF/WebP (bounded), for frame-by-
+  /// frame playback by the viewer. [image] remains the first-frame poster.
+  Uint8List? get animatedSource =>
+      _ready && !_closed && _image != null ? _animatedSource : null;
   String? get name => _name;
   String? get mimeType => _mimeType;
 
@@ -108,6 +117,10 @@ class MediaPlayerOwner {
       // No global image cache and no plaintext image file.
       _image = await imageDecoder(attachment.bytes);
       _checkOpen();
+      if ((_mimeType == 'image/gif' || _mimeType == 'image/webp') &&
+          attachment.bytes.length <= maxAnimatedImageBytes) {
+        _animatedSource = attachment.bytes;
+      }
     } else if (_mimeType!.startsWith('audio/') ||
         _mimeType!.startsWith('video/')) {
       _file = await fileFactory(attachment);
@@ -139,6 +152,7 @@ class MediaPlayerOwner {
   Future<void> play() => _command((p) => p.play());
   Future<void> pause() => _command((p) => p.pause());
   Future<void> seek(Duration position) => _command((p) => p.seek(position));
+  Future<void> setSpeed(double speed) => _command((p) => p.setSpeed(speed));
 
   Future<void> close() {
     _closed = true;
@@ -159,6 +173,7 @@ class MediaPlayerOwner {
     await _commands;
     final image = _image;
     _image = null;
+    _animatedSource = null;
     image?.dispose();
     // If disposal fails, deliberately do NOT unlink a possibly live source.
     await _player?.disposePlayer();
@@ -167,6 +182,9 @@ class MediaPlayerOwner {
     _file = null;
   }
 }
+
+/// Animated GIF/WebP originals above this size show their first frame only.
+const maxAnimatedImageBytes = 8 * 1024 * 1024;
 
 /// Validate header dimensions BEFORE requesting any decoded frame. Reject
 /// decompression bombs, then bound the decoded first frame to 4 Mi pixels.
@@ -202,8 +220,8 @@ Future<ui.Image> decodeMediaImage(Uint8List bytes) async {
       targetWidth: size.width,
       targetHeight: size.height,
     );
-    // Intentionally show only the first frame of animated attachments. This
-    // prevents unbounded animated frame allocation/timers in the viewer.
+    // The poster is the first frame. Animation (bounded, frame by frame) is
+    // owned by the viewer's AnimatedMediaImage, never by a global cache.
     return (await codec.getNextFrame()).image;
   } finally {
     codec?.dispose();
@@ -288,6 +306,8 @@ class _NativeVideoPlayer extends MediaPlaybackController {
   @override
   Future<void> seek(Duration position) => _controller.seekTo(position);
   @override
+  Future<void> setSpeed(double speed) => _controller.setPlaybackSpeed(speed);
+  @override
   Widget buildVideo(BuildContext context) => AspectRatio(
     aspectRatio: _controller.value.aspectRatio,
     child: VideoPlayer(_controller),
@@ -360,6 +380,8 @@ class _NativeAudioPlayer extends MediaPlaybackController {
   Future<void> pause() => _controller.pause();
   @override
   Future<void> seek(Duration position) => _controller.seek(position);
+  @override
+  Future<void> setSpeed(double speed) => _controller.setPlaybackRate(speed);
   @override
   Widget buildVideo(BuildContext context) => const SizedBox.shrink();
   @override

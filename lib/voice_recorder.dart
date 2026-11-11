@@ -6,6 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'features/media/voice_waveform.dart';
 import 'messaging_features.dart';
 
 const maxComposerMediaBytes = 20 * 1024 * 1024;
@@ -65,6 +66,39 @@ class NativeVoiceRecorder implements VoiceRecorder {
   bool _closed = false;
   final _duration = Stopwatch();
 
+  /// Microphone levels (dBFS) sampled while recording, for the waveform.
+  final _levels = <double>[];
+  Timer? _levelTimer;
+  bool _levelPending = false;
+
+  /// Polls levels on our own timer (rather than record's amplitude stream,
+  /// whose timer does not catch platform errors). Stopped before every
+  /// stop/release so no poll races native teardown or file deletion.
+  void _startLevels() {
+    _levels.clear();
+    _levelTimer?.cancel();
+    _levelTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      final recorder = _recorder;
+      if (_levelPending || recorder == null || !_recording) return;
+      _levelPending = true;
+      recorder
+          .getAmplitude()
+          .then((amplitude) {
+            // Bound memory for very long recordings (~1 hour at 10 Hz).
+            if (_recording && _levels.length < 36000) {
+              _levels.add(amplitude.current);
+            }
+          })
+          .catchError((Object _) {})
+          .whenComplete(() => _levelPending = false);
+    });
+  }
+
+  void _stopLevels() {
+    _levelTimer?.cancel();
+    _levelTimer = null;
+  }
+
   @override
   Stream<bool> get playbackChanges => _playback.stream;
 
@@ -111,6 +145,7 @@ class NativeVoiceRecorder implements VoiceRecorder {
       _duration
         ..reset()
         ..start();
+      _startLevels();
     } catch (_) {
       await _discardNow();
       rethrow;
@@ -120,6 +155,7 @@ class NativeVoiceRecorder implements VoiceRecorder {
   @override
   Future<MediaSelection> stop() => _join(() async {
     if (!_recording) throw StateError('There is no active voice recording.');
+    _stopLevels();
     try {
       final path = await _recorder!.stop();
       _recording = false;
@@ -132,11 +168,20 @@ class NativeVoiceRecorder implements VoiceRecorder {
         file.openRead(),
         length: await file.length(),
       );
+      final durationMs = _duration.elapsedMilliseconds;
+      // MSC3245: the sender adds the waveform and voice markers by content.
+      VoiceMessageRegistry.instance.register(
+        bytes,
+        VoiceMetadata(
+          durationMs: durationMs,
+          waveform: waveformFromLevels(_levels),
+        ),
+      );
       return MediaSelection(
         bytes: bytes,
         name: 'voice-${DateTime.now().millisecondsSinceEpoch}.m4a',
         mimeType: 'audio/mp4',
-        durationMs: _duration.elapsedMilliseconds,
+        durationMs: durationMs,
       );
     } finally {
       // Join stop and the entire bounded read before removing the capture file.
@@ -185,6 +230,7 @@ class NativeVoiceRecorder implements VoiceRecorder {
 
   Future<void> _discardNow({bool disposing = false}) async {
     _duration.stop();
+    _stopLevels();
     // Release both independent handles even if one fails. A failed native
     // release retains the directory rather than deleting a possibly live file.
     await Future.wait([

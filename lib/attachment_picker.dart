@@ -60,14 +60,18 @@ Future<void> pickAndSendAttachment(
   }
 }
 
+/// Saves an attachment through the system file picker. [loader] overrides the
+/// active-timeline download (for example, gallery items from older history).
 Future<bool> saveAttachment(
   BuildContext context,
   ChatBackend backend,
   String roomId,
-  String eventId,
-) async {
+  String eventId, {
+  Future<DownloadedAttachment> Function()? loader,
+}) async {
   try {
-    final file = await backend.loadAttachment(roomId, eventId);
+    final file =
+        await (loader?.call() ?? backend.loadAttachment(roomId, eventId));
     if (!context.mounted) return false;
     final saved = await FilePicker.saveFile(
       fileName: safeAttachmentName(file.name),
