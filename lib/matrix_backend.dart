@@ -836,6 +836,7 @@ class MatrixBackend extends ChatBackend
     final generation = _roomGeneration;
     _timeline?.cancelSubscriptions();
     _timeline = null;
+    _focusedEventId = null;
     _activeRoomId = roomId;
     _visibleMessageLimit = 100;
     _loadingHistory = false;
@@ -868,6 +869,110 @@ class MatrixBackend extends ChatBackend
         );
       }
     }
+  }
+
+  // --- Jump to event (lib/features/threads/timeline_navigation.dart) ------
+
+  String? _focusedEventId;
+  bool _focusHasNewer = false;
+
+  /// Event the active timeline is focused on after [openRoomAt], or null
+  /// while the active timeline shows the live end of the room.
+  String? get focusedEventId =>
+      _timeline == null || _activeRoomId == null ? null : _focusedEventId;
+
+  /// Whether messages newer than the focused event exist (or arrived) and are
+  /// hidden. Always true for a server-fetched (fragmented) context.
+  bool get focusHasNewer {
+    final timeline = _timeline;
+    final focus = focusedEventId;
+    if (timeline == null || focus == null) return false;
+    return _focusHasNewer ||
+        timeline.canRequestFuture ||
+        timeline.events.indexWhere((event) => event.eventId == focus) > 0;
+  }
+
+  /// Opens [roomId] with its timeline loaded around [eventId] (search results,
+  /// permalinks, pinned messages). Messages newer than the event stay hidden
+  /// until [jumpToLatest], so the event is the newest visible entry. Sync
+  /// updates keep flowing; a server-fetched context switches to the live
+  /// timeline on [jumpToLatest]. Read receipts are not sent for a focused
+  /// timeline because the latest messages have not been seen.
+  Future<void> openRoomAt(String roomId, String eventId) async {
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    if (!eventId.startsWith(r'$')) throw ArgumentError.value(eventId);
+    _roomGeneration++;
+    final generation = _roomGeneration;
+    final security = _securityGeneration;
+    _timeline?.cancelSubscriptions();
+    _timeline = null;
+    _activeRoomId = roomId;
+    _focusedEventId = eventId;
+    _focusHasNewer = false;
+    _visibleMessageLimit = 100;
+    _loadingHistory = false;
+    _messages = const [];
+    notifyListeners();
+    bool current() =>
+        generation == _roomGeneration &&
+        security == _securityGeneration &&
+        !_disposed &&
+        isSessionCurrent(client);
+    matrix.Timeline? created;
+    try {
+      created = await room.getTimeline(
+        eventContextId: eventId,
+        onUpdate: () {
+          if (current() && created != null) _refreshMessages(created);
+        },
+        onNewEvent: () {
+          if (current() && !_focusHasNewer && _focusedEventId != null) {
+            _focusHasNewer = true;
+            notifyListeners();
+          }
+        },
+      );
+    } catch (_) {
+      if (current()) {
+        _activeRoomId = null;
+        _focusedEventId = null;
+        notifyListeners();
+      }
+      rethrow;
+    }
+    if (!current()) {
+      created.cancelSubscriptions();
+      throw StateError('Room changed while jumping to the message');
+    }
+    if (!created.events.any((event) => event.eventId == eventId)) {
+      created.cancelSubscriptions();
+      _activeRoomId = null;
+      _focusedEventId = null;
+      notifyListeners();
+      throw StateError('Message unavailable');
+    }
+    _timeline = created;
+    _refreshMessages(created);
+  }
+
+  /// Leaves a focused timeline for the live end of [roomId].
+  Future<void> jumpToLatest(String roomId) async {
+    final timeline = _timeline;
+    if (_activeRoomId != roomId || _focusedEventId == null) return;
+    _focusedEventId = null;
+    _focusHasNewer = false;
+    if (timeline != null && !timeline.canRequestFuture) {
+      // The context was the cached live timeline: just reveal newer entries.
+      _refreshMessages(timeline);
+      return;
+    }
+    _timeline?.cancelSubscriptions();
+    _timeline = null;
+    await openRoom(roomId);
   }
 
   @override
@@ -905,6 +1010,7 @@ class MatrixBackend extends ChatBackend
     _roomGeneration++;
     _timeline?.cancelSubscriptions();
     _timeline = null;
+    _focusedEventId = null;
     _activeRoomId = null;
     _messages = const [];
   }
@@ -2797,8 +2903,14 @@ class MatrixBackend extends ChatBackend
     final client = _client;
     if (_disposed || timeline != _timeline || client == null) return;
     final queuedIds = _outbox.records.map((record) => record.id).toSet();
+    var events = timeline.events;
+    // Jump to event: the focused event is the newest visible entry.
+    final focus = _focusedEventId == null
+        ? -1
+        : events.indexWhere((event) => event.eventId == _focusedEventId);
+    if (focus > 0) events = events.sublist(focus);
     _messages = List.unmodifiable(
-      timeline.events
+      events
           .take(_visibleMessageLimit)
           .where(
             (event) =>
