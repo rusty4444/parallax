@@ -86,6 +86,83 @@ void main() {
     expect(find.text('Quiet'), findsNothing);
   });
 
+  testWidgets('room creation defaults to encryption and rejects blank names', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Create room'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      isTrue,
+    );
+    await tester.tap(find.text('Create'));
+    await tester.pump();
+    expect(backend.createdRoomName, isNull);
+    expect(find.text('Create room'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '  Private group  ');
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Create'))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(backend.createdRoomName, 'Private group');
+    expect(backend.createdRoomEncrypted, isTrue);
+    expect(backend.activeRoomId, '!created:example.org');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('room creation passes explicit unencrypted choice', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InboxScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.ultraviolet),
+          style: VisualTheme.ultraviolet,
+          onThemeChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Create room'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pump();
+    expect(
+      find.text('Private room without end-to-end encryption.'),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byType(TextField).last, 'Unencrypted group');
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Create'))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(backend.createdRoomName, 'Unencrypted group');
+    expect(backend.createdRoomEncrypted, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'empty inbox distinguishes syncing, failure, and a true empty account',
     (tester) async {
@@ -1210,6 +1287,8 @@ class FakeBackend extends ChatBackend {
   String? declined;
   bool? lastRoomUnread;
   String? lastLeftRoom;
+  String? createdRoomName;
+  bool? createdRoomEncrypted;
   int imageLoads = 0;
   int avatarLoads = 0;
   String? lastRecoveryKey;
@@ -1338,7 +1417,6 @@ class FakeBackend extends ChatBackend {
   @override
   Future<void> openRoom(String roomId) async {
     activeId = roomId;
-    notifyListeners();
   }
 
   @override
@@ -1405,6 +1483,23 @@ class FakeBackend extends ChatBackend {
 
   @override
   Future<void> createDirectChat(String userId) async {}
+
+  @override
+  Future<String> createRoom(String name, {required bool encrypted}) async {
+    createdRoomName = name;
+    createdRoomEncrypted = encrypted;
+    roomList.add(
+      ChatRoom(
+        id: '!created:example.org',
+        name: name,
+        preview: '',
+        lastActivity: null,
+        encrypted: encrypted,
+      ),
+    );
+    notifyListeners();
+    return '!created:example.org';
+  }
 
   @override
   Future<void> acceptInvite(String roomId) async {}
