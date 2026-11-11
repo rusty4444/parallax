@@ -26,6 +26,8 @@ import 'message_text.dart';
 import 'recipient_trust.dart';
 import 'reaction_summary.dart';
 import 'room_details.dart';
+import 'room_events.dart';
+import 'timeline_kinds.dart';
 import 'room_join.dart';
 import 'safe_matrix_database.dart';
 import 'matrix_auth_service.dart';
@@ -39,7 +41,11 @@ import 'send_cancellation.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
 class MatrixBackend extends ChatBackend
-    implements MessagingFeatures, RecoverableRoomJoining {
+    implements
+        MessagingFeatures,
+        RecoverableRoomJoining,
+        RoomEventFeatures,
+        MatrixSdkAccess {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     this.localStorage,
@@ -2796,9 +2802,7 @@ class MatrixBackend extends ChatBackend
           .take(_visibleMessageLimit)
           .where(
             (event) =>
-                (event.type == matrix.EventTypes.Message ||
-                    event.type == matrix.EventTypes.Encrypted ||
-                    event.type == matrix.EventTypes.Sticker) &&
+                isTimelineVisibleType(event.type) &&
                 event.relationshipType != matrix.RelationshipTypes.edit &&
                 event.relationshipType != matrix.RelationshipTypes.thread &&
                 (event.status.isSynced ||
@@ -2831,6 +2835,30 @@ class MatrixBackend extends ChatBackend
                 ),
             client.userID,
           );
+    final kind = entryKindFor(
+      type: display.type,
+      msgtype: display.messageType,
+      content: display.content,
+      redacted: event.redacted,
+    );
+    // Cached membership only: never trigger member fetches while projecting.
+    final member = event.room.getState(
+      matrix.EventTypes.RoomMember,
+      event.senderId,
+    );
+    final memberName = member?.content['displayname'];
+    final memberAvatar = member?.content['avatar_url'];
+    final content = event.redacted
+        ? const <String, Object?>{}
+        : Map<String, Object?>.unmodifiable(display.content);
+    final format = content['format'];
+    final formatted = content['formatted_body'];
+    final thread =
+        (event.unsigned?['m.relations'] as Map?)?['m.thread'] as Map?;
+    final threadLatest = thread?['latest_event'] as Map?;
+    final threadLatestContent = threadLatest?['content'] as Map?;
+    final mentions = content['m.mentions'];
+    final mentionIds = mentions is Map ? mentions['user_ids'] : null;
     return ChatEntry(
       id: event.eventId,
       sender: event.senderId,
@@ -2838,6 +2866,8 @@ class MatrixBackend extends ChatBackend
           ? 'Message removed'
           : display.type == matrix.EventTypes.Encrypted
           ? '🔒 Unable to decrypt this message'
+          : kind == EntryKind.state || kind == EntryKind.call
+          ? _fallbackBody(display)
           : visibleMessageBody(display.body, isReply: replyToId != null),
       time: event.originServerTs,
       mine: event.senderId == client.userID,
@@ -2847,6 +2877,7 @@ class MatrixBackend extends ChatBackend
               display.type == matrix.EventTypes.Sticker),
       isAttachment:
           !event.redacted &&
+          display.type == matrix.EventTypes.Message &&
           {
             matrix.MessageTypes.File,
             matrix.MessageTypes.Audio,
@@ -2856,7 +2887,133 @@ class MatrixBackend extends ChatBackend
       redacted: event.redacted,
       edited: display.eventId != event.eventId,
       reactions: reactions,
+      kind: kind,
+      eventType: display.type,
+      msgtype: display.type == matrix.EventTypes.Message
+          ? display.messageType
+          : null,
+      formattedBody: format == 'org.matrix.custom.html' && formatted is String
+          ? formatted
+          : null,
+      senderName: memberName is String ? memberName : null,
+      senderAvatar: memberAvatar is String ? Uri.tryParse(memberAvatar) : null,
+      content: content,
+      stateKey: event.stateKey,
+      threadReplyCount: (thread?['count'] as num?)?.toInt() ?? 0,
+      threadLatestBody: threadLatestContent?['body'] as String?,
+      pinned: event.room.pinnedEventIds.contains(event.eventId),
+      highlight:
+          mentionIds is List && mentionIds.contains(client.userID) ||
+          (mentions is Map && mentions['room'] == true),
     );
+  }
+
+  String _fallbackBody(matrix.Event event) {
+    try {
+      return event.calcLocalizedBodyFallback(
+        const matrix.MatrixDefaultLocalizations(),
+        hideReply: true,
+      );
+    } catch (_) {
+      return event.type;
+    }
+  }
+
+  // --- Feature-module access (see lib/room_events.dart) -------------------
+
+  @override
+  matrix.Client? get sdkClient =>
+      _disposed || _loggingOut || _connection == SessionStatus.offline
+      ? null
+      : _client;
+
+  @override
+  bool isSessionCurrent(matrix.Client client) =>
+      !_disposed &&
+      !_loggingOut &&
+      identical(_client, client) &&
+      client.isLogged();
+
+  @override
+  Future<String> sendRoomEvent(
+    String roomId,
+    String type,
+    Map<String, Object?> content,
+  ) async {
+    if (type.isEmpty || type == matrix.EventTypes.Encrypted) {
+      throw ArgumentError.value(type, 'type', 'Invalid event type');
+    }
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    final owner = _sendOwnership(client, room, _securityGeneration);
+    return MatrixSendGuard.owned(owner, () async {
+      await _ensureTrusted(room);
+      _checkSendOwner(owner);
+      _requireEncryptedTransport(room);
+      final id = await _protectSend(
+        room,
+        () => room.sendEvent(Map<String, dynamic>.of(content), type: type),
+        ownerCurrent: owner,
+      );
+      if (id == null) throw StateError('Event was not sent');
+      return id;
+    });
+  }
+
+  @override
+  Future<void> setRoomState(
+    String roomId,
+    String type,
+    Map<String, Object?> content, {
+    String stateKey = '',
+  }) async {
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    await client.setRoomStateWithKey(
+      roomId,
+      type,
+      stateKey,
+      Map<String, dynamic>.of(content),
+    );
+    if (!isSessionCurrent(client)) throw StateError('Session changed');
+  }
+
+  @override
+  Future<Map<String, Object?>?> roomState(
+    String roomId,
+    String type, {
+    String stateKey = '',
+  }) async {
+    final client = _requireClient();
+    try {
+      final state = await client.getRoomStateWithKey(roomId, type, stateKey);
+      if (!isSessionCurrent(client)) throw StateError('Session changed');
+      return state;
+    } on matrix.MatrixException catch (error) {
+      if (error.error == matrix.MatrixError.M_NOT_FOUND) return null;
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> redactEvent(
+    String roomId,
+    String eventId, {
+    String? reason,
+  }) async {
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    await room.redactEvent(eventId, reason: reason);
+    if (!isSessionCurrent(client)) throw StateError('Session changed');
   }
 
   @override

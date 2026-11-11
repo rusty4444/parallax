@@ -526,7 +526,7 @@ void main() {
     expect(find.text('Alice typing…'), findsOneWidget);
     await tester.longPress(find.text('Hi there'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('React 👍'));
+    await tester.tap(find.byTooltip('React 👍'));
     await tester.pumpAndSettle();
     expect(backend.lastReaction, '👍');
   });

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'hooks/registry.dart';
 import 'appearance_settings_screen.dart';
 import 'feature_settings_scope.dart';
 import 'chat_backend.dart';
@@ -578,6 +579,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   );
                 },
+              ),
+              ...settingsSectionsFor(
+                context,
+                SettingsHookContext(backend: widget.backend, palette: p),
               ),
               const SizedBox(height: 28),
               OutlinedButton.icon(

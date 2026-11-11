@@ -7,20 +7,20 @@ import 'app_theme.dart';
 import 'attachment_picker.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
+import 'features/reactions/reaction_hooks.dart';
+import 'hooks/registry.dart';
 import 'media_viewer.dart';
 import 'message_draft_store.dart';
 import 'message_receipts_sheet.dart';
 import 'messaging_features.dart';
 import 'rich_message_composer.dart';
 import 'thread_screen.dart';
-import 'gallery_bubble.dart';
-import 'message_image.dart';
-import 'message_groups.dart';
 import 'photo_picker.dart';
 import 'room_avatar.dart';
 import 'room_background_store.dart';
 import 'room_details_screen.dart';
 import 'room_draft_owner.dart';
+import 'timeline/timeline_view.dart';
 import 'widgets.dart';
 
 class RoomScreen extends StatelessWidget {
@@ -526,15 +526,36 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
+  ChatRoom? get _currentRoom => [
+    for (final r in widget.backend.rooms)
+      if (r.id == widget.roomId) r,
+  ].firstOrNull;
+
+  RoomHookContext _roomContext(ChatRoom? room) => RoomHookContext(
+    backend: widget.backend,
+    roomId: widget.roomId,
+    palette: widget.palette,
+    room: room,
+  );
+
+  EntryHookContext _entryContext(ChatEntry entry) => EntryHookContext(
+    backend: widget.backend,
+    roomId: widget.roomId,
+    palette: widget.palette,
+    entry: entry,
+    room: _currentRoom,
+    entries: widget.backend.activeRoomId == widget.roomId
+        ? widget.backend.messages
+        : const [],
+  );
+
   Future<void> _heart(ChatEntry entry) async {
     await _react(entry, '❤️');
   }
 
   Future<void> _react(ChatEntry entry, String emoji) async {
     if (!mounted || !_owner.isCurrent) return;
-    if (widget.backend.rooms.any(
-      (room) => room.id == widget.roomId && room.encrypted,
-    )) {
+    if (!reactionsAllowed(_roomContext(_currentRoom))) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Encrypted reactions are unavailable in this build.'),
@@ -586,7 +607,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
   Future<void> _showActions(ChatEntry entry) async {
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
+    final hookActions = messageActionsFor(context, _entryContext(entry));
     final choice = await showModalBottomSheet<String>(
+      isScrollControlled: true,
       context: context,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
@@ -607,15 +630,14 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                 title: const Text('Verify sender'),
                 onTap: () => Navigator.pop(sheetContext, 'verify'),
               ),
-            if (!widget.backend.rooms.any(
-              (room) => room.id == widget.roomId && room.encrypted,
-            ))
-              for (final emoji in ['❤️', '👍', '😂', '🎉', '😮'])
-                ListTile(
-                  leading: Text(emoji, style: const TextStyle(fontSize: 23)),
-                  title: Text('React $emoji'),
-                  onTap: () => Navigator.pop(sheetContext, emoji),
-                ),
+            if (reactionsAllowed(_roomContext(_currentRoom)))
+              _QuickReactions(
+                palette: widget.palette,
+                onPick: (emoji) => Navigator.pop(sheetContext, emoji),
+                onMore: emojiPickerAvailable
+                    ? () => Navigator.pop(sheetContext, _moreReactions)
+                    : null,
+              ),
             if (_features != null) ...[
               ListTile(
                 leading: const Icon(Icons.forum_outlined),
@@ -652,11 +674,51 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                 title: const Text('Delete message'),
                 onTap: () => Navigator.pop(sheetContext, 'delete'),
               ),
+            for (final item in hookActions)
+              ListTile(
+                leading: Icon(
+                  item.icon,
+                  color: item.destructive ? Colors.redAccent : null,
+                ),
+                title: Text(
+                  item.label,
+                  style: item.destructive
+                      ? const TextStyle(color: Colors.redAccent)
+                      : null,
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'hook:${item.id}'),
+              ),
           ],
         ),
       ),
     );
     if (!mounted || !_owner.isCurrent || choice == null) return;
+    if (choice.startsWith('hook:')) {
+      final id = choice.substring(5);
+      final item = hookActions.where((action) => action.id == id).firstOrNull;
+      if (item == null) return;
+      try {
+        await item.onSelected(context);
+      } catch (_) {
+        if (mounted && _owner.isCurrent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Couldn’t ${item.label.toLowerCase()}.')),
+          );
+        }
+      }
+      return;
+    }
+    if (choice == _moreReactions) {
+      final emoji = await pickEmoji(
+        context,
+        palette: widget.palette,
+        forReaction: true,
+      );
+      if (emoji != null && mounted && _owner.isCurrent) {
+        await _react(entry, emoji);
+      }
+      return;
+    }
     if (choice == 'thread') {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -871,7 +933,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         final entries = widget.backend.activeRoomId == widget.roomId
             ? widget.backend.messages
             : const <ChatEntry>[];
-        final rows = groupTimeline(entries);
+        final roomCtx = _roomContext(room);
         return Scaffold(
           body: GlowBackdrop(
             palette: p,
@@ -971,6 +1033,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                             ],
                           ),
                         ),
+                        ...roomHeaderActionsFor(context, roomCtx),
                         IconButton(
                           tooltip: 'Room details',
                           icon: Icon(
@@ -1020,6 +1083,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       ],
                     ),
                   ),
+                  ...roomBannersFor(context, roomCtx),
                   Expanded(
                     child: _opening
                         ? Center(
@@ -1064,75 +1128,17 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                               ],
                             ),
                           )
-                        : ListView.builder(
-                            reverse: true,
-                            padding: EdgeInsets.fromLTRB(
-                              16,
-                              compact ? 8 : 20,
-                              16,
-                              compact ? 8 : 18,
-                            ),
-                            itemCount:
-                                rows.length +
-                                (widget.backend.canLoadOlder ? 1 : 0),
-                            itemBuilder: (context, index) {
-                              if (index == rows.length) {
-                                return Center(
-                                  child: TextButton(
-                                    onPressed: widget.backend.loadingHistory
-                                        ? null
-                                        : _loadOlder,
-                                    child: Text(
-                                      widget.backend.loadingHistory
-                                          ? 'Loading…'
-                                          : 'Load earlier messages',
-                                    ),
-                                  ),
-                                );
-                              }
-                              final row = rows[rows.length - index - 1];
-                              if (row.isGallery) {
-                                return GalleryBubble(
-                                  key: ValueKey(row.entries.first.id),
-                                  entries: row.entries,
-                                  backend: widget.backend,
-                                  roomId: widget.roomId,
-                                  palette: p,
-                                  onHeart: _heart,
-                                  onAction: _showActions,
-                                  onReaction: _react,
-                                );
-                              }
-                              final entry = row.entries.single;
-                              final previous = rows.length - index - 2 >= 0
-                                  ? rows[rows.length - index - 2].entries.last
-                                  : null;
-                              final group =
-                                  previous?.sender == entry.sender &&
-                                  entry.time
-                                          .difference(previous!.time)
-                                          .inMinutes <
-                                      5;
-                              return _MessageBubble(
-                                key: ValueKey(entry.id),
-                                entry: entry,
-                                backend: widget.backend,
-                                roomId: widget.roomId,
-                                palette: p,
-                                group: group,
-                                onHeart: () => _heart(entry),
-                                onAction: () => _showActions(entry),
-                                onReaction: (emoji) => _react(entry, emoji),
-                                replyPreview: entry.replyToId == null
-                                    ? null
-                                    : entries
-                                          .where(
-                                            (item) =>
-                                                item.id == entry.replyToId,
-                                          )
-                                          .firstOrNull,
-                              );
-                            },
+                        : TimelineView(
+                            backend: widget.backend,
+                            roomId: widget.roomId,
+                            palette: p,
+                            entries: entries,
+                            compact: compact,
+                            room: room,
+                            onHeart: _heart,
+                            onAction: _showActions,
+                            onReaction: _react,
+                            onLoadOlder: _loadOlder,
                           ),
                   ),
                   if (_features != null) _pendingPanel(p),
@@ -1219,6 +1225,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       ),
                     ),
                     RichMessageComposer(
+                      extraAttachments: composerAttachmentsFor(
+                        context,
+                        roomCtx,
+                      ),
                       controller: _draft,
                       sendContext: _sendContext,
                       onAcknowledged: (textCleared) =>
@@ -1324,220 +1334,38 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({
-    super.key,
-    required this.entry,
-    required this.backend,
-    required this.roomId,
+const _moreReactions = '__more_reactions__';
+
+/// Element X-style quick reaction row in the message action sheet.
+class _QuickReactions extends StatelessWidget {
+  const _QuickReactions({
     required this.palette,
-    required this.group,
-    required this.onHeart,
-    required this.onAction,
-    required this.onReaction,
-    this.replyPreview,
+    required this.onPick,
+    this.onMore,
   });
-  final ChatEntry entry;
-  final ChatBackend backend;
-  final String roomId;
   final AppPalette palette;
-  final bool group;
-  final VoidCallback onHeart;
-  final VoidCallback onAction;
-  final ValueChanged<String> onReaction;
-  final ChatEntry? replyPreview;
+  final ValueChanged<String> onPick;
+  final VoidCallback? onMore;
 
   @override
-  Widget build(BuildContext context) {
-    final mine = entry.mine;
-    final compact =
-        FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.83,
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(top: group ? 3 : (compact ? 7 : 14)),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: mine ? palette.bubble : palette.surface,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(19),
-                topRight: const Radius.circular(19),
-                bottomLeft: Radius.circular(mine ? 19 : 5),
-                bottomRight: Radius.circular(mine ? 5 : 19),
-              ),
-              border: mine ? null : Border.all(color: palette.stroke),
-            ),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                14,
-                compact ? 6 : 10,
-                14,
-                compact ? 5 : 8,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  GestureDetector(
-                    onDoubleTap: onHeart,
-                    onLongPress: onAction,
-                    behavior: HitTestBehavior.opaque,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (!mine && !group) ...[
-                          Text(
-                            entry.sender,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: palette.secondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                        ],
-                        if (entry.replyToId != null) ...[
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                left: BorderSide(
-                                  color: palette.secondary,
-                                  width: 3,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              replyPreview == null
-                                  ? 'In reply to an earlier message'
-                                  : '${replyPreview!.sender}: ${replyPreview!.body}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: mine
-                                    ? palette.bubbleText
-                                    : palette.muted,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                        ],
-                        if (entry.isImage) ...[
-                          MessageImage(
-                            backend: backend,
-                            palette: palette,
-                            roomId: roomId,
-                            eventId: entry.id,
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                        if (entry.isAttachment)
-                          InkWell(
-                            onTap: () => openMediaViewer(
-                              context,
-                              backend: backend,
-                              roomId: roomId,
-                              eventId: entry.id,
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 5),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.insert_drive_file_outlined,
-                                    color: mine
-                                        ? palette.bubbleText
-                                        : palette.secondary,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      entry.body,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: mine
-                                            ? palette.bubbleText
-                                            : palette.foreground,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Icon(
-                                    Icons.download_rounded,
-                                    size: 18,
-                                    color: mine
-                                        ? palette.bubbleText
-                                        : palette.secondary,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        else if (entry.body.isNotEmpty)
-                          Text(
-                            entry.edited
-                                ? '${entry.body} (edited)'
-                                : entry.body,
-                            style: TextStyle(
-                              color: mine
-                                  ? palette.bubbleText
-                                  : palette.foreground,
-                              fontSize: 15,
-                              height: 1.35,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (entry.reactions.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 3,
-                      children: [
-                        for (final reaction in entry.reactions)
-                          ActionChip(
-                            tooltip: reaction.mine
-                                ? 'Remove your ${reaction.emoji} reaction'
-                                : 'React with ${reaction.emoji}',
-                            label: Text('${reaction.emoji} ${reaction.count}'),
-                            backgroundColor: reaction.mine
-                                ? palette.accent.withValues(alpha: 0.25)
-                                : palette.background,
-                            onPressed: () => onReaction(reaction.emoji),
-                          ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Text(
-                      TimeOfDay.fromDateTime(
-                        entry.time.toLocal(),
-                      ).format(context),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: mine
-                            ? palette.bubbleText.withValues(alpha: 0.77)
-                            : palette.muted,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        for (final emoji in const ['❤️', '👍', '😂', '🎉', '😮', '🙏'])
+          IconButton(
+            tooltip: 'React $emoji',
+            onPressed: () => onPick(emoji),
+            icon: Text(emoji, style: const TextStyle(fontSize: 24)),
           ),
-        ),
-      ),
-    );
-  }
+        if (onMore != null)
+          IconButton(
+            tooltip: 'More reactions',
+            onPressed: onMore,
+            icon: Icon(Icons.add_reaction_outlined, color: palette.secondary),
+          ),
+      ],
+    ),
+  );
 }

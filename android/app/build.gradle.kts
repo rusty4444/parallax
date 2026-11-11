@@ -56,6 +56,14 @@ flutter {
     source = "../.."
 }
 
+configurations.all {
+    // UnifiedPush's connector depends on JVM Tink; flutter_secure_storage ships
+    // tink-android with the same classes. Keep only the Android artifact.
+    exclude(group = "com.google.crypto.tink", module = "tink")
+}
+
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // AppCompat launch themes keep the biometric prompt stable on Android 8 and below.
+    implementation("androidx.appcompat:appcompat:1.7.1")
 }

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'package:image_picker/image_picker.dart';
 
+import 'features/reactions/reaction_hooks.dart';
+import 'hooks/hook_types.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
 
@@ -34,6 +36,7 @@ class RichMessageComposer extends StatefulWidget {
     this.pickCamera,
     this.pickFile,
     this.recorder,
+    this.extraAttachments = const [],
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
@@ -54,6 +57,10 @@ class RichMessageComposer extends StatefulWidget {
   final MediaPicker? pickCamera;
   final MediaPicker? pickFile;
   final VoiceRecorder? recorder;
+
+  /// Feature-provided attachment options (poll, location …) shown after the
+  /// built-in media sources.
+  final List<ComposerAttachmentAction> extraAttachments;
 
   @override
   State<RichMessageComposer> createState() => _RichMessageComposerState();
@@ -227,9 +234,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     final epoch = _pickEpoch;
     var chosen = false;
     try {
-      final source = await showModalBottomSheet<_MediaSource>(
+      final source = await showModalBottomSheet<Object>(
         context: context,
         showDragHandle: true,
+        isScrollControlled: true,
         builder: (context) => SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -252,12 +260,28 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                     Navigator.pop(context, item.$1);
                   },
                 ),
+              for (final extra in widget.extraAttachments)
+                ListTile(
+                  leading: Icon(extra.icon),
+                  title: Text(extra.label),
+                  onTap: () {
+                    if (chosen) return;
+                    chosen = true;
+                    Navigator.pop(context, extra);
+                  },
+                ),
             ],
           ),
         ),
       );
       if (!_alive || epoch != _pickEpoch || source == null) return;
-      _pick(source);
+      if (source is ComposerAttachmentAction) {
+        _sourceSheetOpen = false;
+        if (!mounted) return;
+        await source.onSelected(context);
+        return;
+      }
+      _pick(source as _MediaSource);
     } finally {
       _sourceSheetOpen = false;
       if (_alive) setState(() {});
@@ -336,92 +360,94 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     setState(() => _emojiSheetOpen = true);
     var chosen = false;
     try {
-      final emoji = await showModalBottomSheet<String>(
-        context: context,
-        showDragHandle: true,
-        builder: (context) => SafeArea(
-          child: SizedBox(
-            height: 300,
-            child: Column(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 8),
-                  child: Text('Emoji'),
-                ),
-                Expanded(
-                  child: GridView.count(
-                    crossAxisCount: 8,
+      final emoji = emojiPickerAvailable
+          ? await pickEmoji(context)
+          : await showModalBottomSheet<String>(
+              context: context,
+              showDragHandle: true,
+              builder: (context) => SafeArea(
+                child: SizedBox(
+                  height: 300,
+                  child: Column(
                     children: [
-                      for (final emoji in const [
-                        '😀',
-                        '😃',
-                        '😁',
-                        '😂',
-                        '🥰',
-                        '😍',
-                        '😎',
-                        '🥳',
-                        '😊',
-                        '🙂',
-                        '😉',
-                        '🤔',
-                        '😅',
-                        '😭',
-                        '😮',
-                        '😴',
-                        '👍',
-                        '👎',
-                        '👏',
-                        '🙌',
-                        '🙏',
-                        '💪',
-                        '🤝',
-                        '👋',
-                        '❤️',
-                        '🧡',
-                        '💛',
-                        '💚',
-                        '💙',
-                        '💜',
-                        '🔥',
-                        '✨',
-                        '🎉',
-                        '🎂',
-                        '🎁',
-                        '🌈',
-                        '☀️',
-                        '🌙',
-                        '⭐',
-                        '💯',
-                        '✅',
-                        '❌',
-                        '❓',
-                        '💡',
-                        '👀',
-                        '🚀',
-                        '☕',
-                        '🍕',
-                      ])
-                        TextButton(
-                          key: ValueKey('emoji-$emoji'),
-                          onPressed: () {
-                            if (chosen) return;
-                            chosen = true;
-                            Navigator.pop(context, emoji);
-                          },
-                          child: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 26),
-                          ),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Text('Emoji'),
+                      ),
+                      Expanded(
+                        child: GridView.count(
+                          crossAxisCount: 8,
+                          children: [
+                            for (final emoji in const [
+                              '😀',
+                              '😃',
+                              '😁',
+                              '😂',
+                              '🥰',
+                              '😍',
+                              '😎',
+                              '🥳',
+                              '😊',
+                              '🙂',
+                              '😉',
+                              '🤔',
+                              '😅',
+                              '😭',
+                              '😮',
+                              '😴',
+                              '👍',
+                              '👎',
+                              '👏',
+                              '🙌',
+                              '🙏',
+                              '💪',
+                              '🤝',
+                              '👋',
+                              '❤️',
+                              '🧡',
+                              '💛',
+                              '💚',
+                              '💙',
+                              '💜',
+                              '🔥',
+                              '✨',
+                              '🎉',
+                              '🎂',
+                              '🎁',
+                              '🌈',
+                              '☀️',
+                              '🌙',
+                              '⭐',
+                              '💯',
+                              '✅',
+                              '❌',
+                              '❓',
+                              '💡',
+                              '👀',
+                              '🚀',
+                              '☕',
+                              '🍕',
+                            ])
+                              TextButton(
+                                key: ValueKey('emoji-$emoji'),
+                                onPressed: () {
+                                  if (chosen) return;
+                                  chosen = true;
+                                  Navigator.pop(context, emoji);
+                                },
+                                child: Text(
+                                  emoji,
+                                  style: const TextStyle(fontSize: 26),
+                                ),
+                              ),
+                          ],
                         ),
+                      ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-      );
+              ),
+            );
       if (!_alive || emoji == null) return;
       final controller = widget.controller;
       final text = controller.text;

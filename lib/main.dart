@@ -8,6 +8,7 @@ import 'app_theme.dart';
 import 'appearance_preferences.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
+import 'hooks/registry.dart';
 import 'inbox_screen.dart';
 import 'login_screen.dart';
 import 'matrix_backend.dart';
@@ -130,7 +131,11 @@ class _ParallaxAppState extends State<ParallaxApp> {
     }
     _accountKey = account;
     _userId = user;
-    if (_backend.connection == SessionStatus.ready) _authenticated = true;
+    if (_backend.connection == SessionStatus.ready && !_authenticated) {
+      _authenticated = true;
+      // Signed-in wrappers (app lock, calls, share intents) attach now.
+      _scheduleRebuild();
+    }
     _bindPushSession();
   }
 
@@ -485,7 +490,17 @@ class _ParallaxAppState extends State<ParallaxApp> {
                 Expanded(
                   child: SecurityOverlay(
                     backend: _backend,
-                    child: child ?? const SizedBox.shrink(),
+                    child: _authenticated
+                        ? wrapSignedInApp(
+                            context,
+                            AppHookContext(
+                              backend: _backend,
+                              palette: p,
+                              navigatorKey: _navigatorKey,
+                            ),
+                            child ?? const SizedBox.shrink(),
+                          )
+                        : child ?? const SizedBox.shrink(),
                   ),
                 ),
               ],

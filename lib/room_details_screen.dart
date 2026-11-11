@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'hooks/registry.dart';
 import 'room_details.dart';
 
 class RoomDetailsScreen extends StatefulWidget {
@@ -331,6 +332,18 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                                   ],
                                 ),
                         ),
+                      ...roomDetailsSectionsFor(
+                        context,
+                        RoomHookContext(
+                          backend: widget.backend,
+                          roomId: widget.roomId,
+                          palette: p,
+                          room: [
+                            for (final room in widget.backend.rooms)
+                              if (room.id == widget.roomId) room,
+                          ].firstOrNull,
+                        ),
+                      ),
                     ],
                   ),
                 ),

@@ -196,6 +196,26 @@ class ChatReaction {
   final bool mine;
 }
 
+/// What a timeline row represents. Renderers dispatch on this.
+enum EntryKind {
+  text,
+  emote,
+  notice,
+  image,
+  video,
+  audio,
+  voice,
+  file,
+  sticker,
+  location,
+  poll,
+  state,
+  call,
+  undecryptable,
+  redacted,
+  unknown,
+}
+
 @immutable
 class ChatEntry {
   const ChatEntry({
@@ -210,10 +230,29 @@ class ChatEntry {
     this.redacted = false,
     this.edited = false,
     this.reactions = const [],
-  });
+    EntryKind? kind,
+    this.eventType = 'm.room.message',
+    this.msgtype,
+    this.formattedBody,
+    this.senderName,
+    this.senderAvatar,
+    this.content = const {},
+    this.stateKey,
+    this.threadReplyCount = 0,
+    this.threadLatestBody,
+    this.pinned = false,
+    this.highlight = false,
+    // Public name `kind`, private storage: the getter supplies a fallback.
+    // ignore: prefer_initializing_formals
+  }) : _kind = kind;
 
   final String id;
+
+  /// Matrix user ID of the sender.
   final String sender;
+
+  /// Plain-text body (reply fallback stripped). For state/call/poll entries a
+  /// short human-readable fallback.
   final String body;
   final DateTime time;
   final bool mine;
@@ -223,6 +262,53 @@ class ChatEntry {
   final bool redacted;
   final bool edited;
   final List<ChatReaction> reactions;
+  final EntryKind? _kind;
+
+  /// Matrix event type (after decryption), e.g. `m.room.message`.
+  final String eventType;
+
+  /// `msgtype` of an `m.room.message`.
+  final String? msgtype;
+
+  /// Raw `formatted_body` when `format` is `org.matrix.custom.html`.
+  /// Untrusted: renderers must sanitise it.
+  final String? formattedBody;
+
+  /// Sender display name from cached room membership, if known.
+  final String? senderName;
+
+  /// Sender avatar `mxc://` URI from cached room membership, if known.
+  final Uri? senderAvatar;
+
+  /// Decrypted display content (edits applied). Read-only by convention.
+  final Map<String, Object?> content;
+
+  /// State key for state events.
+  final String? stateKey;
+
+  /// Server-side thread summary for a thread root.
+  final int threadReplyCount;
+  final String? threadLatestBody;
+
+  /// Whether the event is in the room's pinned events.
+  final bool pinned;
+
+  /// Whether the event mentions the current user (or @room).
+  final bool highlight;
+
+  EntryKind get kind =>
+      _kind ??
+      (redacted
+          ? EntryKind.redacted
+          : isImage
+          ? EntryKind.image
+          : isAttachment
+          ? EntryKind.file
+          : EntryKind.text);
+
+  /// Display name if known, otherwise the Matrix ID.
+  String get senderLabel =>
+      (senderName?.trim().isNotEmpty ?? false) ? senderName!.trim() : sender;
 }
 
 @immutable
