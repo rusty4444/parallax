@@ -361,7 +361,7 @@ void main() {
       await tester.pumpWidget(_app(_body(backend)));
       expect(
         tester.getSemantics(find.bySemanticsLabel(RegExp('^Sushi'))),
-        containsSemantics(
+        isSemantics(
           label: 'Sushi, 0 votes, 0 percent of total votes',
           isButton: true,
           hasTapAction: true,
