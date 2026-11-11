@@ -48,9 +48,11 @@ class MatrixBackend extends ChatBackend
         MatrixSdkAccess {
   MatrixBackend({
     bool Function()? sendReadReceipts,
+    bool Function()? sendTypingNotifications,
     this.localStorage,
     this.beforeLogout,
-  }) : _sendReadReceipts = sendReadReceipts ?? (() => true);
+  }) : _sendReadReceipts = sendReadReceipts ?? (() => true),
+       _sendTypingNotifications = sendTypingNotifications ?? (() => true);
 
   @visibleForTesting
   factory MatrixBackend.withClient(
@@ -71,6 +73,7 @@ class MatrixBackend extends ChatBackend
   }
 
   final bool Function() _sendReadReceipts;
+  final bool Function() _sendTypingNotifications;
   final Future<void> Function()? beforeLogout;
   final SecureValueStore? localStorage;
   String? _outboxAccount;
@@ -1340,6 +1343,9 @@ class MatrixBackend extends ChatBackend
 
   @override
   Future<void> setTyping(String roomId, bool typing) async {
+    // Privacy preference (Settings → Media & privacy). Stop notices are still
+    // allowed so turning the preference off cannot leave a stale indicator.
+    if (typing && !_sendTypingNotifications()) return;
     final room = _requireClient().getRoomById(roomId);
     if (room == null || room.membership != matrix.Membership.join) return;
     // The SDK pre-shares Megolm keys on typing before recipient approval.
@@ -2765,7 +2771,38 @@ class MatrixBackend extends ChatBackend
     final heroIds =
         room.summary.mHeroes ??
         [if (room.directChatMatrixID != null) room.directChatMatrixID!];
+    final tags = room.tags.keys.toList(growable: false);
+    // Cached membership only: never trigger member fetches while projecting.
+    String? previewSender;
+    if (!room.isDirectChat &&
+        event != null &&
+        (event.type == matrix.EventTypes.Message ||
+            event.type == matrix.EventTypes.Encrypted)) {
+      if (event.senderId == client.userID) {
+        previewSender = 'You';
+      } else {
+        final member = room
+            .getState(matrix.EventTypes.RoomMember, event.senderId)
+            ?.content['displayname'];
+        previewSender = member is String && member.trim().isNotEmpty
+            ? member.trim()
+            : event.senderId;
+      }
+    }
     return ChatRoom(
+      highlightCount: room.highlightCount,
+      favourite: tags.contains(matrix.TagType.favourite),
+      lowPriority: tags.contains(matrix.TagType.lowPriority),
+      tags: tags,
+      notificationMode: switch (room.pushRuleState) {
+        matrix.PushRuleState.notify => RoomNotificationMode.allMessages,
+        matrix.PushRuleState.mentionsOnly =>
+          RoomNotificationMode.mentionsAndKeywords,
+        matrix.PushRuleState.dontNotify => RoomNotificationMode.mute,
+      },
+      isSpace: room.isSpace,
+      previewSender: previewSender,
+      canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       id: room.id,
       name: name,
       preview: event?.type == matrix.EventTypes.Message

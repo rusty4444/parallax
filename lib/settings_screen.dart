@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'features/home/about_screen.dart';
+import 'features/home/app_lock/app_lock_gate.dart';
+import 'features/home/app_lock/app_lock_settings_screen.dart';
+import 'features/home/blocked_users_screen.dart';
+import 'features/home/home_features.dart';
+import 'features/home/notification_settings_screen.dart';
+import 'features/home/profile_screen.dart';
+import 'features/home/sessions_screen.dart';
+import 'features/home/settings_widgets.dart';
+import 'features/home/sign_out.dart';
 import 'hooks/registry.dart';
 import 'appearance_settings_screen.dart';
 import 'feature_settings_scope.dart';
@@ -18,12 +28,18 @@ class SettingsScreen extends StatefulWidget {
     required this.style,
     required this.onThemeChanged,
     this.setSecureWindow,
+    this.followSystemTheme = false,
+    this.onFollowSystemTheme,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final VisualTheme style;
   final ValueChanged<VisualTheme> onThemeChanged;
   final Future<void> Function(bool enabled)? setSecureWindow;
+
+  /// "Match system" is selected; null [onFollowSystemTheme] hides the option.
+  final bool followSystemTheme;
+  final ValueChanged<bool>? onFollowSystemTheme;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -39,8 +55,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   late VisualTheme _style = widget.style;
+  late bool _followSystem = widget.followSystemTheme;
   late Future<CryptoStatus> _cryptoFuture;
   late Future<List<VerificationDevice>> _devicesFuture;
+  late final AccountFeatures? _account = accountFeaturesOf(widget.backend);
+  Future<HomeProfile>? _profileFuture;
+  Future<AccountManagement>? _managementFuture;
   bool _restoring = false;
   bool _credentialDialogOpen = false;
 
@@ -49,6 +69,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _cryptoFuture = widget.backend.cryptoStatus();
     _devicesFuture = widget.backend.ownDevices();
+    _refreshAccount();
+  }
+
+  void _refreshAccount() {
+    final account = _account;
+    if (account == null) return;
+    _profileFuture = account.ownProfile();
+    _managementFuture = account.accountManagement();
+  }
+
+  Future<void> _push(Widget Function(AppPalette palette) page) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => page(paletteFor(_style))),
+    );
+    if (mounted && _owner.isCurrent) setState(_refreshAccount);
   }
 
   void _refreshCrypto() => setState(() {
@@ -243,38 +278,138 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
-        content: const Text(
-          'This removes your local session from this device. '
-          'You can sign in again at any time.',
+    if (!mounted || !_owner.isCurrent) return;
+    final signedOut = await runSignOutFlow(
+      context,
+      backend: widget.backend,
+      appLock: AppLockScope.maybeOf(context),
+    );
+    if (signedOut && mounted && _owner.isCurrent) Navigator.pop(context);
+  }
+
+  Widget _profileCard(AppPalette p) {
+    Widget card({
+      required Widget avatar,
+      required String title,
+      String? subtitle,
+      VoidCallback? onTap,
+    }) => Material(
+      color: p.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: p.stroke),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              avatar,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: p.foreground,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: p.muted, fontSize: 13),
+                      ),
+                    ],
+                    const SizedBox(height: 3),
+                    Text(
+                      'CONNECTED TO MATRIX',
+                      style: TextStyle(
+                        color: p.secondary,
+                        fontSize: 10,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                Icon(Icons.chevron_right_rounded, color: p.muted),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Stay'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sign out'),
-          ),
-        ],
       ),
     );
-    if (confirmed != true || !mounted || !_owner.isCurrent) return;
-    try {
-      await widget.backend.logout();
-      if (mounted && _owner.isCurrent) Navigator.pop(context);
-    } catch (_) {
-      if (mounted && _owner.isCurrent) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Couldn’t sign out. Try again.')),
-        );
-      }
+    final account = _account;
+    final userId = widget.backend.userId ?? 'Matrix account';
+    if (account == null) {
+      return card(
+        avatar: BrandMark(palette: p),
+        title: userId,
+      );
     }
+    return FutureBuilder<HomeProfile>(
+      future: _profileFuture,
+      builder: (context, snapshot) {
+        final profile = snapshot.data ?? HomeProfile(userId: userId);
+        return card(
+          avatar: ProfileAvatar(
+            profile: profile,
+            backend: widget.backend,
+            palette: p,
+          ),
+          title: profile.label,
+          subtitle: profile.label == profile.userId ? null : profile.userId,
+          onTap: () => _push(
+            (palette) => ProfileScreen(
+              backend: widget.backend,
+              palette: palette,
+              features: account,
+            ),
+          ),
+        );
+      },
+    );
   }
+
+  Widget _accountTile(AccountFeatures account) =>
+      FutureBuilder<AccountManagement>(
+        future: _managementFuture,
+        builder: (context, snapshot) {
+          final management = snapshot.data;
+          if (management?.url case final url?) {
+            return ListTile(
+              leading: const Icon(Icons.manage_accounts_outlined),
+              title: const Text('Manage account'),
+              subtitle: Text(url.host),
+              trailing: const Icon(Icons.open_in_new_rounded),
+              onTap: () => openExternalLink(context, url),
+            );
+          }
+          return ListTile(
+            leading: const Icon(Icons.person_outline_rounded),
+            title: const Text('Profile and password'),
+            subtitle: const Text('Display name, avatar and password'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _push(
+              (palette) => ProfileScreen(
+                backend: widget.backend,
+                palette: palette,
+                features: account,
+              ),
+            ),
+          );
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -282,6 +417,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final features = FeatureSettingsScope.maybeOf(context);
     final preferences = features?.preferences;
     final notifications = features?.notifications;
+    final appLock = AppLockScope.maybeOf(context);
     return Scaffold(
       body: GlowBackdrop(
         palette: p,
@@ -310,80 +446,122 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: p.surface,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: p.stroke),
-                ),
-                child: Row(
+              _profileCard(p),
+              const SizedBox(height: 22),
+              if (_account case final account?)
+                SettingsGroup(
+                  palette: p,
+                  title: 'Account',
                   children: [
-                    BrandMark(palette: p),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.backend.userId ?? 'Matrix account',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: p.foreground,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            'CONNECTED TO MATRIX',
-                            style: TextStyle(
-                              color: p.secondary,
-                              fontSize: 10,
-                              letterSpacing: 1.1,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
+                    _accountTile(account),
+                    ListTile(
+                      leading: const Icon(Icons.devices_rounded),
+                      title: const Text('Devices'),
+                      subtitle: const Text('This and other sessions'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _push(
+                        (palette) => SessionsScreen(
+                          backend: widget.backend,
+                          palette: palette,
+                          features: account,
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.block_rounded),
+                      title: const Text('Blocked users'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _push(
+                        (palette) => BlockedUsersScreen(
+                          backend: widget.backend,
+                          palette: palette,
+                          features: account,
+                        ),
                       ),
                     ),
                   ],
                 ),
+              SettingsGroup(
+                palette: p,
+                title: 'Notifications',
+                children: [
+                  if (_account case final account?)
+                    ListTile(
+                      leading: const Icon(Icons.tune_rounded),
+                      title: const Text('Notifications'),
+                      subtitle: const Text(
+                        'Direct and group chats, mentions, invitations, calls',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _push(
+                        (palette) => NotificationSettingsScreen(
+                          backend: widget.backend,
+                          palette: palette,
+                          features: account,
+                        ),
+                      ),
+                    ),
+                  if (notifications != null)
+                    ListTile(
+                      leading: const Icon(Icons.notifications_outlined),
+                      title: const Text('Push notifications'),
+                      subtitle: const Text(
+                        'Off by default · use your own services',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              PushSettingsScreen(notifications: notifications),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 28),
-              Eyebrow('Appearance', palette: p),
-              if (notifications != null)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.notifications_outlined),
-                  title: const Text('Push notifications'),
-                  subtitle: const Text(
-                    'Off by default · use your own services',
-                  ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          PushSettingsScreen(notifications: notifications),
+              SettingsGroup(
+                palette: p,
+                title: 'Privacy & security',
+                children: [
+                  if (appLock != null)
+                    ListTile(
+                      leading: const Icon(Icons.lock_outline_rounded),
+                      title: const Text('Screen lock'),
+                      subtitle: Text(
+                        appLock.pinSet
+                            ? appLock.biometricEnabled
+                                  ? 'PIN and biometric unlock'
+                                  : 'PIN'
+                            : 'Off',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _push(
+                        (palette) => AppLockSettingsScreen(
+                          controller: appLock,
+                          palette: palette,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              if (preferences != null)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.text_fields_rounded),
-                  title: const Text('Reading and media preferences'),
-                  subtitle: const Text(
-                    'Text size, compact layout, media previews and read receipts',
-                  ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          AppearanceSettingsScreen(preferences: preferences),
+                  if (preferences != null)
+                    ListTile(
+                      leading: const Icon(Icons.text_fields_rounded),
+                      title: const Text('Reading and media preferences'),
+                      subtitle: const Text(
+                        'Text size, media previews, read receipts and typing',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => AppearanceSettingsScreen(
+                            preferences: preferences,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                ],
+              ),
               const SizedBox(height: 10),
+              Eyebrow('Appearance', palette: p),
+              const SizedBox(height: 8),
               Text(
                 'Pick your frequency',
                 style: TextStyle(
@@ -393,13 +571,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 13),
+              if (widget.onFollowSystemTheme != null) ...[
+                _ThemeCard(
+                  key: const ValueKey('theme-system'),
+                  style: visualThemeForBrightness(
+                    MediaQuery.platformBrightnessOf(context),
+                  ),
+                  palette: p,
+                  selected: _followSystem,
+                  label: 'Match system',
+                  caption: 'Parallax or Parallax Day, following your device',
+                  onTap: () {
+                    setState(() {
+                      _followSystem = true;
+                      _style = visualThemeForBrightness(
+                        MediaQuery.platformBrightnessOf(context),
+                      );
+                    });
+                    widget.onFollowSystemTheme!(true);
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
               for (final style in VisualTheme.values) ...[
                 _ThemeCard(
                   style: style,
                   palette: p,
-                  selected: style == _style,
+                  selected: !_followSystem && style == _style,
                   onTap: () {
-                    setState(() => _style = style);
+                    setState(() {
+                      _style = style;
+                      _followSystem = false;
+                    });
                     widget.onThemeChanged(style);
                   },
                 ),
@@ -585,6 +788,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SettingsHookContext(backend: widget.backend, palette: p),
               ),
               const SizedBox(height: 28),
+              SettingsGroup(
+                palette: p,
+                title: 'About & help',
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.info_outline_rounded),
+                    title: const Text('About Parallax'),
+                    subtitle: const Text('Version, licences and legal'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        _push((palette) => AboutScreen(palette: palette)),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.bug_report_outlined),
+                    title: const Text('Report a problem'),
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => openExternalLink(context, reportProblemUrl),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: _logout,
                 icon: const Icon(Icons.logout_rounded),
@@ -595,9 +819,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   minimumSize: const Size.fromHeight(54),
                 ),
               ),
+              if (_account case final account?) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () => _push(
+                    (palette) => DeactivateAccountScreen(
+                      backend: widget.backend,
+                      palette: palette,
+                      features: account,
+                      appLock: appLock,
+                    ),
+                  ),
+                  icon: const Icon(Icons.delete_forever_outlined),
+                  label: const Text('Delete account'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               Text(
-                'Parallax 0.4.0 · Every angle of the conversation.',
+                'Parallax $parallaxVersion · Every angle of the conversation.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: p.muted, fontSize: 12),
               ),
@@ -668,15 +910,20 @@ class _RecoveryDialogState extends State<_RecoveryDialog> {
 
 class _ThemeCard extends StatelessWidget {
   const _ThemeCard({
+    super.key,
     required this.style,
     required this.palette,
     required this.selected,
     required this.onTap,
+    this.label,
+    this.caption,
   });
   final VisualTheme style;
   final AppPalette palette;
   final bool selected;
   final VoidCallback onTap;
+  final String? label;
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
@@ -736,7 +983,7 @@ class _ThemeCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      style.label,
+                      label ?? style.label,
                       style: TextStyle(
                         color: palette.foreground,
                         fontWeight: FontWeight.w700,
@@ -744,7 +991,7 @@ class _ThemeCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      style.caption,
+                      caption ?? style.caption,
                       style: TextStyle(color: palette.muted, fontSize: 12),
                     ),
                   ],

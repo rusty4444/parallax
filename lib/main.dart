@@ -57,7 +57,7 @@ class ParallaxApp extends StatefulWidget {
   State<ParallaxApp> createState() => _ParallaxAppState();
 }
 
-class _ParallaxAppState extends State<ParallaxApp> {
+class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   late final AppearancePreferences _preferences;
   late final MessageDraftStore _draftStore;
   late final PushNotifications _notifications;
@@ -66,6 +66,7 @@ class _ParallaxAppState extends State<ParallaxApp> {
   late final bool _ownsNotifications;
   late final bool _ownsBackend;
   VisualTheme _style = defaultVisualTheme;
+  bool _followSystemTheme = false;
   GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   String? _accountKey;
   String? _userId;
@@ -102,14 +103,22 @@ class _ParallaxAppState extends State<ParallaxApp> {
         PushNotifications();
     _backend =
         widget.backend ??
-        (widget.backendFactory ?? MatrixBackend.new)(
-          beforeLogout: _notifications.logout,
-          sendReadReceipts: () => _preferences.sendReadReceipts,
-        );
+        (widget.backendFactory != null
+            ? widget.backendFactory!(
+                beforeLogout: _notifications.logout,
+                sendReadReceipts: () => _preferences.sendReadReceipts,
+              )
+            : MatrixBackend(
+                beforeLogout: _notifications.logout,
+                sendReadReceipts: () => _preferences.sendReadReceipts,
+                sendTypingNotifications: () =>
+                    _preferences.sendTypingNotifications,
+              ));
     _accountKey = BackendSessionOwner.keyFor(_backend);
     _userId = _backend.userId;
     _authenticated = _backend.connection == SessionStatus.ready;
     _backend.addListener(_sessionChanged);
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_start());
@@ -384,6 +393,13 @@ class _ParallaxAppState extends State<ParallaxApp> {
       final prefs = await SharedPreferences.getInstance();
       if (!mounted || revision != _themeRevision) return;
       final saved = prefs.getString('visual_theme');
+      if (saved == systemThemePreference) {
+        setState(() {
+          _followSystemTheme = true;
+          _style = _systemStyle;
+        });
+        return;
+      }
       for (final theme in VisualTheme.values) {
         if (theme.name == saved) setState(() => _style = theme);
       }
@@ -392,17 +408,42 @@ class _ParallaxAppState extends State<ParallaxApp> {
     }
   }
 
-  void _changeTheme(VisualTheme style) {
-    _themeRevision++;
-    setState(() => _style = style);
-    unawaited(_saveTheme(style));
+  VisualTheme get _systemStyle => visualThemeForBrightness(
+    WidgetsBinding.instance.platformDispatcher.platformBrightness,
+  );
+
+  @override
+  void didChangePlatformBrightness() {
+    if (!mounted || _closing || !_followSystemTheme) return;
+    final style = _systemStyle;
+    if (style != _style) setState(() => _style = style);
   }
 
-  Future<void> _saveTheme(VisualTheme style) async {
+  void _changeTheme(VisualTheme style) {
+    _themeRevision++;
+    setState(() {
+      _followSystemTheme = false;
+      _style = style;
+    });
+    unawaited(_saveTheme(style.name));
+  }
+
+  void _followSystem(bool follow) {
+    if (!follow) return _changeTheme(_style);
+    _themeRevision++;
+    setState(() {
+      _followSystemTheme = true;
+      _style = _systemStyle;
+    });
+    unawaited(_saveTheme(systemThemePreference));
+  }
+
+  Future<void> _saveTheme(String value) async {
+    final revision = _themeRevision;
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (!mounted || _style != style) return;
-      await prefs.setString('visual_theme', style.name);
+      if (!mounted || revision != _themeRevision) return;
+      await prefs.setString('visual_theme', value);
     } catch (_) {
       debugPrint('Parallax theme preference could not be saved.');
     }
@@ -419,6 +460,7 @@ class _ParallaxAppState extends State<ParallaxApp> {
     }
     _startupDeadlines.clear();
     ++_pushGeneration;
+    WidgetsBinding.instance.removeObserver(this);
     _backend.removeListener(_sessionChanged);
     // Cancel immediately; release the SDK only after all accepted push callbacks
     // and exact pusher removals have joined. Never dispose borrowed resources.
@@ -545,6 +587,8 @@ class _ParallaxAppState extends State<ParallaxApp> {
               palette: p,
               style: _style,
               onThemeChanged: _changeTheme,
+              followSystemTheme: _followSystemTheme,
+              onFollowSystemTheme: _followSystem,
             ),
             SessionStatus.offline => Scaffold(
               body: GlowBackdrop(

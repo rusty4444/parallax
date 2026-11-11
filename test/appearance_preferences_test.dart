@@ -16,6 +16,30 @@ void main() {
 
   tearDown(() => preferences.dispose());
 
+  test('media preview modes and legacy auto-load values', () async {
+    await preferences.setMediaPreviewMode(MediaPreviewMode.privateRooms);
+    // Renderers that cannot tell room privacy fail safe (hidden).
+    expect(preferences.autoLoadMedia, isFalse);
+    expect(preferences.autoLoadMediaIn(publicRoom: false), isTrue);
+    expect(preferences.autoLoadMediaIn(publicRoom: true), isFalse);
+    final restored = AppearancePreferences(prefs: prefs);
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.mediaPreviewMode, MediaPreviewMode.privateRooms);
+
+    // A store written by an older version only has the on/off key.
+    SharedPreferences.setMockInitialValues({
+      'parallax.appearance.v1.auto_load_media': false,
+    });
+    final legacyPrefs = await SharedPreferences.getInstance();
+    final legacy = AppearancePreferences(prefs: legacyPrefs);
+    addTearDown(legacy.dispose);
+    await legacy.load();
+    expect(legacy.mediaPreviewMode, MediaPreviewMode.never);
+    expect(legacy.sendTypingNotifications, isTrue);
+    expect(legacy.hideInviteAvatars, isFalse);
+  });
+
   test('defaults are usable before and after loading', () async {
     expect(preferences.textScale, 1.0);
     expect(preferences.compact, isFalse);
@@ -36,14 +60,20 @@ void main() {
       await preferences.setCompact(true);
       await preferences.setAutoLoadMedia(false);
       await preferences.setSendReadReceipts(false);
-      expect(prefs.getKeys(), hasLength(4));
+      await preferences.setSendTypingNotifications(false);
+      await preferences.setHideInviteAvatars(true);
+      // Media previews store the mode plus the legacy on/off key.
+      expect(prefs.getKeys(), hasLength(7));
       final restored = AppearancePreferences(prefs: prefs);
       addTearDown(restored.dispose);
       await restored.load();
       expect(restored.textScale, 1.25);
       expect(restored.compact, isTrue);
       expect(restored.autoLoadMedia, isFalse);
+      expect(restored.mediaPreviewMode, MediaPreviewMode.never);
       expect(restored.sendReadReceipts, isFalse);
+      expect(restored.sendTypingNotifications, isFalse);
+      expect(restored.hideInviteAvatars, isTrue);
     },
   );
 

@@ -260,15 +260,22 @@ void main() {
         ),
       ),
     );
+    await tester.ensureVisible(find.text('Invites'));
     await tester.tap(find.text('Invites'));
-    await tester.pump();
-    expect(find.text('General'), findsNothing);
-    await tester.tap(find.text('Project invite'));
     await tester.pumpAndSettle();
+    expect(find.text('General'), findsNothing);
+    // Element X shows inline Accept/Decline; declining asks for confirmation.
     await tester.tap(find.text('Decline'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(backend.declined, isNull);
+    await tester.tap(find.text('Decline'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Decline invite'));
+    await tester.pumpAndSettle();
     expect(backend.declined, '!invite:example.org');
-    expect(find.text('No invitations'), findsOneWidget);
+    expect(find.text('You don’t have any pending invites'), findsOneWidget);
   });
 
   testWidgets('long-press marks a joined room unread and clears the flag', (
@@ -295,14 +302,14 @@ void main() {
     );
     await tester.longPress(find.text('General'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark unread'));
+    await tester.tap(find.text('Mark as unread'));
     await tester.pumpAndSettle();
     expect(backend.lastRoomUnread, isTrue);
     expect(find.text('•'), findsOneWidget);
 
     await tester.longPress(find.text('General'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Clear manually unread'));
+    await tester.tap(find.text('Mark as read'));
     await tester.pumpAndSettle();
     expect(backend.lastRoomUnread, isFalse);
   });

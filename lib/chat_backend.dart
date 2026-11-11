@@ -89,6 +89,9 @@ class TrustWarning {
   final List<UntrustedRecipient> recipients;
 }
 
+/// Per-room notification setting derived from the account's push rules.
+enum RoomNotificationMode { allMessages, mentionsAndKeywords, mute }
+
 @immutable
 class ChatRoom {
   const ChatRoom({
@@ -103,6 +106,14 @@ class ChatRoom {
     this.manuallyUnread = false,
     this.heroes = const [],
     this.invited = false,
+    this.highlightCount = 0,
+    this.favourite = false,
+    this.lowPriority = false,
+    this.tags = const [],
+    this.notificationMode = RoomNotificationMode.allMessages,
+    this.isSpace = false,
+    this.previewSender,
+    this.canonicalAlias,
   });
 
   final String id;
@@ -116,6 +127,61 @@ class ChatRoom {
   final bool manuallyUnread;
   final List<ChatAvatar> heroes;
   final bool invited;
+
+  /// Unread mentions/keywords (`highlight_count`).
+  final int highlightCount;
+
+  /// Tagged `m.favourite`.
+  final bool favourite;
+
+  /// Tagged `m.lowpriority`.
+  final bool lowPriority;
+
+  /// Valid `m.tag` names for this room.
+  final List<String> tags;
+  final RoomNotificationMode notificationMode;
+
+  /// The room is a Space (`m.room.create` type `m.space`).
+  final bool isSpace;
+
+  /// Display name of the last message's sender, for group previews.
+  final String? previewSender;
+  final String? canonicalAlias;
+
+  bool get muted => notificationMode == RoomNotificationMode.mute;
+
+  ChatRoom copyWith({
+    String? name,
+    String? preview,
+    int? unread,
+    bool? manuallyUnread,
+    bool? invited,
+    int? highlightCount,
+    bool? favourite,
+    bool? lowPriority,
+    List<String>? tags,
+    RoomNotificationMode? notificationMode,
+  }) => ChatRoom(
+    id: id,
+    name: name ?? this.name,
+    preview: preview ?? this.preview,
+    lastActivity: lastActivity,
+    unread: unread ?? this.unread,
+    avatarUrl: avatarUrl,
+    encrypted: encrypted,
+    isDirect: isDirect,
+    manuallyUnread: manuallyUnread ?? this.manuallyUnread,
+    heroes: heroes,
+    invited: invited ?? this.invited,
+    highlightCount: highlightCount ?? this.highlightCount,
+    favourite: favourite ?? this.favourite,
+    lowPriority: lowPriority ?? this.lowPriority,
+    tags: tags ?? this.tags,
+    notificationMode: notificationMode ?? this.notificationMode,
+    isSpace: isSpace,
+    previewSender: previewSender,
+    canonicalAlias: canonicalAlias,
+  );
 }
 
 int compareRooms(ChatRoom a, ChatRoom b) {

@@ -6,6 +6,15 @@ enum VisualTheme { parallax, parallaxDay, ultraviolet, ember, daylight }
 /// The theme used before any preference is loaded or when none is saved.
 const defaultVisualTheme = VisualTheme.parallax;
 
+/// Stored theme preference value meaning "Match system".
+const systemThemePreference = 'system';
+
+/// The Parallax palette that matches the platform's light/dark setting.
+VisualTheme visualThemeForBrightness(Brightness brightness) =>
+    brightness == Brightness.dark
+    ? VisualTheme.parallax
+    : VisualTheme.parallaxDay;
+
 /// Fixed brand colours for the Parallax mark (independent of the active theme).
 abstract final class ParallaxBrand {
   static const crimson = Color(0xFFD7263D);

@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'created_room_wait.dart';
+import 'features/home/home_features.dart';
+import 'features/home/room_list_filters.dart';
+import 'features/home/room_list_menu.dart';
+import 'features/home/room_list_tile.dart';
+import 'features/home/space_switcher.dart';
+import 'features/rooms_admin/rooms_admin_hooks.dart';
 import 'room_creation_request.dart';
 import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
@@ -9,7 +17,6 @@ import 'messaging_features.dart';
 import 'space_browser_screen.dart';
 import 'user_directory_screen.dart';
 import 'message_search_screen.dart';
-import 'room_avatar.dart';
 import 'room_screen.dart';
 import 'room_sync_panel.dart';
 import 'settings_screen.dart';
@@ -22,11 +29,17 @@ class InboxScreen extends StatefulWidget {
     required this.palette,
     required this.style,
     required this.onThemeChanged,
+    this.followSystemTheme = false,
+    this.onFollowSystemTheme,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final VisualTheme style;
   final ValueChanged<VisualTheme> onThemeChanged;
+
+  /// Theme follows the platform's light/dark setting ("Match system").
+  final bool followSystemTheme;
+  final ValueChanged<bool>? onFollowSystemTheme;
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
@@ -55,6 +68,8 @@ class _InboxScreenState extends State<InboxScreen> {
       ? widget.backend as MessagingFeatures
       : null;
 
+  RoomListFeatures? get _roomList => roomListFeaturesOf(widget.backend);
+
   @override
   void dispose() {
     _createdRoomWait?.cancel();
@@ -63,17 +78,18 @@ class _InboxScreenState extends State<InboxScreen> {
     super.dispose();
   }
 
-  bool _favourite(String roomId) {
+  bool _favourite(ChatRoom room) {
+    if (room.favourite) return true;
     try {
-      return _features?.isFavourite(roomId) ?? false;
+      return _features?.isFavourite(room.id) ?? false;
     } catch (_) {
       return false;
     } // A bad room projection cannot hide the inbox.
   }
 
   String _query = '';
-  bool _unreadOnly = false;
-  bool _invitesOnly = false;
+  Set<RoomListFilter> _filters = const {};
+  String? _spaceId;
   String? _pendingRoomAction;
   bool _creatingRoom = false;
   String? get _createdRoomId => _creation.roomId;
@@ -89,7 +105,7 @@ class _InboxScreenState extends State<InboxScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Decline'),
+            child: const Text('Decline invite'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -99,26 +115,150 @@ class _InboxScreenState extends State<InboxScreen> {
       ),
     );
     if (choice == null || !mounted || !_owner.isCurrent) return;
+    await (choice ? _acceptInvite(room) : _declineInvite(room, confirm: false));
+  }
+
+  Future<void> _acceptInvite(ChatRoom room) async {
+    if (_pendingRoomAction != null || !_owner.isCurrent) return;
+    setState(() => _pendingRoomAction = room.id);
     try {
-      if (choice) {
-        await widget.backend.acceptInvite(room.id);
-        if (mounted && _owner.isCurrent) _open(room.id);
-      } else {
-        await widget.backend.declineInvite(room.id);
+      await widget.backend.acceptInvite(room.id);
+      if (mounted && _owner.isCurrent) _open(room.id);
+    } catch (_) {
+      if (mounted && _owner.isCurrent) _showError('Couldn’t join this room.');
+    } finally {
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingRoomAction = null);
       }
+    }
+  }
+
+  Future<void> _declineInvite(ChatRoom room, {bool confirm = true}) async {
+    if (_pendingRoomAction != null || !_owner.isCurrent) return;
+    if (confirm) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Decline invite to ${room.name}?'),
+          content: const Text(
+            'You won’t be able to join unless you are invited again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Decline invite'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || !_owner.isCurrent) return;
+    }
+    setState(() => _pendingRoomAction = room.id);
+    try {
+      await widget.backend.declineInvite(room.id);
     } catch (_) {
       if (mounted && _owner.isCurrent) {
-        _showError(
-          choice
-              ? 'Couldn’t join this room.'
-              : 'Couldn’t decline this invitation.',
-        );
+        _showError('Couldn’t decline this invitation.');
+      }
+    } finally {
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingRoomAction = null);
       }
     }
   }
 
   Future<void> _showRoomActions(ChatRoom room) async {
     if (room.invited || _pendingRoomAction != null) return;
+    final roomList = _roomList;
+    final favourite = _favourite(room);
+    final choice = await showRoomListMenu(
+      context,
+      room: room,
+      favourite: favourite,
+      capabilities: RoomMenuCapabilities(
+        favourites: roomList != null || _features != null,
+        tags: roomList != null,
+        notifications: roomList != null,
+      ),
+    );
+    if (!mounted ||
+        !_owner.isCurrent ||
+        choice == null ||
+        _pendingRoomAction != null) {
+      return;
+    }
+    if (choice == RoomMenuAction.copyLink) {
+      final link =
+          roomList?.roomLink(room.id) ??
+          matrixToRoomLink(room.canonicalAlias ?? room.id);
+      await Clipboard.setData(ClipboardData(text: link));
+      if (mounted && _owner.isCurrent) _showError('Room link copied');
+      return;
+    }
+    if (choice == RoomMenuAction.leave &&
+        (!await confirmLeaveRoom(context, room) ||
+            !mounted ||
+            !_owner.isCurrent)) {
+      return;
+    }
+    setState(() => _pendingRoomAction = room.id);
+    try {
+      switch (choice) {
+        case RoomMenuAction.leave:
+          await widget.backend.leaveRoom(room.id);
+        case RoomMenuAction.favourite:
+          if (roomList != null) {
+            await roomList.setFavourite(room.id, !favourite);
+          } else {
+            await _features!.setFavourite(room.id, !favourite);
+          }
+        case RoomMenuAction.lowPriority:
+          await roomList!.setLowPriority(room.id, !room.lowPriority);
+        case RoomMenuAction.mute || RoomMenuAction.unmute:
+          await roomList!.setRoomMuted(room.id, choice == RoomMenuAction.mute);
+        case RoomMenuAction.markUnread:
+          await widget.backend.setRoomUnread(room.id, true);
+        case RoomMenuAction.markRead:
+          if (room.manuallyUnread) {
+            await widget.backend.setRoomUnread(room.id, false);
+          }
+          if (!mounted || !_owner.isCurrent) return;
+          await roomList?.markAsRead(
+            room.id,
+            publicReceipt:
+                FeatureSettingsScope.maybeOf(
+                  context,
+                )?.preferences.sendReadReceipts ??
+                true,
+          );
+        case RoomMenuAction.copyLink:
+          break;
+      }
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        _showError(switch (choice) {
+          RoomMenuAction.leave => 'Couldn’t leave this room.',
+          RoomMenuAction.favourite => 'Couldn’t update favourites.',
+          RoomMenuAction.lowPriority => 'Couldn’t update low priority.',
+          RoomMenuAction.mute || RoomMenuAction.unmute =>
+            'Couldn’t change notifications for this room.',
+          _ => 'Couldn’t update this room’s unread status.',
+        });
+      }
+    } finally {
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingRoomAction = null);
+      }
+    }
+  }
+
+  Future<void> _showSpaceOptions(HomeSpace space) async {
+    final roomList = _roomList;
+    if (roomList == null || !_owner.isCurrent) return;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -128,94 +268,68 @@ class _InboxScreenState extends State<InboxScreen> {
           children: [
             ListTile(
               title: Text(
-                room.name,
+                space.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              subtitle: const Text('Room actions'),
-            ),
-            ListTile(
-              leading: Icon(
-                room.manuallyUnread
-                    ? Icons.mark_email_read_outlined
-                    : Icons.mark_email_unread_outlined,
-              ),
-              title: Text(
-                room.manuallyUnread ? 'Clear manually unread' : 'Mark unread',
-              ),
-              onTap: () => Navigator.pop(sheetContext, 'unread'),
+              subtitle: const Text('Space'),
             ),
             if (_features != null)
               ListTile(
-                leading: Icon(
-                  _favourite(room.id)
-                      ? Icons.star_rounded
-                      : Icons.star_border_rounded,
-                ),
-                title: Text(
-                  _favourite(room.id) ? 'Remove favourite' : 'Add favourite',
-                ),
-                onTap: () => Navigator.pop(sheetContext, 'favourite'),
+                leading: const Icon(Icons.travel_explore_rounded),
+                title: const Text('Explore rooms in this Space'),
+                onTap: () => Navigator.pop(sheetContext, 'explore'),
               ),
             ListTile(
-              leading: const Icon(Icons.exit_to_app_rounded),
-              title: const Text('Leave room'),
+              leading: Icon(
+                Icons.exit_to_app_rounded,
+                color: Theme.of(sheetContext).colorScheme.error,
+              ),
+              title: Text(
+                'Leave Space',
+                style: TextStyle(
+                  color: Theme.of(sheetContext).colorScheme.error,
+                ),
+              ),
               onTap: () => Navigator.pop(sheetContext, 'leave'),
             ),
           ],
         ),
       ),
     );
-    if (!mounted ||
-        !_owner.isCurrent ||
-        choice == null ||
-        _pendingRoomAction != null) {
-      return;
-    }
-    if (choice == 'leave') {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Leave ${room.name}?'),
-          content: const Text(
-            'You will no longer see new messages in this room. '
-            'You may need another invitation to rejoin.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Leave'),
-            ),
-          ],
+    if (!mounted || !_owner.isCurrent || choice == null) return;
+    if (choice == 'explore') return _browseSpaces(spaceId: space.id);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Leave ${space.name}?'),
+        content: const Text(
+          'You will leave the Space itself. Rooms you joined through it stay '
+          'in your chat list until you leave them too.',
         ),
-      );
-      if (confirmed != true || !mounted || !_owner.isCurrent) return;
-    }
-    setState(() => _pendingRoomAction = room.id);
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Leave Space'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || !_owner.isCurrent) return;
     try {
-      if (choice == 'leave') {
-        await widget.backend.leaveRoom(room.id);
-      } else if (choice == 'favourite') {
-        await _features!.setFavourite(room.id, !_favourite(room.id));
-      } else {
-        await widget.backend.setRoomUnread(room.id, !room.manuallyUnread);
+      await roomList.leaveSpace(space.id);
+      if (mounted && _owner.isCurrent) {
+        setState(() {
+          if (_spaceId == space.id) _spaceId = null;
+        });
       }
     } catch (_) {
-      if (mounted && _owner.isCurrent) {
-        _showError(
-          choice == 'leave'
-              ? 'Couldn’t leave this room.'
-              : 'Couldn’t update this room’s unread status.',
-        );
-      }
-    } finally {
-      if (mounted && _owner.isCurrent) {
-        setState(() => _pendingRoomAction = null);
-      }
+      if (mounted && _owner.isCurrent) _showError('Couldn’t leave this Space.');
     }
   }
 
@@ -241,11 +355,12 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
-  Future<void> _browseSpaces() async {
+  Future<void> _browseSpaces({String? spaceId}) async {
     if (!mounted || !_owner.isCurrent || _features == null) return;
     final joinedRoomId = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => SpaceBrowserScreen(backend: widget.backend),
+        builder: (_) =>
+            SpaceBrowserScreen(backend: widget.backend, spaceId: spaceId),
       ),
     );
     if (mounted && _owner.isCurrent && joinedRoomId != null) {
@@ -255,6 +370,15 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _newConversation() async {
     if (!mounted || !_owner.isCurrent) return;
+    if (startChatAvailable) {
+      final roomId = await openStartChat(
+        context,
+        widget.backend,
+        widget.palette,
+      );
+      if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
+      return;
+    }
     if (_features != null) return _findPeople();
     final controller = TextEditingController();
     try {
@@ -396,28 +520,49 @@ class _InboxScreenState extends State<InboxScreen> {
     if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
   }
 
-  String _time(DateTime? value) {
-    if (value == null) return '';
-    final now = DateTime.now();
-    final local = value.toLocal();
-    if (now.year == local.year &&
-        now.month == local.month &&
-        now.day == local.day) {
-      return TimeOfDay.fromDateTime(local).format(context);
+  void _openSettings() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SettingsScreen(
+        backend: widget.backend,
+        palette: widget.palette,
+        style: widget.style,
+        onThemeChanged: widget.onThemeChanged,
+        followSystemTheme: widget.followSystemTheme,
+        onFollowSystemTheme: widget.onFollowSystemTheme,
+      ),
+    ),
+  );
+
+  List<HomeSpace> _spaces() {
+    try {
+      return _roomList?.joinedSpaces ?? const [];
+    } catch (_) {
+      return const [];
     }
-    return '${local.day}/${local.month}';
+  }
+
+  Set<String>? _spaceRooms(String? spaceId) {
+    if (spaceId == null) return null;
+    try {
+      return _roomList?.spaceDescendants(spaceId) ?? const {};
+    } catch (_) {
+      return const {};
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
-    final compact =
-        FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
+    final settings = FeatureSettingsScope.maybeOf(context)?.preferences;
+    final compact = settings?.compact ?? false;
+    final hideInviteAvatars = settings?.hideInviteAvatars ?? false;
     return AnimatedBuilder(
       animation: widget.backend,
       builder: (context, _) {
-        final roomCountLabel = widget.backend.rooms.isNotEmpty
-            ? '${widget.backend.rooms.length} ROOMS'
+        final chats = widget.backend.rooms.where((room) => !room.isSpace);
+        final chatCount = chats.length;
+        final roomCountLabel = chatCount > 0
+            ? '$chatCount ROOMS'
             : switch (widget.backend.roomSyncState) {
                 RoomSyncState.loading => 'SYNCING',
                 RoomSyncState.error => 'SYNC ERROR',
@@ -430,34 +575,27 @@ class _InboxScreenState extends State<InboxScreen> {
                 .toSet() ??
             <String>{};
         final favourites = {
-          for (final room in widget.backend.rooms) room.id: _favourite(room.id),
+          for (final room in widget.backend.rooms)
+            if (_favourite(room)) room.id,
         };
-        final originalOrder = {
-          for (final (index, room) in widget.backend.rooms.indexed)
-            room.id: index,
-        };
-        final rooms = widget.backend.rooms
-            .where(
-              (room) =>
-                  (!_unreadOnly ||
-                      room.invited ||
-                      room.unread > 0 ||
-                      room.manuallyUnread ||
-                      failedRooms.contains(room.id)) &&
-                  (!_invitesOnly || room.invited) &&
-                  (room.name.toLowerCase().contains(_query.toLowerCase()) ||
-                      room.id.toLowerCase().contains(_query.toLowerCase())),
-            )
-            .toList();
-        if (_features != null) {
-          rooms.sort((a, b) {
-            if (a.invited != b.invited) return a.invited ? -1 : 1;
-            final af = favourites[a.id] ?? false;
-            final bf = favourites[b.id] ?? false;
-            if (af != bf) return af ? -1 : 1;
-            return originalOrder[a.id]!.compareTo(originalOrder[b.id]!);
-          });
-        }
+        final spaces = _spaces();
+        final spaceId = spaces.any((space) => space.id == _spaceId)
+            ? _spaceId
+            : null;
+        final rooms = filterRoomList(
+          widget.backend.rooms,
+          _filters,
+          RoomListContext(
+            favourites: favourites,
+            failedRooms: failedRooms,
+            spaceRooms: _spaceRooms(spaceId),
+            query: _query,
+          ),
+        );
+        final emptyState = roomListEmptyState(
+          _filters,
+          spaceSelected: spaceId != null,
+        );
         return Scaffold(
           body: GlowBackdrop(
             palette: p,
@@ -511,16 +649,7 @@ class _InboxScreenState extends State<InboxScreen> {
                         IconButton(
                           tooltip: 'Settings',
                           iconSize: 25,
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => SettingsScreen(
-                                backend: widget.backend,
-                                palette: p,
-                                style: widget.style,
-                                onThemeChanged: widget.onThemeChanged,
-                              ),
-                            ),
-                          ),
+                          onPressed: _openSettings,
                           icon: const Icon(Icons.tune_rounded),
                         ),
                       ],
@@ -634,283 +763,121 @@ class _InboxScreenState extends State<InboxScreen> {
                               ),
                             ],
                           ),
-                        const SizedBox(height: 17),
+                        if (spaces.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          SpaceSwitcher(
+                            spaces: spaces,
+                            selected: spaceId,
+                            backend: widget.backend,
+                            palette: p,
+                            onSelected: (id) => setState(() => _spaceId = id),
+                            onOptions: _showSpaceOptions,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
-                              _FilterChip(
-                                label: 'All chats',
-                                selected: !_unreadOnly && !_invitesOnly,
-                                palette: p,
-                                onTap: () => setState(() {
-                                  _unreadOnly = false;
-                                  _invitesOnly = false;
-                                }),
-                              ),
-                              const SizedBox(width: 9),
-                              _FilterChip(
-                                label: 'Unread',
-                                selected: _unreadOnly,
-                                palette: p,
-                                onTap: () => setState(() {
-                                  _unreadOnly = true;
-                                  _invitesOnly = false;
-                                }),
-                              ),
-                              const SizedBox(width: 9),
-                              _FilterChip(
-                                label: 'Invites',
-                                selected: _invitesOnly,
-                                palette: p,
-                                onTap: () => setState(() {
-                                  _invitesOnly = true;
-                                  _unreadOnly = false;
-                                }),
-                              ),
+                              if (_filters.isNotEmpty) ...[
+                                IconButton.filledTonal(
+                                  tooltip: 'Clear filters',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () =>
+                                      setState(() => _filters = const {}),
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              // Element X keeps selected filters first.
+                              for (final filter in [
+                                ...RoomListFilter.values.where(
+                                  _filters.contains,
+                                ),
+                                ...RoomListFilter.values.where(
+                                  (f) => !_filters.contains(f),
+                                ),
+                              ]) ...[
+                                _FilterChip(
+                                  label: filter.label,
+                                  selected: _filters.contains(filter),
+                                  palette: p,
+                                  onTap: () => setState(
+                                    () => _filters = toggleRoomListFilter(
+                                      _filters,
+                                      filter,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 9),
+                              ],
                             ],
                           ),
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 14),
                       ],
                     ),
                   ),
                   Expanded(
                     child:
-                        widget.backend.rooms.isEmpty &&
+                        chatCount == 0 &&
                             widget.backend.roomSyncState != RoomSyncState.ready
                         ? RoomSyncPanel(backend: widget.backend, palette: p)
                         : rooms.isEmpty
-                        ? LayoutBuilder(
-                            builder: (context, viewport) => SingleChildScrollView(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: viewport.maxHeight,
-                                ),
-                                child: Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(35),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _query.isNotEmpty
-                                              ? Icons.search_off_rounded
-                                              : Icons.forum_outlined,
-                                          size: 50,
-                                          color: p.secondary,
-                                        ),
-                                        const SizedBox(height: 14),
-                                        Text(
-                                          _query.isNotEmpty
-                                              ? 'No matches yet'
-                                              : _invitesOnly
-                                              ? 'No invitations'
-                                              : _unreadOnly
-                                              ? 'All caught up'
-                                              : 'No rooms found',
-                                          style: TextStyle(
-                                            color: p.foreground,
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          _query.isNotEmpty
-                                              ? 'Try another search.'
-                                              : _invitesOnly
-                                              ? 'Invitations will appear here.'
-                                              : _unreadOnly
-                                              ? 'No unread rooms right now.'
-                                              : 'Synced as ${widget.backend.userId ?? 'this account'}. '
-                                                    'No joined rooms or invitations were returned.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: p.muted,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                        if (_query.isEmpty &&
-                                            !_invitesOnly &&
-                                            !_unreadOnly) ...[
-                                          const SizedBox(height: 18),
-                                          OutlinedButton.icon(
-                                            onPressed: () =>
-                                                widget.backend.refreshRooms(),
-                                            icon: const Icon(
-                                              Icons.refresh_rounded,
-                                            ),
-                                            label: const Text('Refresh rooms'),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
+                        ? _EmptyRoomList(
+                            palette: p,
+                            icon: _query.isNotEmpty
+                                ? Icons.search_off_rounded
+                                : _filters.contains(RoomListFilter.unread)
+                                ? Icons.celebration_outlined
+                                : Icons.forum_outlined,
+                            title: _query.isNotEmpty
+                                ? 'No matches yet'
+                                : emptyState?.title ?? 'No rooms found',
+                            subtitle: _query.isNotEmpty
+                                ? 'Try another search.'
+                                : emptyState?.subtitle ??
+                                      'Synced as ${widget.backend.userId ?? 'this account'}. '
+                                          'No joined rooms or invitations were returned.',
+                            action: _query.isEmpty && emptyState == null
+                                ? OutlinedButton.icon(
+                                    onPressed: () =>
+                                        widget.backend.refreshRooms(),
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: const Text('Refresh rooms'),
+                                  )
+                                : _query.isEmpty && _filters.isNotEmpty
+                                ? OutlinedButton.icon(
+                                    onPressed: () =>
+                                        setState(() => _filters = const {}),
+                                    icon: const Icon(Icons.filter_alt_off),
+                                    label: const Text('Clear filters'),
+                                  )
+                                : null,
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                             itemCount: rooms.length,
                             itemBuilder: (context, index) {
                               final room = rooms[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Material(
-                                  color: p.surface,
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: InkWell(
-                                    onTap: room.invited
-                                        ? () => _showInvitation(room)
-                                        : () => _open(room.id),
-                                    onLongPress: room.invited
-                                        ? null
-                                        : () => _showRoomActions(room),
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: Padding(
-                                      padding: EdgeInsets.all(compact ? 9 : 14),
-                                      child: Row(
-                                        children: [
-                                          RoomAvatar(
-                                            room: room,
-                                            backend: widget.backend,
-                                            palette: p,
-                                          ),
-                                          const SizedBox(width: 13),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        room.name,
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          color: p.foreground,
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          fontSize: 16,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    if (favourites[room.id] ==
-                                                        true)
-                                                      Icon(
-                                                        Icons.star_rounded,
-                                                        size: 16,
-                                                        color: p.accent,
-                                                      ),
-                                                    if (failedRooms.contains(
-                                                      room.id,
-                                                    ))
-                                                      Tooltip(
-                                                        message:
-                                                            'Message not sent',
-                                                        child: Icon(
-                                                          Icons.error_outline,
-                                                          size: 16,
-                                                          color: p.accent,
-                                                        ),
-                                                      ),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      _time(room.lastActivity),
-                                                      style: TextStyle(
-                                                        color: p.muted,
-                                                        fontSize: 11,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 5),
-                                                Row(
-                                                  children: [
-                                                    if (room.encrypted) ...[
-                                                      Icon(
-                                                        Icons.lock_outline,
-                                                        size: 13,
-                                                        color: p.secondary,
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                    ],
-                                                    Expanded(
-                                                      child: Text(
-                                                        room.invited
-                                                            ? 'Invited to join'
-                                                            : room
-                                                                  .preview
-                                                                  .isEmpty
-                                                            ? 'No messages yet'
-                                                            : room.preview,
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          color: p.muted,
-                                                          fontSize: 13,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    if (room.invited) ...[
-                                                      const SizedBox(width: 8),
-                                                      Text(
-                                                        'INVITE',
-                                                        style: TextStyle(
-                                                          color: p.secondary,
-                                                          fontSize: 10,
-                                                          fontWeight:
-                                                              FontWeight.w800,
-                                                        ),
-                                                      ),
-                                                    ] else if (room.unread >
-                                                            0 ||
-                                                        room.manuallyUnread) ...[
-                                                      const SizedBox(width: 8),
-                                                      Container(
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 7,
-                                                              vertical: 3,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          color: p.accent,
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                11,
-                                                              ),
-                                                        ),
-                                                        child: Text(
-                                                          room.unread == 0
-                                                              ? '•'
-                                                              : room.unread > 99
-                                                              ? '99+'
-                                                              : '${room.unread}',
-                                                          style: TextStyle(
-                                                            color: p.accentOn,
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                            fontSize: 11,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              return RoomListTile(
+                                key: ValueKey('room-${room.id}'),
+                                room: room,
+                                backend: widget.backend,
+                                palette: p,
+                                compact: compact,
+                                favourite: favourites.contains(room.id),
+                                failedSend: failedRooms.contains(room.id),
+                                hideInviteAvatar: hideInviteAvatars,
+                                busy: _pendingRoomAction == room.id,
+                                onTap: room.invited
+                                    ? () => _showInvitation(room)
+                                    : () => _open(room.id),
+                                onLongPress: room.invited
+                                    ? null
+                                    : () => _showRoomActions(room),
+                                onAccept: () => _acceptInvite(room),
+                                onDecline: () => _declineInvite(room),
                               );
                             },
                           ),
@@ -920,7 +887,7 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
           ),
           floatingActionButton:
-              widget.backend.rooms.isEmpty &&
+              chatCount == 0 &&
                   widget.backend.roomSyncState != RoomSyncState.ready
               ? null
               : FloatingActionButton.extended(
@@ -938,6 +905,58 @@ class _InboxScreenState extends State<InboxScreen> {
       },
     );
   }
+}
+
+class _EmptyRoomList extends StatelessWidget {
+  const _EmptyRoomList({
+    required this.palette,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.action,
+  });
+  final AppPalette palette;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, viewport) => SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: viewport.maxHeight),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(35),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 50, color: palette.secondary),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: palette.foreground,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: palette.muted, height: 1.4),
+                ),
+                if (action != null) ...[const SizedBox(height: 18), action!],
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _CreateRoomDialog extends StatefulWidget {
@@ -1006,14 +1025,18 @@ class _FilterChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => ActionChip(
-    onPressed: onTap,
-    label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-    backgroundColor: selected ? palette.accent : palette.surface,
-    labelStyle: TextStyle(
-      color: selected ? palette.accentOn : palette.foreground,
+  Widget build(BuildContext context) => Semantics(
+    selected: selected,
+    button: true,
+    child: ActionChip(
+      onPressed: onTap,
+      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      backgroundColor: selected ? palette.accent : palette.surface,
+      labelStyle: TextStyle(
+        color: selected ? palette.accentOn : palette.foreground,
+      ),
+      side: BorderSide(color: selected ? palette.accent : palette.stroke),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    side: BorderSide(color: selected ? palette.accent : palette.stroke),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   );
 }

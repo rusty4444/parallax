@@ -1,6 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Element X "Show media in timeline" (TimelineProtection) choices.
+enum MediaPreviewMode {
+  /// Always load image/video previews.
+  always,
+
+  /// Load previews only in private (non-public) rooms.
+  privateRooms,
+
+  /// Never load previews automatically; tap to show.
+  never,
+}
+
 /// App-wide, nonsensitive display and messaging preferences.
 ///
 /// Defaults are available immediately. Await [load] before applying saved values
@@ -14,21 +26,44 @@ class AppearancePreferences extends ChangeNotifier {
   static const _textScaleKey = 'parallax.appearance.v1.text_scale';
   static const _compactKey = 'parallax.appearance.v1.compact';
   static const _autoLoadMediaKey = 'parallax.appearance.v1.auto_load_media';
+  static const _mediaPreviewKey = 'parallax.appearance.v1.media_preview_mode';
   static const _sendReadReceiptsKey =
       'parallax.appearance.v1.send_read_receipts';
+  static const _sendTypingKey = 'parallax.appearance.v1.send_typing';
+  static const _hideInviteAvatarsKey =
+      'parallax.appearance.v1.hide_invite_avatars';
 
   SharedPreferences? _prefs;
   Future<void> _tail = Future<void>.value();
   bool _disposed = false;
   double _textScale = 1;
   bool _compact = false;
-  bool _autoLoadMedia = true;
+  MediaPreviewMode _mediaPreviewMode = MediaPreviewMode.always;
   bool _sendReadReceipts = true;
+  bool _sendTypingNotifications = true;
+  bool _hideInviteAvatars = false;
 
   double get textScale => _textScale;
   bool get compact => _compact;
-  bool get autoLoadMedia => _autoLoadMedia;
+
+  /// True only when previews load everywhere. Renderers that cannot tell
+  /// whether a room is public treat "private rooms only" as hidden (fail safe);
+  /// renderers that can should use [autoLoadMediaIn].
+  bool get autoLoadMedia => _mediaPreviewMode == MediaPreviewMode.always;
+  MediaPreviewMode get mediaPreviewMode => _mediaPreviewMode;
   bool get sendReadReceipts => _sendReadReceipts;
+  bool get sendTypingNotifications => _sendTypingNotifications;
+
+  /// Element X "Hide avatars in room invite requests".
+  bool get hideInviteAvatars => _hideInviteAvatars;
+
+  /// Whether media previews load automatically in a room.
+  bool autoLoadMediaIn({required bool publicRoom}) =>
+      switch (_mediaPreviewMode) {
+        MediaPreviewMode.always => true,
+        MediaPreviewMode.privateRooms => !publicRoom,
+        MediaPreviewMode.never => false,
+      };
 
   /// Loads the injected preferences or obtains SharedPreferences lazily.
   /// Loads and mutations are serialized, so an older load cannot undo a setter.
@@ -39,17 +74,29 @@ class AppearancePreferences extends ChangeNotifier {
         ? rawScale.toDouble().clamp(minTextScale, maxTextScale).toDouble()
         : 1.0;
     final compact = _boolOr(prefs.get(_compactKey), false);
-    final autoLoadMedia = _boolOr(prefs.get(_autoLoadMediaKey), true);
+    final rawMode = prefs.get(_mediaPreviewKey);
+    // Earlier versions stored only an on/off switch; keep its meaning.
+    final mode =
+        MediaPreviewMode.values.where((m) => m.name == rawMode).firstOrNull ??
+        (_boolOr(prefs.get(_autoLoadMediaKey), true)
+            ? MediaPreviewMode.always
+            : MediaPreviewMode.never);
     final sendReadReceipts = _boolOr(prefs.get(_sendReadReceiptsKey), true);
+    final sendTyping = _boolOr(prefs.get(_sendTypingKey), true);
+    final hideInviteAvatars = _boolOr(prefs.get(_hideInviteAvatarsKey), false);
     final changed =
         scale != _textScale ||
         compact != _compact ||
-        autoLoadMedia != _autoLoadMedia ||
-        sendReadReceipts != _sendReadReceipts;
+        mode != _mediaPreviewMode ||
+        sendReadReceipts != _sendReadReceipts ||
+        sendTyping != _sendTypingNotifications ||
+        hideInviteAvatars != _hideInviteAvatars;
     _textScale = scale;
     _compact = compact;
-    _autoLoadMedia = autoLoadMedia;
+    _mediaPreviewMode = mode;
     _sendReadReceipts = sendReadReceipts;
+    _sendTypingNotifications = sendTyping;
+    _hideInviteAvatars = hideInviteAvatars;
     if (changed) _notifyIfActive();
   });
 
@@ -74,11 +121,20 @@ class AppearancePreferences extends ChangeNotifier {
     _notifyIfActive();
   });
 
-  Future<void> setAutoLoadMedia(bool value) => _ordered(() async {
+  /// Shorthand for [setMediaPreviewMode] with always/never.
+  Future<void> setAutoLoadMedia(bool value) => setMediaPreviewMode(
+    value ? MediaPreviewMode.always : MediaPreviewMode.never,
+  );
+
+  Future<void> setMediaPreviewMode(MediaPreviewMode mode) => _ordered(() async {
     final prefs = await _preferences();
-    _requireSaved(await prefs.setBool(_autoLoadMediaKey, value));
-    if (_autoLoadMedia == value) return;
-    _autoLoadMedia = value;
+    _requireSaved(await prefs.setString(_mediaPreviewKey, mode.name));
+    // Keep the legacy key coherent for older readers of the same store.
+    _requireSaved(
+      await prefs.setBool(_autoLoadMediaKey, mode == MediaPreviewMode.always),
+    );
+    if (_mediaPreviewMode == mode) return;
+    _mediaPreviewMode = mode;
     _notifyIfActive();
   });
 
@@ -87,6 +143,22 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setBool(_sendReadReceiptsKey, value));
     if (_sendReadReceipts == value) return;
     _sendReadReceipts = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setSendTypingNotifications(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_sendTypingKey, value));
+    if (_sendTypingNotifications == value) return;
+    _sendTypingNotifications = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setHideInviteAvatars(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_hideInviteAvatarsKey, value));
+    if (_hideInviteAvatars == value) return;
+    _hideInviteAvatars = value;
     _notifyIfActive();
   });
 
