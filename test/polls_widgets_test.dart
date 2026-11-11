@@ -353,6 +353,24 @@ void main() {
       expect(backend.ends, [r'$poll']);
     });
 
+    testWidgets('answers expose a tappable, labelled semantics node', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final backend = _Backend()..setRelations(r'$poll', [_vote(_me, 'a')]);
+      await tester.pumpWidget(_app(_body(backend)));
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^Sushi'))),
+        containsSemantics(
+          label: 'Sushi, 0 votes, 0 percent of total votes',
+          isButton: true,
+          hasTapAction: true,
+          isInMutuallyExclusiveGroup: true,
+        ),
+      );
+      handle.dispose();
+    });
+
     testWidgets('local echoes cannot be voted on', (tester) async {
       final backend = _Backend();
       await tester.pumpWidget(

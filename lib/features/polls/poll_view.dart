@@ -370,6 +370,9 @@ class _AnswerRow extends StatelessWidget {
       inMutuallyExclusiveGroup: !multiple,
       checked: multiple ? selected : null,
       enabled: onTap != null,
+      button: onTap != null,
+      // The row's own tap action is excluded below, so expose it here.
+      onTap: onTap,
       label: [
         answer.text,
         if (showResults) '$votes ${votes == 1 ? 'vote' : 'votes'}',
