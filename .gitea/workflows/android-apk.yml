@@ -1,0 +1,64 @@
+name: Android APK
+
+# Gitea Actions workflow for a self-hosted runner labelled `parallax-android`
+# with Flutter 3.44, JDK 17, Android SDK 36 (build-tools 36.0.0, NDK
+# 28.2.13676358) and rustup Android targets installed on the host. The runner
+# must also hold the personal signing key at ~/.android/debug.keystore
+# (SHA-256 2E:1C:94:…:EF:F7). Without a registered runner nothing runs; the
+# coordinator then builds and publishes the same artifacts manually.
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+
+jobs:
+  android-apk:
+    runs-on: parallax-android
+    timeout-minutes: 60
+    env:
+      APK: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve and check Dart
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+      - name: Build arm64 release-optimised test APK
+        id: build
+        run: |
+          BUILD_NUMBER=$((30000 + ${{ gitea.run_number }}))
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          # Flutter's arm64 split adds 2000 to the requested build number.
+          echo "APK_VERSION_CODE=$((BUILD_NUMBER + 2000))" >> "$GITHUB_ENV"
+          flutter build apk --release --target-platform android-arm64 --split-per-abi --build-number="$BUILD_NUMBER"
+
+      - name: Inspect APK
+        run: |
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          test -s "$APK"
+          "$BT/apksigner" verify --print-certs "$APK" |
+            grep -Fq 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7'
+          "$BT/aapt" dump badging "$APK" | grep -Fq "package: name='net.samrussell.parallax' versionCode='$APK_VERSION_CODE'"
+          unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so'
+
+      - name: Publish a per-commit test release
+        if: ${{ gitea.ref == 'refs/heads/main' }}
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN }}
+          API: ${{ gitea.server_url }}/api/v1/repos/${{ gitea.repository }}
+        run: |
+          TAG="build-${GITEA_SHA:-${{ gitea.sha }}}"
+          TAG="${TAG:0:18}"
+          ASSET="parallax-${TAG}-arm64.apk"
+          if curl -fsS -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" >/dev/null; then
+            echo "Release $TAG already exists; not replacing its APK."
+            exit 0
+          fi
+          ID=$(curl -fsS -X POST -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
+            -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"${{ gitea.sha }}\",\"name\":\"Parallax $TAG\",\"prerelease\":true,\"body\":\"Personal Android test build (version code $APK_VERSION_CODE). Signed with the personal debug key. Not a production-signed or live two-device E2EE-validated release.\"}" \
+            "$API/releases" | jq -r .id)
+          curl -fsS -X POST -H "Authorization: token $TOKEN" \
+            -F "attachment=@$APK;filename=$ASSET" "$API/releases/$ID/assets?name=$ASSET" >/dev/null
