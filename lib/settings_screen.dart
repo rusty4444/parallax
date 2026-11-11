@@ -59,7 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String title = 'Restore encryption identity',
     String description =
         'Enter your existing recovery key or passphrase. '
-        'It will not be saved by MatriXpress. Never share it.',
+        'It will not be saved by Parallax. Never share it.',
   }) async {
     if (!mounted || !_owner.isCurrent || _credentialDialogOpen) return null;
     _credentialDialogOpen = true;
@@ -592,7 +592,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'MatriXpress 0.3.0 · Built for speed, made for people.',
+                'Parallax 0.4.0 · Every angle of the conversation.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: p.muted, fontSize: 12),
               ),
@@ -609,7 +609,7 @@ class _RecoveryDialog extends StatefulWidget {
     this.title = 'Restore encryption identity',
     this.description =
         'Enter your existing recovery key or passphrase. '
-        'It will not be saved by MatriXpress. Never share it.',
+        'It will not be saved by Parallax. Never share it.',
   });
   final String title;
   final String description;

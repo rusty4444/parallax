@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/attachment_picker.dart';
+import 'package:parallax/attachment_picker.dart';
 
 void main() {
   test('attachment filenames are safe suggestions for document providers', () {

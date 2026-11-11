@@ -1,6 +1,6 @@
 # Security, privacy and preview limitations
 
-MatriXpress is an independently built Android Matrix client. This is a personal test preview, not a security certification or a claim of Element X parity. Automated transport, storage and widget tests do not establish live end-to-end encryption interoperability.
+Parallax is an independently built Android Matrix client. This is a personal test preview, not a security certification or a claim of Element X parity. Automated transport, storage and widget tests do not establish live end-to-end encryption interoperability.
 
 ## Local data
 

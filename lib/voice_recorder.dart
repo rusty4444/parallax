@@ -86,7 +86,7 @@ class NativeVoiceRecorder implements VoiceRecorder {
 
   Future<Directory> _temporaryDirectory() async {
     return _directory ??= await (await getTemporaryDirectory()).createTemp(
-      'matrixpress-voice-',
+      'parallax-voice-',
     );
   }
 

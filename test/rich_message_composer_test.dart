@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/rich_message_composer.dart';
-import 'package:matrixpress/voice_recorder.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/rich_message_composer.dart';
+import 'package:parallax/voice_recorder.dart';
 
 MediaSelection attachment(String name, {int size = 3}) => MediaSelection(
   bytes: Uint8List(size),

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/crypto_setup_policy.dart';
+import 'package:parallax/crypto_setup_policy.dart';
 
 void main() {
   test('stale local default storage pointer is not accepted', () {

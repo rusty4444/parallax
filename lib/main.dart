@@ -19,7 +19,7 @@ import 'widgets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MatrixpressApp());
+  runApp(const ParallaxApp());
 }
 
 typedef MatrixBackendFactory =
@@ -28,8 +28,8 @@ typedef MatrixBackendFactory =
       required bool Function() sendReadReceipts,
     });
 
-class MatrixpressApp extends StatefulWidget {
-  const MatrixpressApp({
+class ParallaxApp extends StatefulWidget {
+  const ParallaxApp({
     super.key,
     this.backend,
     this.preferences,
@@ -53,10 +53,10 @@ class MatrixpressApp extends StatefulWidget {
   final PushNotifications Function()? notificationsFactory;
 
   @override
-  State<MatrixpressApp> createState() => _MatrixpressAppState();
+  State<ParallaxApp> createState() => _ParallaxAppState();
 }
 
-class _MatrixpressAppState extends State<MatrixpressApp> {
+class _ParallaxAppState extends State<ParallaxApp> {
   late final AppearancePreferences _preferences;
   late final MessageDraftStore _draftStore;
   late final PushNotifications _notifications;
@@ -64,7 +64,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
   late final bool _ownsPreferences;
   late final bool _ownsNotifications;
   late final bool _ownsBackend;
-  VisualTheme _style = VisualTheme.ultraviolet;
+  VisualTheme _style = defaultVisualTheme;
   GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   String? _accountKey;
   String? _userId;
@@ -369,7 +369,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
     try {
       await _preferences.load();
     } catch (_) {
-      debugPrint('MatriXpress appearance preferences could not be loaded.');
+      debugPrint('Parallax appearance preferences could not be loaded.');
     }
   }
 
@@ -383,7 +383,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
         if (theme.name == saved) setState(() => _style = theme);
       }
     } catch (_) {
-      debugPrint('MatriXpress theme preference could not be loaded.');
+      debugPrint('Parallax theme preference could not be loaded.');
     }
   }
 
@@ -399,7 +399,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
       if (!mounted || _style != style) return;
       await prefs.setString('visual_theme', style.name);
     } catch (_) {
-      debugPrint('MatriXpress theme preference could not be saved.');
+      debugPrint('Parallax theme preference could not be saved.');
     }
   }
 
@@ -431,7 +431,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
     try {
       await cleanup;
     } catch (_) {
-      debugPrint('MatriXpress push cleanup failed during teardown.');
+      debugPrint('Parallax push cleanup failed during teardown.');
     } finally {
       // shutdown disposes the notifier, which may enqueue a final cleanup retry.
       await _notifications.settle();
@@ -453,7 +453,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
       animation: _preferences,
       builder: (context, _) => MaterialApp(
         navigatorKey: _navigatorKey,
-        title: 'MatriXpress',
+        title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style),
         builder: (context, child) => FeatureSettingsScope(
@@ -507,7 +507,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
                       BrandMark(palette: p, size: 72),
                       const SizedBox(height: 20),
                       Text(
-                        'MatriXpress',
+                        'Parallax',
                         style: TextStyle(
                           color: p.foreground,
                           fontSize: 27,
@@ -543,7 +543,7 @@ class _MatrixpressAppState extends State<MatrixpressApp> {
                         Icon(Icons.error_outline, color: p.accent, size: 48),
                         const SizedBox(height: 18),
                         Text(
-                          'Couldn’t start MatriXpress',
+                          'Couldn’t start Parallax',
                           style: TextStyle(
                             color: p.foreground,
                             fontSize: 22,

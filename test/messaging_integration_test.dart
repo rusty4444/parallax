@@ -4,22 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/appearance_preferences.dart';
-import 'package:matrixpress/appearance_settings_screen.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/feature_settings_scope.dart';
-import 'package:matrixpress/inbox_screen.dart';
-import 'package:matrixpress/main.dart';
-import 'package:matrixpress/media_viewer.dart';
-import 'package:matrixpress/message_draft_store.dart';
-import 'package:matrixpress/message_image.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/rich_message_composer.dart';
-import 'package:matrixpress/room_screen.dart';
-import 'package:matrixpress/space_browser_screen.dart';
-import 'package:matrixpress/thread_screen.dart';
-import 'package:matrixpress/user_directory_screen.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/appearance_settings_screen.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/inbox_screen.dart';
+import 'package:parallax/main.dart';
+import 'package:parallax/media_viewer.dart';
+import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/message_image.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/rich_message_composer.dart';
+import 'package:parallax/room_screen.dart';
+import 'package:parallax/space_browser_screen.dart';
+import 'package:parallax/thread_screen.dart';
+import 'package:parallax/user_directory_screen.dart';
 
 import 'widget_test.dart' show FakeBackend, FakeBackgroundStore;
 
@@ -170,7 +170,7 @@ Widget room(
   child: MaterialApp(
     home: RoomScreen(
       backend: backend,
-      palette: paletteFor(VisualTheme.ultraviolet),
+      palette: paletteFor(VisualTheme.parallax),
       roomId: id,
       draftStore: drafts,
       backgroundStore: FakeBackgroundStore(),
@@ -563,8 +563,8 @@ void main() {
         MaterialApp(
           home: InboxScreen(
             backend: backend,
-            palette: paletteFor(VisualTheme.ultraviolet),
-            style: VisualTheme.ultraviolet,
+            palette: paletteFor(VisualTheme.parallax),
+            style: VisualTheme.parallax,
             onThemeChanged: (_) {},
           ),
         ),
@@ -618,8 +618,8 @@ void main() {
       MaterialApp(
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -642,8 +642,8 @@ void main() {
           child: MaterialApp(
             home: InboxScreen(
               backend: backend,
-              palette: paletteFor(VisualTheme.ultraviolet),
-              style: VisualTheme.ultraviolet,
+              palette: paletteFor(VisualTheme.parallax),
+              style: VisualTheme.parallax,
               onThemeChanged: (_) {},
             ),
           ),
@@ -769,7 +769,7 @@ void main() {
       await preferences.setTextScale(1.3);
       final backend = FeaturesBackend();
       await tester.pumpWidget(
-        MatrixpressApp(
+        ParallaxApp(
           backend: backend,
           preferences: preferences,
           draftStore: Drafts(),
@@ -907,7 +907,7 @@ void main() {
             ),
           ];
         await tester.pumpWidget(
-          MatrixpressApp(
+          ParallaxApp(
             backend: backend,
             preferences: AppearancePreferences(),
             draftStore: Drafts(),

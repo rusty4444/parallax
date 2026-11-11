@@ -6,12 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/created_room_wait.dart';
-import 'package:matrixpress/inbox_screen.dart';
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/room_creation_request.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/created_room_wait.dart';
+import 'package:parallax/inbox_screen.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/room_creation_request.dart';
 
 import 'widget_test.dart' show FakeBackend;
 
@@ -573,8 +573,8 @@ Future<void> _mountInbox(WidgetTester tester, ChatBackend backend) async {
     MaterialApp(
       home: InboxScreen(
         backend: backend,
-        palette: paletteFor(VisualTheme.ultraviolet),
-        style: VisualTheme.ultraviolet,
+        palette: paletteFor(VisualTheme.parallax),
+        style: VisualTheme.parallax,
         onThemeChanged: (_) {},
       ),
     ),

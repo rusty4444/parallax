@@ -189,7 +189,7 @@ zero-metadata delivery. The nonce binds routing to a locally authenticated
 account/device generation; it is not a cryptographic signature from the homeserver
 and does not authorize access to a room.
 
-All app-rendered alerts use fixed text: “New message” / “Open MatriXpress to read your
+All app-rendered alerts use fixed text: “New message” / “Open Parallax to read your
 messages.” Only the registration nonce, room ID and optional event ID survive
 payload parsing. Notifications never render untrusted private message contents.
 The background top-level `matrixPushBackgroundHandler` is registered **only** after

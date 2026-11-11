@@ -19,7 +19,7 @@ class MessageDraftStore {
     : _storage = storage ?? const PlatformSecureValueStore();
 
   final SecureValueStore _storage;
-  static const _prefix = 'matrixpress.message_drafts.v1';
+  static const _prefix = 'parallax.message_drafts.v1';
   static final _accountTails = <String, Future<void>>{};
   static final _validRoomToken = RegExp(r'^[a-f0-9]{64}$');
 

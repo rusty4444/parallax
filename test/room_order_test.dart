@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
+import 'package:parallax/chat_backend.dart';
 
 void main() {
   test('projects inbox ordering from safe room summaries', () {

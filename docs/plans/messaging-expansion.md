@@ -1,8 +1,8 @@
-# MatriXpress messaging expansion implementation plan
+# Parallax messaging expansion implementation plan
 
 > **For Hermes:** Use subagent-driven-development to implement this plan, with spec review before quality review and an integration review before publishing.
 
-**Goal:** Implement every NeonMatrix-inspired feature proposed to Sam in MatriXpress, preserve its stronger encryption/trust invariants, and publish a verified GitHub Android preview release.
+**Goal:** Implement every NeonMatrix-inspired feature proposed to Sam in Parallax, preserve its stronger encryption/trust invariants, and publish a verified GitHub Android preview release.
 
 **Architecture:** Preserve ChatBackend and current Flutter/ChangeNotifier styling. Add a reviewed optional MessagingFeatures interface so existing test backends remain valid. Isolate platform services and fault-testable stores; parent owns integration. No donor source copying is required. Never replace the guarded crypto bootstrap with NeonMatrix's unsafe rotation code.
 
@@ -37,7 +37,7 @@ Create lib/message_outbox.dart and test/message_outbox_test.dart. Public OutboxR
 
 ### 5. Authentication
 
-Create lib/matrix_auth_service.dart and test/matrix_auth_service_test.dart; modify only lib/login_screen.dart for provider discovery/browser UI. MatrixAuthService is passed the real Client and ownership checks; expose discovery(String)->ProviderDiscovery, browserLogin(discovery,{oidc}), refresh and password reauth. Use validated HTTPS discovery, app callback net.samrussell.matrixpress://auth, cryptographic SSO state, SDK OIDC PKCE/state. Inject browser callback for tests. Validate effective homeserver/token endpoints before credentials; pin account/device/generation through awaits. Failures in metadata/network must not surface as destructive MatrixException to SDK. Preserve device via reauth rather than Client.login wiping old state. Parent backend delegates through service and registers onSoftLogout, login methods and lifecycle. Do not modify Android manifest (parent owns). Failed refresh must not poison initialization. Existing password login form/tests must remain functional.
+Create lib/matrix_auth_service.dart and test/matrix_auth_service_test.dart; modify only lib/login_screen.dart for provider discovery/browser UI. MatrixAuthService is passed the real Client and ownership checks; expose discovery(String)->ProviderDiscovery, browserLogin(discovery,{oidc}), refresh and password reauth. Use validated HTTPS discovery, app callback net.samrusselltech.parallax:/auth, cryptographic SSO state, SDK OIDC PKCE/state. Inject browser callback for tests. Validate effective homeserver/token endpoints before credentials; pin account/device/generation through awaits. Failures in metadata/network must not surface as destructive MatrixException to SDK. Preserve device via reauth rather than Client.login wiping old state. Parent backend delegates through service and registers onSoftLogout, login methods and lifecycle. Do not modify Android manifest (parent owns). Failed refresh must not poison initialization. Existing password login form/tests must remain functional.
 
 ### 6. Directory, threads, Spaces, receipt/favourite service and screens
 

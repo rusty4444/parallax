@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/message_outbox.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/secure_store.dart';
-import 'package:matrixpress/send_cancellation.dart';
+import 'package:parallax/message_outbox.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/secure_store.dart';
+import 'package:parallax/send_cancellation.dart';
 
 class _Store implements SecureValueStore {
   final values = <String, String>{};

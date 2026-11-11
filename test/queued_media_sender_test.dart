@@ -5,9 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/queued_media_sender.dart';
-import 'package:matrixpress/send_cancellation.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/queued_media_sender.dart';
+import 'package:parallax/send_cancellation.dart';
 
 void main() {
   late _UploadClient transport;

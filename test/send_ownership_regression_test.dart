@@ -6,9 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/matrix_send_guard.dart';
-import 'package:matrixpress/secure_store.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/matrix_send_guard.dart';
+import 'package:parallax/secure_store.dart';
 
 void main() {
   for (final images in [false, true]) {

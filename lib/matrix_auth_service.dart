@@ -47,8 +47,8 @@ class MatrixAuthService {
   }) : _authenticate = authenticate ?? _openBrowser,
        _storage = storage ?? const PlatformSecureValueStore();
 
-  static final callbackUri = Uri.parse('net.samrussell.matrixpress://auth');
-  static const callbackScheme = 'net.samrussell.matrixpress';
+  static final callbackUri = Uri.parse('net.samrusselltech.parallax:/auth');
+  static const callbackScheme = 'net.samrusselltech.parallax';
   static final _leases = Expando<_AuthLease>();
 
   /// Also available statically when the backend makes an owner-scoped service
@@ -261,7 +261,7 @@ class MatrixAuthService {
           'token': token,
           'refresh_token': true,
           if (existing != null) 'device_id': pin.device,
-          'initial_device_display_name': 'MatriXpress',
+          'initial_device_display_name': 'Parallax',
         },
       );
       final response = matrix.LoginResponse.fromJson(json);
@@ -331,15 +331,15 @@ class MatrixAuthService {
     // Registration is scoped to the exact issuer and callback; no bearer tokens
     // or client secrets are written to this registration cache.
     final cacheKey =
-        'matrixpress.oidc.${sha256.convert(utf8.encode('${metadata.issuer}\n$callbackUri'))}';
+        'parallax.oidc.${sha256.convert(utf8.encode('${metadata.issuer}\n$callbackUri'))}';
     var clientId = await _wait(_storage.read(cacheKey), pin);
     if (existing?['oidc_client_id'] case final String registered) {
       clientId = registered;
     }
     if (clientId == null || clientId.isEmpty) {
       final information = matrix.OidcClientInformation(
-        clientName: 'MatriXpress',
-        clientUri: Uri.parse('https://github.com/rusty4444/matrixpress'),
+        clientName: 'Parallax',
+        clientUri: Uri.parse('https://samrusselltech.net/'),
         logoUri: null,
         tosUri: null,
         policyUri: null,
@@ -371,8 +371,8 @@ class MatrixAuthService {
         clientId: clientId,
         clientIdIssuedAt: null,
         clientInformation: matrix.OidcClientInformation(
-          clientName: 'MatriXpress',
-          clientUri: Uri.parse('https://github.com/rusty4444/matrixpress'),
+          clientName: 'Parallax',
+          clientUri: Uri.parse('https://samrusselltech.net/'),
           logoUri: null,
           tosUri: null,
           policyUri: null,
@@ -543,7 +543,7 @@ class MatrixAuthService {
         ).toJson(),
         'password': password,
         'refresh_token': true,
-        'initial_device_display_name': 'MatriXpress',
+        'initial_device_display_name': 'Parallax',
       },
     );
     final response = matrix.LoginResponse.fromJson(json);
@@ -731,7 +731,7 @@ class MatrixAuthService {
         newHomeserver: server,
         newUserID: user,
         newDeviceID: device,
-        newDeviceName: existing?['device_name'] as String? ?? 'MatriXpress',
+        newDeviceName: existing?['device_name'] as String? ?? 'Parallax',
         newOlmAccount:
             client.encryption?.pickledOlmAccount ??
             existing?['olm_account'] as String?,

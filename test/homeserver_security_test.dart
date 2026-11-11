@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/homeserver_security.dart';
+import 'package:parallax/homeserver_security.dart';
 
 void main() {
   test('accepts HTTPS homeserver URLs including reverse-proxy paths', () {

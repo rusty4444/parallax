@@ -1,4 +1,4 @@
-# MatriXpress
+# Parallax
 
 A new Android Matrix messenger, built independently of the Element X fork. Its name is a Matrix/express pun; its interface uses Space Grotesk, vivid gradients and three contrast-conscious palettes: Ultraviolet, Afterglow and Daybreak.
 
@@ -36,11 +36,11 @@ The local SDK SQLite store uses Android's app sandbox and device storage encrypt
 
 ## Automatic APKs
 
-Every normal commit pushed to `main` runs analysis and tests, builds an arm64 APK, and publishes an immutable per-commit prerelease at [GitHub Releases](https://github.com/rusty4444/matrixpress/releases). The repository is private; sign in to GitHub to download it. Local edits do not trigger a build until committed and pushed. The same APK is retained as a GitHub Actions artifact for 30 days. Commits marked `[skip ci]` do not build.
+Every normal commit pushed to `main` runs analysis and tests, builds an arm64 APK, and publishes an immutable per-commit prerelease at [GitHub Releases](http://192.168.68.247:3300/rusty4444/parallax/releases). The repository is private; sign in to GitHub to download it. Local edits do not trigger a build until committed and pushed. The same APK is retained as a GitHub Actions artifact for 30 days. Commits marked `[skip ci]` do not build.
 
 Pushes to `feat/**` and `fix/**` run the same checks and retain a signed candidate APK as an Actions artifact **without publishing a release**. This allows install/update testing before promoting the exact source commit to `main`.
 
-CI restores the existing personal debug signing key from the `MATRIXPRESS_DEBUG_KEYSTORE_BASE64` GitHub Actions secret and verifies its public certificate fingerprint before publishing. This preserves update compatibility with the v0.2.1 preview; an incorrect or missing key fails the build instead of releasing an APK that would require uninstalling. CI uses an increasing Android version code. These are **test builds**, not production-signed releases; the signing key must never be committed to Git.
+CI restores the existing personal debug signing key from the `PARALLAX_KEYSTORE_BASE64` GitHub Actions secret and verifies its public certificate fingerprint before publishing. This preserves update compatibility with the v0.2.1 preview; an incorrect or missing key fails the build instead of releasing an APK that would require uninstalling. CI uses an increasing Android version code. These are **test builds**, not production-signed releases; the signing key must never be committed to Git.
 
 ## Build
 
@@ -55,7 +55,7 @@ flutter test
 flutter build apk --release --target-platform android-arm64 --split-per-abi
 ```
 
-The resulting `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` is **arm64 only, release-optimised but signed with this machine's debug certificate** by the generated Gradle configuration; it is for device testing, not production distribution. Install with `adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` only when its version code is higher than the installed APK and its signing certificate matches. CI uses a higher, increasing version code; a default local build may be rejected as a downgrade. Other machines' debug certificates will not match: uninstalling first removes local session and encryption keys. A future production-signed APK also cannot update this debug-signed installation in place. The package ID is `net.samrussell.matrixpress`, separate from official Element X and the fork. No credentials are bundled into the APK.
+The resulting `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` is **arm64 only, release-optimised but signed with this machine's debug certificate** by the generated Gradle configuration; it is for device testing, not production distribution. Install with `adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` only when its version code is higher than the installed APK and its signing certificate matches. CI uses a higher, increasing version code; a default local build may be rejected as a downgrade. Other machines' debug certificates will not match: uninstalling first removes local session and encryption keys. A future production-signed APK also cannot update this debug-signed installation in place. The package ID is `net.samrussell.parallax`, separate from official Element X and the fork. No credentials are bundled into the APK.
 
 The bundled Space Grotesk font is licensed under SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The `matrix` Dart SDK is AGPL-3.0-or-later; review its distribution obligations before shipping any build.
 

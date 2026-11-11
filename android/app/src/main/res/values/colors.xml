@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Parallax brand colours. Keep in sync with lib/app_theme.dart. -->
+    <color name="parallax_background">#130A0B</color>
+    <color name="parallax_accent">#FF5A36</color>
+</resources>

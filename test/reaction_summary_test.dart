@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/reaction_summary.dart';
+import 'package:parallax/reaction_summary.dart';
 
 void main() {
   test('groups emoji reactions by distinct sender and identifies my vote', () {

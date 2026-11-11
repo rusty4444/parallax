@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/room_details.dart';
-import 'package:matrixpress/room_details_screen.dart';
-import 'package:matrixpress/room_screen.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/room_details.dart';
+import 'package:parallax/room_details_screen.dart';
+import 'package:parallax/room_screen.dart';
 
 import 'widget_test.dart' show FakeBackend;
 
@@ -197,10 +197,10 @@ void main() {
     'room entry opens server details; edit, invite and moderation write',
     (tester) async {
       final backend = DetailsBackend();
-      final palette = paletteFor(VisualTheme.ultraviolet);
+      final palette = paletteFor(VisualTheme.parallax);
       await tester.pumpWidget(
         MaterialApp(
-          theme: themeFor(VisualTheme.ultraviolet),
+          theme: themeFor(VisualTheme.parallax),
           home: RoomScreen(backend: backend, palette: palette, roomId: roomId),
         ),
       );
@@ -270,7 +270,7 @@ void main() {
       MaterialApp(
         home: RoomDetailsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: roomId,
         ),
       ),
@@ -301,7 +301,7 @@ void main() {
         MaterialApp(
           home: RoomDetailsScreen(
             backend: backend,
-            palette: paletteFor(VisualTheme.ultraviolet),
+            palette: paletteFor(VisualTheme.parallax),
             roomId: roomId,
           ),
         ),
@@ -324,7 +324,7 @@ void main() {
       MaterialApp(
         home: RoomDetailsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: roomId,
         ),
       ),

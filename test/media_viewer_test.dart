@@ -5,10 +5,10 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/media_player_owner.dart';
-import 'package:matrixpress/media_viewer.dart';
-import 'package:matrixpress/messaging_features.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/media_player_owner.dart';
+import 'package:parallax/media_viewer.dart';
+import 'package:parallax/messaging_features.dart';
 
 DownloadedAttachment media([String mime = 'audio/ogg']) => DownloadedAttachment(
   name: '../../voice.ogg',
@@ -290,7 +290,7 @@ void main() {
           temporaryDirectory: fixture,
         );
         expect(first.path, isNot(second.path));
-        expect(first.path, startsWith('${fixture.path}/matrixpress-media-'));
+        expect(first.path, startsWith('${fixture.path}/parallax-media-'));
         expect(first.path, endsWith('/media.ogg'));
         expect(first.path, isNot(contains('../')));
         expect(await File(first.path).readAsBytes(), media().bytes);

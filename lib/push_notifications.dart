@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' show Color;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -173,8 +174,8 @@ class PushRegistration {
   matrix.Pusher get pusher => matrix.Pusher(
     appId: configuration.appId,
     pushkey: token,
-    appDisplayName: 'MatriXpress',
-    deviceDisplayName: 'MatriXpress Android',
+    appDisplayName: 'Parallax',
+    deviceDisplayName: 'Parallax Android',
     kind: 'http',
     lang: 'en',
     data: matrix.PusherData(
@@ -196,7 +197,7 @@ class PushEnvelope {
     this.eventId,
   });
   static const notificationTitle = 'New message';
-  static const notificationBody = 'Open MatriXpress to read your messages.';
+  static const notificationBody = 'Open Parallax to read your messages.';
   final String registrationId;
   final String roomId;
   final String? eventId;
@@ -297,7 +298,7 @@ abstract interface class PushStateStore {
 
 class SecurePushStateStore implements PushStateStore {
   const SecurePushStateStore();
-  static const _key = 'matrixpress.push.active.v1';
+  static const _key = 'parallax.push.active.v1';
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(resetOnError: false),
     iOptions: IOSOptions(
@@ -899,7 +900,7 @@ Future<void> _initializeLocal(
 ) async {
   final initialized = await local.initialize(
     settings: const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('@drawable/ic_stat_parallax'),
     ),
     onDidReceiveNotificationResponse: onResponse,
   );
@@ -915,13 +916,14 @@ Future<void> _showGeneric(
   body: PushEnvelope.notificationBody,
   notificationDetails: const NotificationDetails(
     android: AndroidNotificationDetails(
-      'matrixpress_messages_v1',
+      'parallax_messages_v1',
       'Messages',
-      channelDescription: 'Generic MatriXpress message alerts',
+      channelDescription: 'Generic Parallax message alerts',
       importance: Importance.high,
       priority: Priority.high,
       visibility: NotificationVisibility.private,
       category: AndroidNotificationCategory.message,
+      color: Color(0xFFFF5A36),
     ),
   ),
   payload: jsonEncode(envelope.toJson()),

@@ -5,11 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/room_join.dart';
-import 'package:matrixpress/room_join_dialog.dart';
-import 'package:matrixpress/send_cancellation.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/room_join.dart';
+import 'package:parallax/room_join_dialog.dart';
+import 'package:parallax/send_cancellation.dart';
 
 class _Database implements matrix.DatabaseApi {
   @override

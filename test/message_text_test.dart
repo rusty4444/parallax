@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/message_text.dart';
+import 'package:parallax/message_text.dart';
 
 void main() {
   test('strips SDK reply fallback and keeps the actual message', () {

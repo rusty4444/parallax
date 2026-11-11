@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/app_theme.dart';
+import 'package:parallax/app_theme.dart';
 
 void main() {
   test('all palettes keep primary text and buttons legible', () {

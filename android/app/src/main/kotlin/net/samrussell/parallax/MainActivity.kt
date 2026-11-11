@@ -1,4 +1,4 @@
-package net.samrussell.matrixpress
+package net.samrussell.parallax
 
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -8,7 +8,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "matrixpress/secure_window")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/secure_window")
             .setMethodCallHandler { call, result ->
                 if (call.method != "setSecure") {
                     result.notImplemented()

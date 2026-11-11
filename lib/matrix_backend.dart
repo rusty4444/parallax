@@ -605,17 +605,17 @@ class MatrixBackend extends ChatBackend
       final directory = await getApplicationSupportDirectory();
       checkStartup();
       openedDatabase = await sqlite.openDatabase(
-        path.join(directory.path, 'matrixpress.db'),
+        path.join(directory.path, 'parallax.db'),
       );
       checkStartup();
       final sdkDatabase = SafeMatrixDatabase(
-        'matrixpress',
+        'parallax',
         database: openedDatabase,
       );
       await sdkDatabase.open();
       await sdkDatabase.dropLegacyEncryptedQueue();
       final storedUrl = (await sdkDatabase.getClient(
-        'MatriXpress',
+        'Parallax',
       ))?['homeserver_url'];
       checkStartup();
       if (storedUrl != null &&
@@ -630,7 +630,7 @@ class MatrixBackend extends ChatBackend
       );
       _sendGuard = sendGuard;
       openedClient = matrix.Client(
-        'MatriXpress',
+        'Parallax',
         database: sdkDatabase,
         httpClient: sendGuard,
         supportedLoginTypes: {

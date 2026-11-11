@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/key_query_validation.dart';
+import 'package:parallax/key_query_validation.dart';
 
 void main() {
   const user = '@friend:example.org';

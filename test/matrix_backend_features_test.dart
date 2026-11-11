@@ -4,12 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/matrix_auth_service.dart';
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/push_notifications.dart';
-import 'package:matrixpress/secure_store.dart';
-import 'package:matrixpress/send_cancellation.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/matrix_auth_service.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/push_notifications.dart';
+import 'package:parallax/secure_store.dart';
+import 'package:parallax/send_cancellation.dart';
 
 void main() {
   test(

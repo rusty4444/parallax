@@ -47,16 +47,16 @@ jobs:
 
       - name: Restore persistent signing key
         env:
-          KEYSTORE_BASE64: ${{ secrets.MATRIXPRESS_DEBUG_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.PARALLAX_KEYSTORE_BASE64 }}
         run: |
           test -n "$KEYSTORE_BASE64"
-          KEYSTORE_FILE="$RUNNER_TEMP/matrixpress-debug.keystore"
+          KEYSTORE_FILE="$RUNNER_TEMP/parallax-debug.keystore"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
           chmod 600 "$KEYSTORE_FILE"
           # Fail before building if CI cannot update previously installed APKs.
           keytool -list -v -alias androiddebugkey -keystore "$KEYSTORE_FILE" -storepass android |
             grep -F 'SHA256: 2E:1C:94:44:6D:3C:1D:33:F8:43:CA:3B:54:25:C6:DF:D1:38:3B:BD:5F:C3:40:8D:0C:30:39:27:87:15:EF:F7'
-          echo "MATRIXPRESS_KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+          echo "PARALLAX_KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
       - name: Build arm64 release-optimised test APK
         id: build
@@ -94,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
-          name: matrixpress-arm64-${{ github.sha }}
+          name: parallax-arm64-${{ github.sha }}
           path: ${{ env.APK }}
           retention-days: 30
           if-no-files-found: error
@@ -106,16 +106,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="build-${GITHUB_SHA:0:12}"
-          ASSET="build/matrixpress-${TAG}-arm64.apk"
+          ASSET="build/parallax-${TAG}-arm64.apk"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # A rerun of the same commit must not silently replace a published APK.
             gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
-              grep -Fx "matrixpress-${TAG}-arm64.apk"
+              grep -Fx "parallax-${TAG}-arm64.apk"
             echo "Existing release $TAG is unchanged."
           else
             cp "$APK" "$ASSET"
             gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --prerelease \
-              --title "MatriXpress $TAG" \
-              --notes "Personal Android test build from commit $GITHUB_SHA (APK version code $APK_VERSION_CODE). Signed with the existing debug key so it can update earlier MatriXpress previews. This is not a production-signed or live two-device E2EE-validated release."
+              --title "Parallax $TAG" \
+              --notes "Personal Android test build from commit $GITHUB_SHA (APK version code $APK_VERSION_CODE). Signed with the existing debug key so it can update earlier Parallax previews. This is not a production-signed or live two-device E2EE-validated release."
           fi

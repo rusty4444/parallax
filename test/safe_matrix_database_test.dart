@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/matrix_send_guard.dart';
-import 'package:matrixpress/safe_matrix_database.dart';
+import 'package:parallax/matrix_send_guard.dart';
+import 'package:parallax/safe_matrix_database.dart';
 import 'package:sqflite/sqflite.dart' as sqlite;
 
 void main() {

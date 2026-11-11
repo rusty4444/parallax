@@ -1,10 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/secure_window.dart';
+import 'package:parallax/secure_window.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('matrixpress/secure_window');
+  const channel = MethodChannel('parallax/secure_window');
 
   test('recovery flow toggles Android screen protection', () async {
     final seen = <bool>[];

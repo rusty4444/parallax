@@ -190,7 +190,7 @@ class _CryptoSetupScreenState extends State<CryptoSetupScreen> {
                   const Center(child: CircularProgressIndicator()),
                 if (_secureReady && _result == null) ...[
                   const Text(
-                    'Save this generated phrase outside MatriXpress before '
+                    'Save this generated phrase outside Parallax before '
                     'continuing. It may help repair a partially completed '
                     'setup and can restore a completed identity on another '
                     'device. Some failures cannot be repaired without another '

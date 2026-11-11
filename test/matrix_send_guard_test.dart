@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:matrixpress/matrix_send_guard.dart';
+import 'package:parallax/matrix_send_guard.dart';
 
 void main() {
   final plain = Uri.parse(

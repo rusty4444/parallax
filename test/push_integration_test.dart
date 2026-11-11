@@ -2,17 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/appearance_preferences.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/crypto_setup_policy.dart';
-import 'package:matrixpress/feature_settings_scope.dart';
-import 'package:matrixpress/main.dart';
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/message_draft_store.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/push_notifications.dart';
-import 'package:matrixpress/push_settings_screen.dart';
-import 'package:matrixpress/room_screen.dart';
+import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/crypto_setup_policy.dart';
+import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/main.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/push_notifications.dart';
+import 'package:parallax/push_settings_screen.dart';
+import 'package:parallax/room_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'push_notifications_test.dart'
@@ -272,7 +272,7 @@ class _Harness {
     bool settle = true,
   }) async {
     await tester.pumpWidget(
-      MatrixpressApp(
+      ParallaxApp(
         backend: ownedBackend ? null : legacyBackend ?? backend,
         backendFactory: ownedBackend
             ? ({required beforeLogout, required sendReadReceipts}) {
@@ -607,7 +607,7 @@ void main() {
     h.backend.status = SessionStatus.loading;
     h.backend.failInitialization = true;
     await h.boot(tester);
-    expect(find.text('Couldn’t start MatriXpress'), findsOneWidget);
+    expect(find.text('Couldn’t start Parallax'), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(tester.takeException(), isNull);
@@ -737,7 +737,7 @@ void main() {
   ) async {
     final h = _Harness();
     await h.boot(tester);
-    await tester.pumpWidget(const MatrixpressApp());
+    await tester.pumpWidget(const ParallaxApp());
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
     await _join(tester, h.push.settle);

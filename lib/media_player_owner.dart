@@ -231,7 +231,7 @@ Future<MediaTempFile> createMediaTempFile(
   Directory? temporaryDirectory,
 }) async {
   final root = temporaryDirectory ?? await getTemporaryDirectory();
-  final directory = await root.createTemp('matrixpress-media-');
+  final directory = await root.createTemp('parallax-media-');
   try {
     final mime = attachment.mimeType.split(';').first.trim().toLowerCase();
     final extension = switch (mime) {

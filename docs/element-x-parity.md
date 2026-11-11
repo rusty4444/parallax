@@ -1,6 +1,6 @@
-# MatriXpress / Element X parity ledger
+# Parallax / Element X parity ledger
 
-MatriXpress is an independent Flutter client using Matrix Dart SDK 14.1.0, not a port of the Element X Rust-SDK app. The comparison baseline is [official Element X Android v26.10.0](https://github.com/element-hq/element-x-android/releases/tag/v26.10.0). This is a **gap ledger**, not a parity claim: SDK API availability and widget tests are not evidence of cross-client interoperability. Update each row only after exercising the acceptance gate against a disposable account and another client.
+Parallax is an independent Flutter client using Matrix Dart SDK 14.1.0, not a port of the Element X Rust-SDK app. The comparison baseline is [official Element X Android v26.10.0](https://github.com/element-hq/element-x-android/releases/tag/v26.10.0). This is a **gap ledger**, not a parity claim: SDK API availability and widget tests are not evidence of cross-client interoperability. Update each row only after exercising the acceptance gate against a disposable account and another client.
 
 | Area | Status | Evidence / acceptance gate |
 |---|---|---|

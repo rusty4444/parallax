@@ -6,8 +6,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/rich_message_composer.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/rich_message_composer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'messaging_integration_test.dart' as fixtures;

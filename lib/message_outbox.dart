@@ -304,7 +304,7 @@ class MessageOutbox {
       'mx_${base64Url.encode(List<int>.generate(32, (_) => _random.nextInt(256))).replaceAll('=', '')}';
 
   static String _storageKey(String accountKey) =>
-      'matrixpress.outbox.v1.${sha256.convert(utf8.encode(accountKey))}';
+      'parallax.outbox.v1.${sha256.convert(utf8.encode(accountKey))}';
 
   _Session _select(String accountKey) {
     if (_disposed) throw StateError('Outbox is disposed');

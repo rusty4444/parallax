@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matrix/matrix.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/matrix_room_features.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/matrix_room_features.dart';
 
 class _UnusedDatabase implements DatabaseApi {
   @override

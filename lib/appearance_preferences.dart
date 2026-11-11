@@ -11,11 +11,11 @@ class AppearancePreferences extends ChangeNotifier {
 
   static const minTextScale = 0.85;
   static const maxTextScale = 1.5;
-  static const _textScaleKey = 'matrixpress.appearance.v1.text_scale';
-  static const _compactKey = 'matrixpress.appearance.v1.compact';
-  static const _autoLoadMediaKey = 'matrixpress.appearance.v1.auto_load_media';
+  static const _textScaleKey = 'parallax.appearance.v1.text_scale';
+  static const _compactKey = 'parallax.appearance.v1.compact';
+  static const _autoLoadMediaKey = 'parallax.appearance.v1.auto_load_media';
   static const _sendReadReceiptsKey =
-      'matrixpress.appearance.v1.send_read_receipts';
+      'parallax.appearance.v1.send_read_receipts';
 
   SharedPreferences? _prefs;
   Future<void> _tail = Future<void>.value();

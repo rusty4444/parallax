@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/message_search_screen.dart';
-import 'package:matrixpress/messaging_features.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/message_search_screen.dart';
+import 'package:parallax/messaging_features.dart';
 
 class _SearchBackend extends ChatBackend implements MessagingFeatures {
   String account = 'session-a';
@@ -54,7 +54,7 @@ MessageHit _hit(String id) => MessageHit(
 Widget _screen(_SearchBackend backend) => MaterialApp(
   home: MessageSearchScreen(
     backend: backend,
-    palette: paletteFor(VisualTheme.ultraviolet),
+    palette: paletteFor(VisualTheme.parallax),
   ),
 );
 
@@ -396,7 +396,7 @@ void main() {
                   MaterialPageRoute(
                     builder: (_) => MessageSearchScreen(
                       backend: backend,
-                      palette: paletteFor(VisualTheme.ultraviolet),
+                      palette: paletteFor(VisualTheme.parallax),
                     ),
                   ),
                 );

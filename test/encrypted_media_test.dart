@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/encrypted_media.dart';
+import 'package:parallax/encrypted_media.dart';
 
 void main() {
   test('encrypted media content carries only a ciphertext URL and keys', () {

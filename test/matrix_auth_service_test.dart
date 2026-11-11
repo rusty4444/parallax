@@ -8,16 +8,16 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matrix/encryption.dart' as crypto;
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/login_screen.dart';
-import 'package:matrixpress/matrix_auth_service.dart';
-import 'package:matrixpress/matrix_backend.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/secure_store.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/login_screen.dart';
+import 'package:parallax/matrix_auth_service.dart';
+import 'package:parallax/matrix_backend.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/secure_store.dart';
 
 const _server = 'https://matrix.example';
-const _callback = 'net.samrussell.matrixpress://auth';
+const _callback = 'net.samrusselltech.parallax:/auth';
 final _discovery = ProviderDiscovery(
   homeserver: Uri(scheme: 'https', host: 'matrix.example'),
   password: true,
@@ -106,7 +106,7 @@ void main() {
       ownerCurrent: () => owner,
       storage: storage,
       authenticate: (url, scheme) async {
-        expect(scheme, 'net.samrussell.matrixpress');
+        expect(scheme, 'net.samrusselltech.parallax');
         final uri = Uri.parse(url);
         final redirect = uri.queryParameters['redirectUrl'];
         if (redirect != null) {
@@ -307,10 +307,10 @@ void main() {
   );
 
   for (final bad in [
-    'net.samrussell.matrixpress://wrong?loginToken=stolen',
-    'net.samrussell.matrixpress://auth/path?loginToken=stolen',
-    'net.samrussell.matrixpress://auth?loginToken=stolen',
-    'net.samrussell.matrixpress://auth?state=wrong&loginToken=stolen',
+    'net.samrusselltech.parallax:/wrong?loginToken=stolen',
+    'net.samrusselltech.parallax:/auth/path?loginToken=stolen',
+    'net.samrusselltech.parallax:/auth?loginToken=stolen',
+    'net.samrusselltech.parallax:/auth?state=wrong&loginToken=stolen',
   ]) {
     test('SSO rejects callback mismatch: $bad', () async {
       final auth = MatrixAuthService(
@@ -852,7 +852,7 @@ void main() {
       MaterialApp(
         home: LoginScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
         ),
       ),
     );

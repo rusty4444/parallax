@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:matrixpress/room_background_store.dart';
+import 'package:parallax/room_background_store.dart';
 
 void main() {
   late Directory root;

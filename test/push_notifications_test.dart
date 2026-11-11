@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/push_notifications.dart';
-import 'package:matrixpress/push_settings_screen.dart';
+import 'package:parallax/push_notifications.dart';
+import 'package:parallax/push_settings_screen.dart';
 
 const options = FirebaseOptions(
   apiKey: 'test-not-a-live-key',
@@ -15,7 +15,7 @@ const options = FirebaseOptions(
 );
 final configuration = PushConfiguration(
   gatewayUrl: Uri.parse('https://push.example.org/_matrix/push/v1/notify'),
-  appId: 'org.example.matrixpress',
+  appId: 'org.example.parallax',
   firebaseOptions: options,
 );
 
@@ -247,7 +247,7 @@ void main() {
       expect(driver.shown.single.toJson().containsKey('body'), isFalse);
       expect(
         PushEnvelope.notificationBody,
-        'Open MatriXpress to read your messages.',
+        'Open Parallax to read your messages.',
       );
       expect(navigated.single.roomId, '!room:example.org');
       expect(navigated.single.isCurrent, isTrue);

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/message_groups.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/message_groups.dart';
 
 void main() {
   final start = DateTime.utc(2026, 10, 20, 12);

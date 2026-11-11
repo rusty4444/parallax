@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/user_directory_screen.dart';
-import 'package:matrixpress/space_browser_screen.dart';
-import 'package:matrixpress/thread_screen.dart';
-import 'package:matrixpress/message_receipts_sheet.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/user_directory_screen.dart';
+import 'package:parallax/space_browser_screen.dart';
+import 'package:parallax/thread_screen.dart';
+import 'package:parallax/message_receipts_sheet.dart';
 
 class _Backend extends ChatBackend implements MessagingFeatures {
   String account = 'account-a';

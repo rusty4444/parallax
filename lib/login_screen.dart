@@ -167,10 +167,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: BrandMark(palette: p, size: 68),
                       ),
                       const SizedBox(height: 32),
-                      Eyebrow('The conversation, reimagined', palette: p),
+                      Eyebrow('Matrix messaging, in depth', palette: p),
                       const SizedBox(height: 12),
                       Text(
-                        'Matrix,\nbut make it\nmove.',
+                        'Every angle\nof the\nconversation.',
                         style: TextStyle(
                           fontSize: 49,
                           height: 1.04,
@@ -181,8 +181,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'MatriXpress puts your conversations first — '
-                        'with a little extra electricity.',
+                        'Parallax keeps your conversations close — '
+                        'encrypted, quick and warm.',
                         style: TextStyle(
                           color: p.muted,
                           fontSize: 16,

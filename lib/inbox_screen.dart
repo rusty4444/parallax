@@ -476,7 +476,7 @@ class _InboxScreenState extends State<InboxScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'MatriXpress',
+                                'Parallax',
                                 style: TextStyle(
                                   color: p.foreground,
                                   fontSize: 23,

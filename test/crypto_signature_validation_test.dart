@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matrix/matrix.dart' as matrix;
-import 'package:matrixpress/crypto_signature_validation.dart';
+import 'package:parallax/crypto_signature_validation.dart';
 
 void main() {
   test('unsigned retained subkey cannot be treated as trusted', () {

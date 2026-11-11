@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "net.samrussell.matrixpress"
+    namespace = "net.samrussell.parallax"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
-    val ciKeystoreFile = System.getenv("MATRIXPRESS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+    val ciKeystoreFile = System.getenv("PARALLAX_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -17,7 +17,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "net.samrussell.matrixpress"
+        applicationId = "net.samrussell.parallax"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

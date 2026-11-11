@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/messaging_features.dart';
-import 'package:matrixpress/voice_recorder.dart';
+import 'package:parallax/messaging_features.dart';
+import 'package:parallax/voice_recorder.dart';
 import 'package:record/record.dart';
 
 class RecordingPlatform extends RecordPlatform {

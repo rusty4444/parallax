@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/recipient_trust.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/recipient_trust.dart';
 
 void main() {
   const original = UntrustedRecipient(

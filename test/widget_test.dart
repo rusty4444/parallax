@@ -5,22 +5,22 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/crypto_setup_policy.dart';
-import 'package:matrixpress/crypto_setup_screen.dart';
-import 'package:matrixpress/directory_screen.dart';
-import 'package:matrixpress/gallery_bubble.dart';
-import 'package:matrixpress/inbox_screen.dart';
-import 'package:matrixpress/login_screen.dart';
-import 'package:matrixpress/main.dart';
-import 'package:matrixpress/message_search_screen.dart';
-import 'package:matrixpress/room_screen.dart';
-import 'package:matrixpress/room_background_store.dart';
-import 'package:matrixpress/room_details.dart';
-import 'package:matrixpress/room_avatar.dart';
-import 'package:matrixpress/settings_screen.dart';
-import 'package:matrixpress/security_overlay.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/crypto_setup_policy.dart';
+import 'package:parallax/crypto_setup_screen.dart';
+import 'package:parallax/directory_screen.dart';
+import 'package:parallax/gallery_bubble.dart';
+import 'package:parallax/inbox_screen.dart';
+import 'package:parallax/login_screen.dart';
+import 'package:parallax/main.dart';
+import 'package:parallax/message_search_screen.dart';
+import 'package:parallax/room_screen.dart';
+import 'package:parallax/room_background_store.dart';
+import 'package:parallax/room_details.dart';
+import 'package:parallax/room_avatar.dart';
+import 'package:parallax/settings_screen.dart';
+import 'package:parallax/security_overlay.dart';
 
 void main() {
   testWidgets('login validates homeserver and sends credentials', (
@@ -29,10 +29,10 @@ void main() {
     final backend = FakeBackend();
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: LoginScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
         ),
       ),
     );
@@ -70,11 +70,11 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -94,8 +94,8 @@ void main() {
       MaterialApp(
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -134,8 +134,8 @@ void main() {
       MaterialApp(
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -171,11 +171,11 @@ void main() {
         ..currentUserId = '@test:example.org';
       await tester.pumpWidget(
         MaterialApp(
-          theme: themeFor(VisualTheme.ultraviolet),
+          theme: themeFor(VisualTheme.parallax),
           home: InboxScreen(
             backend: backend,
-            palette: paletteFor(VisualTheme.ultraviolet),
-            style: VisualTheme.ultraviolet,
+            palette: paletteFor(VisualTheme.parallax),
+            style: VisualTheme.parallax,
             onThemeChanged: (_) {},
           ),
         ),
@@ -215,11 +215,11 @@ void main() {
       ..syncIssue = RoomSyncIssue.homeserver;
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -251,11 +251,11 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -287,8 +287,8 @@ void main() {
       MaterialApp(
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -321,8 +321,8 @@ void main() {
       MaterialApp(
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -351,10 +351,10 @@ void main() {
     final backend = FakeBackend();
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: DirectoryScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
         ),
       ),
     );
@@ -376,10 +376,10 @@ void main() {
     final backend = FakeBackend();
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: MessageSearchScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
         ),
       ),
     );
@@ -418,10 +418,10 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: RoomBackgroundStore(
             root: Directory('build/test_background'),
@@ -445,7 +445,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -476,7 +476,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -516,7 +516,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -547,7 +547,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -577,7 +577,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -649,10 +649,10 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: RoomBackgroundStore(
             root: Directory('build/test_background'),
@@ -689,10 +689,10 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: RoomBackgroundStore(
             root: Directory('build/test_background'),
@@ -720,10 +720,10 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: store,
         ),
@@ -754,11 +754,11 @@ void main() {
       ];
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: InboxScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -774,11 +774,11 @@ void main() {
     final backend = FakeBackend();
     await tester.pumpWidget(
       MaterialApp(
-        theme: themeFor(VisualTheme.ultraviolet),
+        theme: themeFor(VisualTheme.parallax),
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
           setSecureWindow: (_) async {},
         ),
@@ -814,8 +814,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
           setSecureWindow: (enabled) async => calls.add(enabled),
         ),
@@ -847,8 +847,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
           setSecureWindow: (enabled) async {
             calls.add(enabled);
@@ -886,8 +886,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
           setSecureWindow: (enabled) async => secureCalls.add(enabled),
         ),
@@ -963,8 +963,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -988,8 +988,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
         ),
       ),
@@ -1012,8 +1012,8 @@ void main() {
       MaterialApp(
         home: SettingsScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
-          style: VisualTheme.ultraviolet,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
           onThemeChanged: (_) {},
           setSecureWindow: (_) async {},
         ),
@@ -1045,7 +1045,7 @@ void main() {
       MaterialApp(
         home: CryptoSetupScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           setSecureWindow: (enabled) async {
             if (enabled) throw StateError('native screen guard unavailable');
           },
@@ -1097,7 +1097,7 @@ void main() {
         stage: VerificationStage.accept,
         incoming: true,
       );
-    await tester.pumpWidget(MatrixpressApp(backend: backend));
+    await tester.pumpWidget(ParallaxApp(backend: backend));
     await tester.pump();
     expect(find.text('Verify identity'), findsOneWidget);
     expect(find.text('Accept request'), findsOneWidget);
@@ -1128,7 +1128,7 @@ void main() {
       MaterialApp(
         home: RoomScreen(
           backend: backend,
-          palette: paletteFor(VisualTheme.ultraviolet),
+          palette: paletteFor(VisualTheme.parallax),
           roomId: '!r:example.org',
           backgroundStore: FakeBackgroundStore(),
         ),
@@ -1255,8 +1255,8 @@ void main() {
 
 class FakeBackgroundStore extends RoomBackgroundStore {
   final rooms = <String, File>{
-    '!r:example.org': File('assets/matrixpress_icon.png'),
-    '!other:example.org': File('assets/matrixpress_icon.png'),
+    '!r:example.org': File('assets/parallax_icon.png'),
+    '!other:example.org': File('assets/parallax_icon.png'),
   };
   final cleared = <String>[];
 

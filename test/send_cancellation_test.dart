@@ -7,8 +7,8 @@ import 'package:matrix/matrix.dart' as matrix;
 // This regression intentionally exercises the resolved SDK's HTTP decorator.
 // ignore: implementation_imports
 import 'package:matrix/src/utils/http_timeout.dart' as sdk_http;
-import 'package:matrixpress/matrix_send_guard.dart';
-import 'package:matrixpress/send_cancellation.dart';
+import 'package:parallax/matrix_send_guard.dart';
+import 'package:parallax/send_cancellation.dart';
 
 void main() {
   test('cancellation is idempotent and check rejects cancelled work', () async {

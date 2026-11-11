@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:matrixpress/app_theme.dart';
-import 'package:matrixpress/chat_backend.dart';
-import 'package:matrixpress/directory_screen.dart';
+import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/directory_screen.dart';
 
 class _Request {
   _Request(this.query, this.cursor);
@@ -42,7 +42,7 @@ class _Backend extends ChatBackend {
 
 Widget _directory(_Backend backend) => DirectoryScreen(
   backend: backend,
-  palette: paletteFor(VisualTheme.ultraviolet),
+  palette: paletteFor(VisualTheme.parallax),
 );
 
 Future<_Backend> _mount(
@@ -63,7 +63,7 @@ Future<_Backend> _mount(
   });
   await tester.pumpWidget(
     MaterialApp(
-      theme: themeFor(VisualTheme.ultraviolet),
+      theme: themeFor(VisualTheme.parallax),
       home: routed
           ? Builder(
               builder: (context) => TextButton(

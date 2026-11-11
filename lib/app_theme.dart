@@ -1,15 +1,38 @@
 import 'package:flutter/material.dart';
 
-enum VisualTheme { ultraviolet, ember, daylight }
+/// Visual themes. [parallax] is the brand default; the others are alternatives.
+enum VisualTheme { parallax, parallaxDay, ultraviolet, ember, daylight }
+
+/// The theme used before any preference is loaded or when none is saved.
+const defaultVisualTheme = VisualTheme.parallax;
+
+/// Fixed brand colours for the Parallax mark (independent of the active theme).
+abstract final class ParallaxBrand {
+  static const crimson = Color(0xFFD7263D);
+  static const vermilion = Color(0xFFFF5A36);
+  static const amber = Color(0xFFFFB238);
+  static const ink = Color(0xFF130A0B);
+
+  /// Back-to-front layer gradients used by the logo.
+  static const layers = <List<Color>>[
+    [Color(0xFF70081E), Color(0xFFAA1430)],
+    [Color(0xFFE42C22), Color(0xFFFF4E2E)],
+    [Color(0xFFFF8428), Color(0xFFFFC84C)],
+  ];
+}
 
 extension VisualThemeName on VisualTheme {
   String get label => switch (this) {
+    VisualTheme.parallax => 'Parallax',
+    VisualTheme.parallaxDay => 'Parallax Day',
     VisualTheme.ultraviolet => 'Ultraviolet',
     VisualTheme.ember => 'Afterglow',
     VisualTheme.daylight => 'Daybreak',
   };
 
   String get caption => switch (this) {
+    VisualTheme.parallax => 'Ember ink · vermilion · amber',
+    VisualTheme.parallaxDay => 'Warm paper · vermilion · rust',
     VisualTheme.ultraviolet => 'Electric violet · mint',
     VisualTheme.ember => 'Midnight ink · warm coral',
     VisualTheme.daylight => 'Soft ivory · cobalt',
@@ -48,6 +71,32 @@ class AppPalette {
 }
 
 AppPalette paletteFor(VisualTheme style) => switch (style) {
+  VisualTheme.parallax => const AppPalette(
+    background: Color(0xFF130A0B),
+    surface: Color(0xFF1F1214),
+    raised: Color(0xFF2C1A1C),
+    foreground: Color(0xFFFFF3EE),
+    muted: Color(0xFFD4BCB5),
+    accent: Color(0xFFFF5A36),
+    accentOn: Color(0xFF2B0700),
+    secondary: Color(0xFFFFB238),
+    stroke: Color(0xFF4D2D2C),
+    bubble: Color(0xFFB02A1A),
+    bubbleText: Color(0xFFFFFFFF),
+  ),
+  VisualTheme.parallaxDay => const AppPalette(
+    background: Color(0xFFFFF7F2),
+    surface: Color(0xFFFFFFFF),
+    raised: Color(0xFFFBE7DF),
+    foreground: Color(0xFF2A0F0A),
+    muted: Color(0xFF6E4B44),
+    accent: Color(0xFFC4321A),
+    accentOn: Color(0xFFFFFFFF),
+    secondary: Color(0xFF9A4500),
+    stroke: Color(0xFFEBCFC5),
+    bubble: Color(0xFFBF3A20),
+    bubbleText: Color(0xFFFFFFFF),
+  ),
   VisualTheme.ultraviolet => const AppPalette(
     background: Color(0xFF0C0A18),
     surface: Color(0xFF171426),
@@ -131,8 +180,51 @@ ThemeData themeFor(VisualTheme style) {
           bodyColor: palette.foreground,
           displayColor: palette.foreground,
         ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: palette.background,
+      foregroundColor: palette.foreground,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: palette.accent,
+      foregroundColor: palette.accentOn,
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: palette.accent),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: palette.raised,
+      contentTextStyle: TextStyle(color: palette.foreground),
+      actionTextColor: palette.secondary,
+      behavior: SnackBarBehavior.floating,
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: palette.surface,
+      selectedColor: palette.accent.withValues(alpha: 0.22),
+      side: BorderSide(color: palette.stroke),
+      labelStyle: TextStyle(color: palette.foreground),
+    ),
+    dividerTheme: DividerThemeData(color: palette.stroke),
   );
 }
+
+/// Brand gradient for primary surfaces (buttons, outgoing highlights).
+LinearGradient accentGradient(AppPalette palette) => LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [
+    Color.lerp(palette.accent, palette.bubble, 0.25)!,
+    palette.accent,
+    Color.lerp(palette.accent, palette.secondary, 0.45)!,
+  ],
+);
 
 class GlowBackdrop extends StatelessWidget {
   const GlowBackdrop({

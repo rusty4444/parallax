@@ -237,7 +237,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
               'Matrix pusher app ID',
               _matrixAppId,
               editable,
-              hint: 'org.yourdomain.matrixpress',
+              hint: 'org.yourdomain.parallax',
             ),
             _field('Firebase project ID', _project, editable),
             _field('Firebase messaging sender ID', _sender, editable),
