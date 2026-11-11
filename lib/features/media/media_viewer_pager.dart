@@ -154,10 +154,19 @@ class _MediaViewerPagerState extends State<MediaViewerPager> {
     super.initState();
     _index = widget.initialIndex.clamp(0, _items.length - 1);
     _controller = PageController(initialPage: _index);
+    widget.backend.addListener(_sessionChanged);
+  }
+
+  /// Logout or account change ends every page and disables all actions.
+  void _sessionChanged() {
+    if (_ended || _owner.isCurrent) return;
+    _shutdown();
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    widget.backend.removeListener(_sessionChanged);
     _shutdown();
     _controller.dispose();
     _owner.release();
