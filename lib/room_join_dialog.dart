@@ -10,17 +10,23 @@ import 'send_cancellation.dart';
 Future<String?> showRoomJoin(
   BuildContext context,
   ChatBackend backend,
-  String roomId,
-) => showDialog<String>(
+  String roomId, {
+  List<String> via = const [],
+}) => showDialog<String>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => _RoomJoinDialog(backend: backend, roomId: roomId),
+  builder: (_) => _RoomJoinDialog(backend: backend, roomId: roomId, via: via),
 );
 
 class _RoomJoinDialog extends StatefulWidget {
-  const _RoomJoinDialog({required this.backend, required this.roomId});
+  const _RoomJoinDialog({
+    required this.backend,
+    required this.roomId,
+    this.via = const [],
+  });
   final ChatBackend backend;
   final String roomId;
+  final List<String> via;
   @override
   State<_RoomJoinDialog> createState() => _RoomJoinDialogState();
 }
@@ -83,6 +89,7 @@ class _RoomJoinDialogState extends State<_RoomJoinDialog> {
           ? await (backend as RecoverableRoomJoining).waitForRoomJoin(
               widget.roomId,
               wait,
+              via: widget.via,
             )
           : await backend.joinPublicRoom(widget.roomId);
       if (mounted && _current && identical(_wait, wait)) {

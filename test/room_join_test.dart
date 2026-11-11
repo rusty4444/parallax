@@ -45,7 +45,11 @@ class _Backend extends ChatBackend implements RecoverableRoomJoining {
   final requests = <Completer<String>>[];
   final cancellations = <SendCancellation>[];
   @override
-  Future<String> waitForRoomJoin(String id, SendCancellation cancellation) {
+  Future<String> waitForRoomJoin(
+    String id,
+    SendCancellation cancellation, {
+    List<String> via = const [],
+  }) {
     cancellations.add(cancellation);
     final result = Completer<String>();
     requests.add(result);
