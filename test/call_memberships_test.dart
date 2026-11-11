@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:matrix/matrix.dart' as matrix;
 import 'package:parallax/features/call/call_features.dart';
 import 'package:parallax/features/call/call_memberships.dart';
 import 'package:parallax/features/call/matrix_call_features.dart';
@@ -127,6 +128,33 @@ void main() {
     final none = summariseRoomCall(const [], now: _now);
     expect(none.active, isFalse);
     expect(none.includesMe, isFalse);
+  });
+
+  test('widget event JSON drops SDK-local fields and pins the room', () {
+    final event = matrix.MatrixEvent(
+      type: 'org.matrix.msc3401.call.member',
+      content: {'application': 'm.call'},
+      senderId: '@alice:x',
+      stateKey: '_@alice:x_A',
+      eventId: r'$member',
+      roomId: '!spoofed:x',
+      originServerTs: DateTime.fromMillisecondsSinceEpoch(1000),
+      unsigned: {
+        'age': 5,
+        'prev_content': <String, Object?>{},
+        'messageSendingStatusKey': 2,
+      },
+    );
+    expect(cleanEventJson(event, '!room:x'), {
+      'type': 'org.matrix.msc3401.call.member',
+      'sender': '@alice:x',
+      'event_id': r'$member',
+      'room_id': '!room:x',
+      'origin_server_ts': 1000,
+      'content': {'application': 'm.call'},
+      'state_key': '_@alice:x_A',
+      'unsigned': {'age': 5, 'prev_content': <String, Object?>{}},
+    });
   });
 
   group('MSC4075 ringing', () {

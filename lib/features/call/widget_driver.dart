@@ -275,7 +275,7 @@ class CallWidgetDriver {
       } on _WidgetError catch (error) {
         _replyError(request, error.message);
       } on MatrixException catch (error) {
-        _replyError(request, error.errorMessage);
+        _replyMatrixError(request, error);
       } on StateError catch (error) {
         _replyError(request, error.message);
       } catch (_) {
@@ -637,6 +637,31 @@ class CallWidgetDriver {
       _reply(request, {
         'error': {'message': message},
       });
+
+  /// Matrix errors carry `matrix_api_error` (as the Rust driver does) so
+  /// Element Call can react to e.g. M_UNRECOGNIZED or
+  /// M_MAX_DELAY_EXCEEDED for delayed events.
+  void _replyMatrixError(Map<String, Object?> request, MatrixException error) {
+    final raw = error.raw;
+    final errcode = raw['errcode'];
+    _reply(request, {
+      'error': {
+        'message': error.errorMessage,
+        if (errcode is String)
+          'matrix_api_error': {
+            'http_status': error.response?.statusCode ?? 400,
+            'response': {
+              for (final entry in raw.entries)
+                // Bounded: only the standard error body and scalar hints.
+                if (entry.value is String ||
+                    entry.value is num ||
+                    entry.value is bool)
+                  entry.key: entry.value,
+            },
+          },
+      },
+    });
+  }
 
   void _emit(Map<String, Object?> message) {
     if (_disposed) return;

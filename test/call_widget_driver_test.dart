@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:matrix/matrix.dart' show MatrixException;
 import 'package:parallax/features/call/widget_capabilities.dart';
 import 'package:parallax/features/call/widget_driver.dart';
 
@@ -262,6 +263,32 @@ void main() {
       expect(h.responseTo(restart), isEmpty);
       expect(h.responseTo(unknown)!['error'], isNotNull);
       expect(h.matrix.delayedUpdates, [('delay-1', 'restart')]);
+    });
+
+    test('Matrix errors carry matrix_api_error for the widget', () async {
+      h.matrix.delayedError = MatrixException.fromJson({
+        'errcode': 'M_MAX_DELAY_EXCEEDED',
+        'error': 'Delay too long',
+        'org.matrix.msc4140.max_delay': 5000,
+        'nested': {'ignored': true},
+      });
+      final id = h.fromWidget('send_event', {
+        'type': 'org.matrix.msc3401.call.member',
+        'state_key': '_${testUser}_$testDevice',
+        'content': <String, Object?>{},
+        'delay': 90000,
+      });
+      await pumpEventQueue();
+      final error = h.responseTo(id)!['error'] as Map<String, Object?>;
+      expect(error['message'], 'Delay too long');
+      expect(error['matrix_api_error'], {
+        'http_status': 400,
+        'response': {
+          'errcode': 'M_MAX_DELAY_EXCEEDED',
+          'error': 'Delay too long',
+          'org.matrix.msc4140.max_delay': 5000,
+        },
+      });
     });
 
     test('delayed message events are refused (no unguarded sends)', () async {

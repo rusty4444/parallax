@@ -30,6 +30,7 @@ class FakeCallMatrix implements CallWidgetMatrix {
   Map<String, List<Map<String, Object?>>> state = {};
   List<Map<String, Object?>> history = [];
   Object? openIdError;
+  Object? delayedError;
   bool disposed = false;
   final roomEventController =
       StreamController<Map<String, Object?>>.broadcast();
@@ -87,6 +88,7 @@ class FakeCallMatrix implements CallWidgetMatrix {
     required int delayMs,
   }) async {
     delayedSends.add((type, stateKey, delayMs));
+    if (delayedError != null) throw delayedError!;
     return 'delay-1';
   }
 
