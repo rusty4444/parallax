@@ -375,6 +375,38 @@ void main() {
       },
     );
 
+    test('the upload limit applies to the optimised size', () async {
+      client.config = matrix.MediaConfig(mUploadSize: 500);
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(1000),
+          name: 'big.jpg',
+          mimeType: 'image/jpeg',
+        ),
+        prepareImage: (_) async => PreparedImage(
+          bytes: Uint8List(400),
+          mimeType: 'image/jpeg',
+          width: 2048,
+          height: 1024,
+          optimised: true,
+        ),
+      );
+      expect(transport.bodies.single, hasLength(400));
+      await expectLater(
+        sendMedia(
+          MediaSelection(
+            bytes: Uint8List(1000),
+            name: 'big.jpg',
+            mimeType: 'image/jpeg',
+          ),
+          optimise: false,
+          prepareImage: (_) async => null,
+        ),
+        throwsArgumentError,
+      );
+      expect(transport.requests, hasLength(1));
+    });
+
     test('GIFs are never re-encoded', () async {
       var called = false;
       await sendMedia(
@@ -488,6 +520,7 @@ class _Client extends Fake implements matrix.Client {
   bool cryptoAvailable = true;
   int configCalls = 0;
   Completer<matrix.MediaConfig>? configGate;
+  matrix.MediaConfig? config;
   @override
   Uri get homeserver => Uri.parse('https://matrix.example/prefix');
   @override
@@ -504,7 +537,7 @@ class _Client extends Fake implements matrix.Client {
     bool throwOnUpdateFailure = false,
   }) async {
     configCalls++;
-    return configGate?.future ?? matrix.MediaConfig();
+    return configGate?.future ?? config ?? matrix.MediaConfig();
   }
 }
 

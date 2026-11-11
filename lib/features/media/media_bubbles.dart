@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -46,9 +47,18 @@ class ImageMessageBody extends StatelessWidget {
   final EntryHookContext ctx;
 
   @override
-  Widget build(BuildContext context) {
-    final info = MediaInfo.fromEntry(ctx.entry);
-    final size = mediaPreviewSize(info);
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final info = MediaInfo.fromEntry(ctx.entry);
+      final size = mediaPreviewSize(
+        info,
+        maxWidth: math.min(240, constraints.maxWidth),
+      );
+      return _image(info, size);
+    },
+  );
+
+  Widget _image(MediaInfo info, Size size) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -177,9 +187,16 @@ class VideoMessageBody extends StatelessWidget {
   final EntryHookContext ctx;
 
   @override
-  Widget build(BuildContext context) {
-    final info = MediaInfo.fromEntry(ctx.entry);
-    final size = mediaPreviewSize(info);
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => _video(
+      context,
+      MediaInfo.fromEntry(ctx.entry),
+      math.min(240, constraints.maxWidth),
+    ),
+  );
+
+  Widget _video(BuildContext context, MediaInfo info, double maxWidth) {
+    final size = mediaPreviewSize(info, maxWidth: maxWidth);
     final p = ctx.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -454,8 +471,8 @@ class _VoiceMessageBodyState extends State<VoiceMessageBody>
     return Semantics(
       label:
           'Voice message, ${formatMediaDuration(info.duration ?? Duration.zero)}',
-      child: SizedBox(
-        width: 252,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 252),
         child: Row(
           children: [
             _PlayButton(ctx: ctx, controller: controller, onPressed: _toggle),
@@ -465,7 +482,7 @@ class _VoiceMessageBodyState extends State<VoiceMessageBody>
                 samples: info.waveform,
                 progress: controller?.progress ?? 0,
                 playedColor: foreground,
-                unplayedColor: foreground.withValues(alpha: 0.38),
+                unplayedColor: foreground.withValues(alpha: 0.5),
                 onSeek: started ? controller.seekFraction : null,
               ),
             ),
@@ -487,13 +504,14 @@ class _VoiceMessageBodyState extends State<VoiceMessageBody>
                   foregroundColor: foreground,
                   minimumSize: const Size(40, 30),
                   padding: const EdgeInsets.symmetric(horizontal: 6),
-                  textStyle: const TextStyle(
+                ),
+                // Style the Text (not the button) so the theme font is kept.
+                child: Text(
+                  formatSpeed(voicePlaybackSpeed.value),
+                  style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                   ),
-                ),
-                child: Text(
-                  formatSpeed(voicePlaybackSpeed.value),
                   semanticsLabel:
                       'Playback speed ${formatSpeed(voicePlaybackSpeed.value)}. '
                       'Tap to change.',
@@ -544,8 +562,8 @@ class _AudioMessageBodyState extends State<AudioMessageBody>
       '${formatMediaDuration(position)} / ${formatMediaDuration(duration)}',
       if (info.size != null) formatFileSize(info.size!),
     ].join(' · ');
-    return SizedBox(
-      width: 260,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -581,6 +599,13 @@ class _AudioMessageBodyState extends State<AudioMessageBody>
                         activeTrackColor: foreground,
                         inactiveTrackColor: foreground.withValues(alpha: 0.3),
                         thumbColor: foreground,
+                        disabledActiveTrackColor: foreground.withValues(
+                          alpha: 0.5,
+                        ),
+                        disabledInactiveTrackColor: foreground.withValues(
+                          alpha: 0.3,
+                        ),
+                        disabledThumbColor: foreground.withValues(alpha: 0.7),
                       ),
                       child: SizedBox(
                         height: 22,

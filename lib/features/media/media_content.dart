@@ -227,13 +227,14 @@ bool isMediaKind(EntryKind kind) =>
 /// Display size for a media preview inside a bubble, from declared
 /// dimensions. Hostile ratios are clamped so one event cannot dominate.
 Size mediaPreviewSize(MediaInfo info, {double maxWidth = 240}) {
+  final limit = maxWidth.isFinite ? math.max(80.0, maxWidth) : 240.0;
   final ratio = info.aspectRatio;
-  if (ratio == null) return Size(maxWidth, maxWidth * 0.72);
-  var width = maxWidth;
+  if (ratio == null) return Size(limit, limit * 0.72);
+  var width = limit;
   var height = width / ratio;
   if (height > 320) {
     height = 320;
-    width = math.max(120, height * ratio);
+    width = math.min(limit, math.max(120, height * ratio));
   } else if (height < 110) {
     height = 110;
   }

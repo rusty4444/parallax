@@ -54,11 +54,16 @@ Future<void> sendQueuedAttachment({
   }
   final maximum = (await client.getConfig()).mUploadSize;
   check();
-  if (maximum != null && maximum > 0 && media.bytes.length > maximum) {
+  final preparable = isPreparableImage(media.mimeType);
+  // Optimised images are checked against the limit after preparation.
+  if (!preparable &&
+      maximum != null &&
+      maximum > 0 &&
+      media.bytes.length > maximum) {
     throw ArgumentError('Attachment exceeds the homeserver upload limit');
   }
   PreparedImage? prepared;
-  if (isPreparableImage(media.mimeType)) {
+  if (preparable) {
     final options =
         uploadOptions ?? await MediaPreferences.shared.resolveUploadOptions();
     check();
@@ -79,6 +84,10 @@ Future<void> sendQueuedAttachment({
             prepared.bytes.length > media.bytes.length)) {
       prepared = null;
     }
+  }
+  final uploadLength = prepared?.bytes.length ?? media.bytes.length;
+  if (maximum != null && maximum > 0 && uploadLength > maximum) {
+    throw ArgumentError('Attachment exceeds the homeserver upload limit');
   }
   final voice = _voiceMetadata(media);
   final file = prepared != null

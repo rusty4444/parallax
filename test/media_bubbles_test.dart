@@ -10,6 +10,7 @@ import 'package:parallax/features/media/voice_waveform.dart';
 import 'package:parallax/hooks/hook_types.dart';
 import 'package:parallax/media_player_owner.dart';
 import 'package:parallax/message_image.dart';
+import 'package:parallax/timeline/message_bubble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'media_test_support.dart';
@@ -76,6 +77,76 @@ void main() {
       body(backend, mediaEntry('r', EntryKind.image, redacted: true)),
     );
     expect(find.text('none'), findsOneWidget);
+  });
+
+  testWidgets('every media kind fits a 320 dp phone inside MessageBubble', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = FakeMediaBackend();
+    final entries = [
+      mediaEntry(
+        'i',
+        EntryKind.image,
+        body: 'A long caption for a photo',
+        content: {
+          'filename': 'p.jpg',
+          'info': {'w': 4000, 'h': 1000},
+        },
+      ),
+      mediaEntry(
+        'v',
+        EntryKind.video,
+        content: {
+          'info': {'w': 1080, 'h': 1920, 'duration': 3600000},
+        },
+      ),
+      mediaEntry('o', EntryKind.voice, content: voiceContent, mine: true),
+      mediaEntry(
+        'a',
+        EntryKind.audio,
+        body: 'a very long audio file name that keeps going.mp3',
+        content: {
+          'info': {'size': 123456789, 'duration': 7200000},
+        },
+      ),
+      mediaEntry('s', EntryKind.sticker),
+      mediaEntry(
+        'f',
+        EntryKind.file,
+        body: 'an extremely long document name for testing layout.docx',
+        content: {
+          'info': {'size': 999999999},
+        },
+      ),
+    ];
+    for (final entry in entries) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              children: [
+                MessageBubble(
+                  entry: entry,
+                  backend: backend,
+                  roomId: roomId,
+                  palette: palette,
+                  group: false,
+                  onHeart: () {},
+                  onAction: () {},
+                  onReaction: (_) {},
+                  entries: entries,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: entry.kind.name);
+    }
   });
 
   testWidgets('image caption shows only with a distinct filename', (
