@@ -92,6 +92,7 @@ class _ReportRoomScreenState extends State<ReportRoomScreen> {
         return;
       }
       if (!mounted) return;
+      setState(() => _busy = false);
       showAdminMessage(context, 'Report sent. You left the room.');
       Navigator.of(context).popUntil((route) => route.isFirst);
       return;

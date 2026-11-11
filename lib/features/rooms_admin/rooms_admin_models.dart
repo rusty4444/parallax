@@ -231,7 +231,9 @@ String? serverNameOf(String? matrixId) {
 
 /// `https://matrix.to` link for a user, room ID or alias.
 String matrixToLink(String id, {List<String> via = const []}) {
-  final encoded = Uri.encodeComponent(id).replaceAll('%3A', ':');
+  final encoded = Uri.encodeComponent(
+    id,
+  ).replaceAll('%3A', ':').replaceAll('%40', '@').replaceAll('%21', '!');
   final query = via.isEmpty
       ? ''
       : '?${via.map((server) => 'via=${Uri.encodeComponent(server)}').join('&')}';
