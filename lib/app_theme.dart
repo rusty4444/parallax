@@ -15,7 +15,7 @@ abstract final class ParallaxBrand {
 
   /// Back-to-front layer gradients used by the logo.
   static const layers = <List<Color>>[
-    [Color(0xFF70081E), Color(0xFFAA1430)],
+    [Color(0xFF8E1230), Color(0xFFC41E3E)],
     [Color(0xFFE42C22), Color(0xFFFF4E2E)],
     [Color(0xFFFF8428), Color(0xFFFFC84C)],
   ];
@@ -209,7 +209,10 @@ ThemeData themeFor(VisualTheme style) {
       backgroundColor: palette.surface,
       selectedColor: palette.accent.withValues(alpha: 0.22),
       side: BorderSide(color: palette.stroke),
-      labelStyle: TextStyle(color: palette.foreground),
+      labelStyle: TextStyle(
+        color: palette.foreground,
+        fontFamily: 'SpaceGrotesk',
+      ),
     ),
     dividerTheme: DividerThemeData(color: palette.stroke),
   );
