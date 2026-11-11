@@ -9,6 +9,7 @@ import 'package:parallax/features/home/home_features.dart';
 import 'package:parallax/features/home/room_list_filters.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/space_browser_screen.dart';
 import 'package:parallax/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -356,6 +357,35 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Alex'), findsOneWidget);
       expect(find.text('Team'), findsNothing);
+    });
+
+    testWidgets('a joined Space can be left from its browser', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => SpaceBrowserScreen(
+                    backend: backend,
+                    spaceId: '!space:x.org',
+                  ),
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Leave Space'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Leave Space'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('leaveSpace:!space:x.org'));
+      expect(find.byType(SpaceBrowserScreen), findsNothing);
     });
 
     testWidgets('invite avatars can be hidden and invites accepted inline', (

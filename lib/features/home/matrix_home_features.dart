@@ -70,6 +70,10 @@ class MatrixHomeFeatures implements RoomListFeatures, AccountFeatures {
   // choice; shared per SDK client, not per helper lifetime.
   static final _tagQueues = Expando<Map<String, Future<void>>>();
 
+  // Provider discovery is stable for a session; avoid repeating up to four
+  // requests every time Settings opens. Failures are not cached.
+  static final _managementCache = Expando<AccountManagement>();
+
   matrix.Client _client() {
     final client = _access.sdkClient;
     if (client == null || !_access.isSessionCurrent(client)) {
@@ -309,6 +313,19 @@ class MatrixHomeFeatures implements RoomListFeatures, AccountFeatures {
   @override
   Future<AccountManagement> accountManagement() async {
     final client = _client();
+    final cached = _managementCache[client];
+    if (cached != null) return cached;
+    final (result, conclusive) = await _discoverAccountManagement(client);
+    _check(client);
+    if (conclusive) _managementCache[client] = result;
+    return result;
+  }
+
+  /// Returns the result and whether it came from a successful server answer
+  /// (only those are cached).
+  Future<(AccountManagement, bool)> _discoverAccountManagement(
+    matrix.Client client,
+  ) async {
     Uri? url;
     var actions = const <String>{};
     for (final path in const [
@@ -344,24 +361,29 @@ class MatrixHomeFeatures implements RoomListFeatures, AccountFeatures {
       }
     }
     var canChangePassword = false;
+    var conclusive = url != null;
     if (url == null) {
       try {
         final capabilities = await client.getCapabilities();
         _check(client);
         canChangePassword = capabilities.mChangePassword?.enabled ?? true;
+        conclusive = true;
       } on StateError {
         rethrow;
       } catch (_) {
         _check(client);
       }
     }
-    return AccountManagement(
-      url: url,
-      canChangePassword: canChangePassword,
-      deviceDeleteSupported:
-          actions.contains('org.matrix.device_delete') ||
-          actions.contains('org.matrix.session_end'),
-      deactivateSupported: actions.contains('org.matrix.account_deactivate'),
+    return (
+      AccountManagement(
+        url: url,
+        canChangePassword: canChangePassword,
+        deviceDeleteSupported:
+            actions.contains('org.matrix.device_delete') ||
+            actions.contains('org.matrix.session_end'),
+        deactivateSupported: actions.contains('org.matrix.account_deactivate'),
+      ),
+      conclusive,
     );
   }
 

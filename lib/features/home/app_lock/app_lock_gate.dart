@@ -54,11 +54,21 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
       widget.controller ?? (widget.createController ?? AppLockController.new)();
   late final bool _owns = widget.controller == null;
 
+  bool _wasLocked = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _controller.addListener(_lockChanged);
     unawaited(_controller.load());
+  }
+
+  void _lockChanged() {
+    final locked = _controller.locked;
+    // Close the keyboard of whatever was focused under the lock screen.
+    if (locked && !_wasLocked) FocusManager.instance.primaryFocus?.unfocus();
+    _wasLocked = locked;
   }
 
   @override
@@ -68,6 +78,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _controller.removeListener(_lockChanged);
     if (_owns) _controller.dispose();
     super.dispose();
   }

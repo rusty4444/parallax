@@ -79,11 +79,13 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   bool _favourite(ChatRoom room) {
-    if (room.favourite) return true;
+    final features = _features;
+    // The live tag state is newer than the projection after a local change.
+    if (features == null) return room.favourite;
     try {
-      return _features?.isFavourite(room.id) ?? false;
+      return features.isFavourite(room.id);
     } catch (_) {
-      return false;
+      return room.favourite;
     } // A bad room projection cannot hide the inbox.
   }
 
@@ -192,11 +194,15 @@ class _InboxScreenState extends State<InboxScreen> {
       return;
     }
     if (choice == RoomMenuAction.copyLink) {
-      final link =
-          roomList?.roomLink(room.id) ??
-          matrixToRoomLink(room.canonicalAlias ?? room.id);
-      await Clipboard.setData(ClipboardData(text: link));
-      if (mounted && _owner.isCurrent) _showError('Room link copied');
+      try {
+        final link =
+            roomList?.roomLink(room.id) ??
+            matrixToRoomLink(room.canonicalAlias ?? room.id);
+        await Clipboard.setData(ClipboardData(text: link));
+        if (mounted && _owner.isCurrent) _showError('Room link copied');
+      } catch (_) {
+        if (mounted && _owner.isCurrent) _showError('Couldn’t copy the link.');
+      }
       return;
     }
     if (choice == RoomMenuAction.leave &&

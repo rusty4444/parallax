@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
+import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/chat_backend.dart';
+import 'package:parallax/features/home/home_hooks.dart';
+import 'package:parallax/main.dart';
+import 'package:parallax/message_draft_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:parallax/features/home/app_lock/app_lock_controller.dart';
 import 'package:parallax/features/home/app_lock/app_lock_gate.dart';
 import 'package:parallax/features/home/app_lock/app_lock_settings_screen.dart';
@@ -24,6 +30,11 @@ class _Store implements SecureValueStore {
 
   @override
   Future<void> delete(String key) async => values.remove(key);
+}
+
+class _ReadyBackend extends HomeFakeBackend {
+  @override
+  SessionStatus get connection => SessionStatus.ready;
 }
 
 class _Biometrics implements BiometricUnlock {
@@ -265,5 +276,35 @@ void main() {
       expect(lock.pinSet, isFalse);
       expect(store.values, isEmpty);
     });
+  });
+
+  testWidgets('the signed-in app shell is wrapped by the lock', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final setup = controller();
+    await setup.load();
+    await setup.setPin('2580');
+    setup.dispose();
+    appLockControllerFactory = controller;
+    addTearDown(() => appLockControllerFactory = null);
+    final preferences = AppearancePreferences();
+    addTearDown(preferences.dispose);
+    await tester.pumpWidget(
+      ParallaxApp(
+        backend: _ReadyBackend(),
+        preferences: preferences,
+        draftStore: MessageDraftStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Parallax is locked'), findsOneWidget);
+    expect(find.text('Messages'), findsNothing);
+    for (final digit in '2580'.split('')) {
+      await tester.tap(find.byKey(ValueKey('pin-key-$digit')));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Messages'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 }
