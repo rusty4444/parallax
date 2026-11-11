@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'chat_backend.dart';
 import 'messaging_features.dart';
+import 'room_join_dialog.dart';
 
 /// Browse joined Spaces, or direct children of [spaceId]. A selected/joined chat
 /// room ID is propagated through every nested browser back to the caller.
@@ -222,8 +223,11 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     final generation = ++_joinGeneration;
     setState(() => _joining = room.id);
     try {
-      final id = await widget.backend.joinPublicRoom(room.id);
-      if (mounted && _ownerCurrent && generation == _joinGeneration) {
+      final id = await showRoomJoin(context, widget.backend, room.id);
+      if (id != null &&
+          mounted &&
+          _ownerCurrent &&
+          generation == _joinGeneration) {
         Navigator.pop(context, id);
       }
     } catch (_) {

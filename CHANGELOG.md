@@ -6,6 +6,9 @@
 - Definite pre-dispatch failures and recognised Matrix rejection codes release room-creation admission and show an accurate retriable error. Unknown/server/transport errors and post-create session changes retain the original uncertain request; no automatic retry or encryption downgrade occurs.
 - Bounded visible acknowledgement and sync waits. A missing acknowledgement becomes uncertain after ten seconds without cancelling or replacing the original request. Session-owned request/room-ID retention survives inbox disposal; late acknowledgement cannot navigate an expired session. Ambiguous transport failures keep creation blocked rather than risking duplicate POSTs. This ownership is not persisted across process restart; use ordinary sync to check for a room before creating again.
 - Deterministic SDK transport/widget coverage holds response headers, releases late acknowledgements, and exercises route disposal, account replacement and same-account logout/login. These are not live Android/two-client interoperability results.
+- Isolate public-directory pagination by query generation. Query changes retire the old page guard/cursor immediately; stale success, error and cleanup cannot affect current results or admit duplicate page requests. Controlled widget regressions cover held obsolete requests, repeated terms/cursors, retry, debounce and route disposal; this is not live server or device acceptance.
+- Bound Space child-room and directory join waits to 30 seconds with explicit stop/check-again controls, session-owned acknowledgement retention and processed-membership recovery. Cancelling a wait does not undo a server join; uncertain requests are not automatically repeated in the same session. Records do not survive process restart.
+- This is one prerequisite for issue #5, not Space graph administration or live Element X acceptance. Invitation acceptance remains a separate SDK flow.
 
 ## 0.3.0 — messaging expansion preview
 
