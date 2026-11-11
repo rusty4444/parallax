@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -190,6 +191,25 @@ void main() {
     final update = h.toWidget('update_state').single;
     final state = (update['data'] as Map)['state'] as List;
     expect(state, hasLength(2));
+  });
+
+  test('live state racing the initial push is delivered after it', () async {
+    final h = _Harness();
+    h.matrix.stateGate = Completer<void>();
+    await h.negotiate(_elementCallRequest());
+    h.matrix.stateController.add(
+      stateEvent('org.matrix.msc3401.call.member', '_@bob:example.org_B', {
+        'application': 'm.call',
+      }),
+    );
+    await pumpEventQueue();
+    expect(h.toWidget('update_state'), isEmpty);
+    h.matrix.stateGate!.complete();
+    await pumpEventQueue();
+    final updates = h.toWidget('update_state');
+    expect(updates, hasLength(2));
+    final live = ((updates.last['data'] as Map)['state'] as List).single;
+    expect((live as Map)['state_key'], '_@bob:example.org_B');
   });
 
   test('requests before negotiation are refused', () async {

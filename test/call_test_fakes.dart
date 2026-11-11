@@ -31,6 +31,7 @@ class FakeCallMatrix implements CallWidgetMatrix {
   List<Map<String, Object?>> history = [];
   Object? openIdError;
   Object? delayedError;
+  Completer<void>? stateGate;
   bool disposed = false;
   final roomEventController =
       StreamController<Map<String, Object?>>.broadcast();
@@ -111,10 +112,13 @@ class FakeCallMatrix implements CallWidgetMatrix {
   Future<List<Map<String, Object?>>> readState(
     String type, {
     String? stateKey,
-  }) async => [
-    for (final event in state[type] ?? const <Map<String, Object?>>[])
-      if (stateKey == null || event['state_key'] == stateKey) event,
-  ];
+  }) async {
+    await stateGate?.future;
+    return [
+      for (final event in state[type] ?? const <Map<String, Object?>>[])
+        if (stateKey == null || event['state_key'] == stateKey) event,
+    ];
+  }
 
   @override
   Future<List<Map<String, Object?>>> readEvents(

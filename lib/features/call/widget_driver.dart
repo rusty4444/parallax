@@ -129,6 +129,7 @@ class CallWidgetDriver {
   final _pending = <String, _PendingRequest>{};
   final _subscriptions = <StreamSubscription<Object?>>[];
   final _ownDelayIds = <String>{};
+  List<Map<String, Object?>>? _postponedState;
   final _random = Random.secure();
   var _counter = 0;
   var _disposed = false;
@@ -511,7 +512,12 @@ class CallWidgetDriver {
       )
       ..add(
         matrix.stateUpdates.listen((event) {
-          if (_canDeliver(event)) {
+          if (!_canDeliver(event)) return;
+          final postponed = _postponedState;
+          if (postponed != null) {
+            // Racing the initial state push: deliver right after it.
+            postponed.add(event);
+          } else {
             _notify('update_state', {
               'state': [event],
             });
@@ -528,6 +534,7 @@ class CallWidgetDriver {
   Future<void> _pushInitialState() async {
     final filters = _capabilities.stateReadFilters;
     if (filters.isEmpty) return;
+    _postponedState = [];
     final state = <String, Map<String, Object?>>{};
     for (final filter in filters) {
       try {
@@ -544,8 +551,15 @@ class CallWidgetDriver {
         // As the Rust SDK: a failed read must not block the whole update.
       }
     }
+    final postponed = _postponedState ?? const [];
+    _postponedState = null;
     if (_disposed) return;
     _notify('update_state', {'state': state.values.toList()});
+    for (final event in postponed) {
+      _notify('update_state', {
+        'state': [event],
+      });
+    }
   }
 
   bool _canDeliver(Map<String, Object?> event) {
