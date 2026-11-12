@@ -12,6 +12,17 @@
     <!-- Static location sharing (polls-location module); requested only when the user taps. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Live location sharing (live-location module): geolocator's
+         GeolocatorLocationService (declared by geolocator_android with
+         foregroundServiceType="location") runs as a foreground service with a
+         persistent notification while a share is active, so updates continue
+         in the background. It is started only from the foreground with
+         while-in-use permission, so ACCESS_BACKGROUND_LOCATION is not needed.
+         WAKE_LOCK: the service holds a partial wake lock while sharing so
+         updates continue with the screen off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="Parallax"
         android:name="${applicationName}"
@@ -107,6 +118,14 @@
                 <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
             </intent-filter>
         </service>
+        <!-- Live location sharing: geolocator_android already declares this
+             service; restated so the location foreground service type stays
+             explicit for Android 14+ after manifest merging. -->
+        <service
+            android:name="com.baseflow.geolocator.GeolocatorLocationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <!-- Don't delete the meta-data below.
