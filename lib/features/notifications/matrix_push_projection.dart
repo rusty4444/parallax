@@ -5,6 +5,7 @@ import 'package:matrix/matrix.dart' as matrix;
 import 'notification_content.dart';
 import 'notification_media.dart';
 import 'notification_model.dart';
+import '../../matrix_room_names.dart';
 
 /// The event could not be described (still encrypted, unsupported type …):
 /// the caller shows the generic notification.
@@ -63,8 +64,7 @@ Future<ResolvedPushEvent> projectPushEvent({
       sanitiseNotificationName(event.senderId) ??
       'Someone';
   final roomName =
-      sanitiseNotificationName(room.getLocalizedDisplayname()) ??
-      'Conversation';
+      sanitiseNotificationName(room.parallaxName) ?? 'Conversation';
   final description = describeNotificationEvent(
     type: event.type,
     content: Map<String, Object?>.from(event.content),
@@ -130,7 +130,7 @@ Future<ResolvedPushEvent> projectInvite({
       sanitiseNotificationName(inviter.calcDisplayname()) ??
       sanitiseNotificationName(member.senderId) ??
       'Someone';
-  final roomName = sanitiseNotificationName(room.getLocalizedDisplayname());
+  final roomName = sanitiseNotificationName(room.parallaxName);
   final isDirect = member.content['is_direct'] == true;
   final description = describeNotificationEvent(
     type: matrix.EventTypes.RoomMember,

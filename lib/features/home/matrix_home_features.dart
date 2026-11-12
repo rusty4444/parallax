@@ -4,6 +4,7 @@ import 'package:matrix/matrix.dart' as matrix;
 
 import '../../room_events.dart';
 import 'home_features.dart';
+import '../../matrix_room_names.dart';
 
 /// Push rule IDs behind Element X's global notification settings.
 abstract final class HomePushRules {
@@ -207,7 +208,7 @@ class MatrixHomeFeatures implements RoomListFeatures, AccountFeatures {
         spaces.add(
           HomeSpace(
             id: room.id,
-            name: room.getLocalizedDisplayname(),
+            name: room.parallaxName,
             avatarUrl: room.avatar,
           ),
         );

@@ -12,6 +12,7 @@ import '../../room_creation_request.dart';
 import '../../room_details.dart';
 import '../../room_events.dart';
 import 'rooms_admin_models.dart';
+import '../../matrix_room_names.dart';
 
 abstract interface class RoomsAdminFeatures {
   /// Server name of the signed-in account (for new room addresses).
@@ -270,7 +271,7 @@ class MatrixRoomsAdmin implements RoomsAdminFeatures {
     }
     return RoomPreview(
       roomId: roomId,
-      name: local?.getLocalizedDisplayname(),
+      name: local?.parallaxName,
       alias: address.isAlias ? address.idOrAlias : null,
       membership: local?.membership.name,
       via: via,

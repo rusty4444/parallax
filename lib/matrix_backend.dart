@@ -49,6 +49,7 @@ import 'features/packs/custom_reactions.dart';
 import 'features/packs/matrix_packs.dart' show packShortcodeForKey;
 import 'hooks/registry.dart' show transformOutgoingText;
 import 'hooks/hook_types.dart' show OutgoingTextContext;
+import 'matrix_room_names.dart';
 
 /// One SDK client and one active timeline for the lifetime of the app.
 class MatrixBackend extends ChatBackend
@@ -761,6 +762,9 @@ class MatrixBackend extends ChatBackend
           encryption.KeyVerificationMethod.numbers,
         },
         defaultNetworkRequestTimeout: const Duration(seconds: 90),
+        // Bridge state names bridge bots, which room names and avatar
+        // clusters leave out; keep it loaded for rooms not yet opened.
+        importantStateEvents: {...bridgeStateTypes},
       );
       final client = openedClient;
       _client = client;
@@ -2021,7 +2025,7 @@ class MatrixBackend extends ChatBackend
                     MessageHit(
                       id: event.eventId,
                       roomId: roomId,
-                      roomName: room.getLocalizedDisplayname(),
+                      roomName: room.parallaxName,
                       sender: event.senderId,
                       body: body,
                       time: event.originServerTs,
@@ -3150,10 +3154,9 @@ class MatrixBackend extends ChatBackend
 
   ChatRoom _projectRoom(matrix.Room room, matrix.Client client) {
     final event = room.lastEvent;
-    final name = room.getLocalizedDisplayname();
-    final heroIds =
-        room.summary.mHeroes ??
-        [if (room.directChatMatrixID != null) room.directChatMatrixID!];
+    // Computed names and avatar clusters leave out bridge bots.
+    final name = room.parallaxName;
+    final heroIds = room.peopleHeroes;
     final tags = room.tags.keys.toList(growable: false);
     // Cached membership only: never trigger member fetches while projecting.
     String? previewSender;
@@ -3197,15 +3200,12 @@ class MatrixBackend extends ChatBackend
       lastActivity: event?.originServerTs,
       unread: room.notificationCount,
       manuallyUnread: room.markedUnread,
-      avatarUrl: room.avatar,
+      avatarUrl: room.parallaxAvatar,
       encrypted: room.encrypted,
       isDirect: room.isDirectChat,
       invited: room.membership == matrix.Membership.invite,
       heroes: [
-        for (final id
-            in heroIds
-                .where((id) => id != client.userID && id.isNotEmpty)
-                .take(4))
+        for (final id in heroIds.take(4))
           ChatAvatar(
             name: room.unsafeGetUserFromMemoryOrFallback(id).calcDisplayname(),
             url: room.unsafeGetUserFromMemoryOrFallback(id).avatarUrl,

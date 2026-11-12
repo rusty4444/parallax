@@ -8,6 +8,7 @@ import '../../media_download.dart';
 import '../../room_events.dart';
 import 'pack_features.dart';
 import 'pack_model.dart';
+import '../../matrix_room_names.dart';
 
 const _maxThumbnailBytes = 512 * 1024;
 const _maxCachedImages = 256;
@@ -16,7 +17,7 @@ const _maxConcurrentLoads = 4;
 
 String _roomName(matrix.Room room) {
   try {
-    final name = room.getLocalizedDisplayname();
+    final name = room.parallaxName;
     return name.trim().isEmpty ? room.id : name;
   } catch (_) {
     return room.id;

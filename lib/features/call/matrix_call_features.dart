@@ -20,6 +20,7 @@ import 'call_settings_store.dart';
 import 'call_widget_url.dart';
 import 'widget_capabilities.dart';
 import 'widget_driver.dart';
+import '../../matrix_room_names.dart';
 
 class MatrixCallFeatures implements CallFeatures {
   MatrixCallFeatures(
@@ -146,7 +147,7 @@ class MatrixCallFeatures implements CallFeatures {
       roomId: event.room.id,
       roomIsDirect: event.room.isDirectChat,
       roomJoined: event.room.membership == matrix.Membership.join,
-      roomName: event.room.getLocalizedDisplayname(),
+      roomName: event.room.parallaxName,
       senderMember: event.room
           .getState(matrix.EventTypes.RoomMember, event.senderId)
           ?.content,

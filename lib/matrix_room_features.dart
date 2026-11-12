@@ -3,6 +3,7 @@ import 'package:matrix/matrix.dart';
 import 'chat_backend.dart';
 import 'features/threads/thread_models.dart';
 import 'messaging_features.dart';
+import 'matrix_room_names.dart';
 
 /// Account-bound SDK operations shared by the optional messaging screens.
 /// Construct a new instance for every account/session generation.
@@ -80,7 +81,7 @@ class MatrixRoomFeatures {
         if (room.isSpace && room.membership == Membership.join)
           SpaceSummary(
             id: room.id,
-            name: room.getLocalizedDisplayname(),
+            name: room.parallaxName,
             topic: room.topic,
             members: room.summary.mJoinedMemberCount ?? 0,
             isSpace: true,

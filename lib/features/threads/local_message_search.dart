@@ -10,6 +10,7 @@ import '../../chat_backend.dart';
 import '../../message_text.dart';
 import '../../room_events.dart';
 import 'message_index_store.dart';
+import '../../matrix_room_names.dart';
 
 /// A local (device index) search result. [threadRootId] is set for thread
 /// replies: those open at their thread root in the main timeline.
@@ -464,7 +465,7 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
         LocalMessageHit(
           id: row.eventId,
           roomId: row.roomId,
-          roomName: room.getLocalizedDisplayname(),
+          roomName: room.parallaxName,
           sender: name is String && name.trim().isNotEmpty
               ? name.trim()
               : row.sender,

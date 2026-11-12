@@ -12,6 +12,7 @@ import '../rooms_admin/leave_room.dart';
 import '../rooms_admin/rooms_admin_models.dart';
 import 'spaces_admin_features.dart';
 import 'spaces_admin_models.dart';
+import '../../matrix_room_names.dart';
 
 class MatrixSpacesAdmin implements SpacesAdminFeatures {
   MatrixSpacesAdmin(this.backend)
@@ -119,11 +120,8 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
     }
   }
 
-  SpaceRef _ref(matrix.Room room) => SpaceRef(
-    id: room.id,
-    name: room.getLocalizedDisplayname(),
-    avatarUrl: room.avatar,
-  );
+  SpaceRef _ref(matrix.Room room) =>
+      SpaceRef(id: room.id, name: room.parallaxName, avatarUrl: room.avatar);
 
   @override
   List<SpaceRef> get joinedSpaceRefs {
@@ -224,7 +222,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
         rooms.add(
           SpaceRoomCandidate(
             id: room.id,
-            name: room.getLocalizedDisplayname(),
+            name: room.parallaxName,
             avatarUrl: room.avatar,
             alias: alias.isEmpty ? null : alias,
             members: room.summary.mJoinedMemberCount ?? 0,
@@ -550,7 +548,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
       final local = client.getRoomById(child.roomId);
       if (local != null && local.membership == matrix.Membership.join) {
         return child.withDisplay(
-          name: local.getLocalizedDisplayname(),
+          name: local.parallaxName,
           avatarUrl: local.avatar,
           members: local.summary.mJoinedMemberCount,
           joined: true,
@@ -772,7 +770,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
       rooms.add(
         LeaveSpaceRoom(
           id: room.id,
-          name: room.getLocalizedDisplayname(),
+          name: room.parallaxName,
           avatarUrl: room.avatar,
           members: room.summary.mJoinedMemberCount ?? 0,
           lastAdmin: admin,
@@ -782,9 +780,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
     }
     return LeaveSpacePlan(
       spaceId: spaceId,
-      spaceName: details.hasName
-          ? details.name
-          : space.getLocalizedDisplayname(),
+      spaceName: details.hasName ? details.name : space.parallaxName,
       details: details,
       lastAdmin: lastAdmin,
       rooms: rooms,
