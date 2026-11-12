@@ -197,6 +197,8 @@ class ChatEffectTracker {
     }
     if (entries.isNotEmpty) _primed = true;
     _previous = ids;
+    // Fingerprints are only needed for entries that may vanish next time.
+    _fingerprints.removeWhere((id, _) => !current.contains(id));
     return effects;
   }
 }

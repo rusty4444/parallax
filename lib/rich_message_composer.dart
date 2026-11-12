@@ -186,7 +186,11 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       _suggestions = const [];
       _syncFromCaller();
     }
-    if (oldWidget.editing != widget.editing) _updateSuggestions();
+    if (oldWidget.editing != widget.editing) {
+      // Commands do not apply to edits; build() follows didUpdateWidget.
+      _suggestionQuery = null;
+      _suggestions = const [];
+    }
   }
 
   /// Caller edits (clear after send, draft restore, emoji) → the field.
