@@ -11,6 +11,9 @@ enum RoomMenuAction {
   lowPriority,
   mute,
   unmute,
+
+  /// Opens the saved module's "Add to folder…" sheet.
+  addToFolder,
   copyLink,
   leave,
 }
@@ -21,6 +24,7 @@ class RoomMenuCapabilities {
     this.favourites = false,
     this.tags = false,
     this.notifications = false,
+    this.folders = false,
   });
   final bool favourites;
 
@@ -29,6 +33,9 @@ class RoomMenuCapabilities {
 
   /// Per-room mute via push rules.
   final bool notifications;
+
+  /// Chat folders (saved module).
+  final bool folders;
 }
 
 Future<RoomMenuAction?> showRoomListMenu(
@@ -113,6 +120,12 @@ Future<RoomMenuAction?> showRoomListMenu(
                         Icons.notifications_off_outlined,
                         'Mute notifications',
                       ),
+              if (capabilities.folders)
+                item(
+                  RoomMenuAction.addToFolder,
+                  Icons.create_new_folder_outlined,
+                  'Add to folder…',
+                ),
               item(
                 RoomMenuAction.copyLink,
                 Icons.link_rounded,

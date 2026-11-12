@@ -10,6 +10,11 @@ import 'features/home/room_list_menu.dart';
 import 'features/home/room_list_tile.dart';
 import 'features/home/space_switcher.dart';
 import 'features/rooms_admin/rooms_admin_hooks.dart';
+import 'features/saved/folder_tabs.dart';
+import 'features/saved/note_to_self.dart';
+import 'features/saved/saved_features.dart';
+import 'features/saved/saved_messages_screen.dart';
+import 'features/saved/saved_models.dart';
 import 'room_creation_request.dart';
 import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
@@ -70,6 +75,13 @@ class _InboxScreenState extends State<InboxScreen> {
 
   RoomListFeatures? get _roomList => roomListFeaturesOf(widget.backend);
 
+  /// Note to self, saved messages and chat folders (saved module).
+  late final SavedFeatures? _saved = savedFeaturesOf(widget.backend);
+  late final Listenable _changes = Listenable.merge([
+    widget.backend,
+    if (_saved != null && !identical(_saved, widget.backend)) _saved,
+  ]);
+
   @override
   void dispose() {
     _createdRoomWait?.cancel();
@@ -92,6 +104,8 @@ class _InboxScreenState extends State<InboxScreen> {
   String _query = '';
   Set<RoomListFilter> _filters = const {};
   String? _spaceId;
+  String? _folderId;
+  bool _openingNote = false;
   String? _pendingRoomAction;
   bool _creatingRoom = false;
   String? get _createdRoomId => _creation.roomId;
@@ -203,12 +217,26 @@ class _InboxScreenState extends State<InboxScreen> {
         favourites: roomList != null || _features != null,
         tags: roomList != null,
         notifications: roomList != null,
+        folders: _saved != null,
       ),
     );
     if (!mounted ||
         !_owner.isCurrent ||
         choice == null ||
         _pendingRoomAction != null) {
+      return;
+    }
+    if (choice == RoomMenuAction.addToFolder) {
+      final saved = _saved;
+      if (saved == null) return;
+      await showAddToFolderSheet(
+        context,
+        backend: widget.backend,
+        palette: widget.palette,
+        features: saved,
+        room: room,
+        facts: _facts(room, {if (favourite) room.id}, _failedRooms()),
+      );
       return;
     }
     if (choice == RoomMenuAction.copyLink) {
@@ -259,7 +287,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 )?.preferences.sendReadReceipts ??
                 true,
           );
-        case RoomMenuAction.copyLink:
+        case RoomMenuAction.copyLink || RoomMenuAction.addToFolder:
           break;
       }
     } catch (_) {
@@ -277,6 +305,95 @@ class _InboxScreenState extends State<InboxScreen> {
       if (mounted && _owner.isCurrent) {
         setState(() => _pendingRoomAction = null);
       }
+    }
+  }
+
+  Set<String> _failedRooms() =>
+      _features?.pendingSends
+          .where((item) => item.state == DeliveryState.failed)
+          .map((item) => item.roomId)
+          .toSet() ??
+      <String>{};
+
+  FolderRoomFacts _facts(
+    ChatRoom room,
+    Set<String> favourites,
+    Set<String> failedRooms,
+  ) => (
+    favourite: favourites.contains(room.id),
+    unread: isRoomUnread(room, RoomListContext(failedRooms: failedRooms)),
+  );
+
+  Future<void> _openNoteToSelf() async {
+    final saved = _saved;
+    if (saved == null || _openingNote || !_owner.isCurrent) return;
+    setState(() => _openingNote = true);
+    try {
+      await openNoteToSelfRoom(
+        context,
+        backend: widget.backend,
+        palette: widget.palette,
+        features: saved,
+        open: _open,
+      );
+    } finally {
+      if (mounted && _owner.isCurrent) setState(() => _openingNote = false);
+    }
+  }
+
+  Future<void> _dismissNotePrompt() async {
+    final saved = _saved;
+    if (saved == null || !_owner.isCurrent) return;
+    try {
+      await saved.dismissNoteToSelfPrompt();
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        _showError('Couldn’t dismiss this suggestion. Try again.');
+      }
+    }
+  }
+
+  Future<void> _openSaved() async {
+    final saved = _saved;
+    if (saved == null || !_owner.isCurrent) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => SavedMessagesScreen(
+          backend: widget.backend,
+          palette: widget.palette,
+          features: saved,
+          onOpenRoom: (_, roomId) => _open(roomId),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _newFolder() async {
+    final saved = _saved;
+    if (saved == null || !_owner.isCurrent) return;
+    final id = await openFolderEditor(
+      context,
+      backend: widget.backend,
+      palette: widget.palette,
+      features: saved,
+    );
+    if (id != null && mounted && _owner.isCurrent) {
+      setState(() => _folderId = id);
+    }
+  }
+
+  Future<void> _showFolderOptions(ChatFolder folder) async {
+    final saved = _saved;
+    if (saved == null || !_owner.isCurrent) return;
+    final deleted = await showFolderTabOptions(
+      context,
+      backend: widget.backend,
+      palette: widget.palette,
+      features: saved,
+      folder: folder,
+    );
+    if (deleted && mounted && _owner.isCurrent && _folderId == folder.id) {
+      setState(() => _folderId = null);
     }
   }
 
@@ -581,7 +698,7 @@ class _InboxScreenState extends State<InboxScreen> {
     final compact = settings?.compact ?? false;
     final hideInviteAvatars = settings?.hideInviteAvatars ?? false;
     return AnimatedBuilder(
-      animation: widget.backend,
+      animation: _changes,
       builder: (context, _) {
         final chats = widget.backend.rooms.where((room) => !room.isSpace);
         final chatCount = chats.length;
@@ -592,12 +709,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 RoomSyncState.error => 'SYNC ERROR',
                 RoomSyncState.ready => '0 ROOMS',
               };
-        final failedRooms =
-            _features?.pendingSends
-                .where((item) => item.state == DeliveryState.failed)
-                .map((item) => item.roomId)
-                .toSet() ??
-            <String>{};
+        final failedRooms = _failedRooms();
         final favourites = {
           for (final room in widget.backend.rooms)
             if (_favourite(room)) room.id,
@@ -606,8 +718,29 @@ class _InboxScreenState extends State<InboxScreen> {
         final spaceId = spaces.any((space) => space.id == _spaceId)
             ? _spaceId
             : null;
-        final rooms = filterRoomList(
-          widget.backend.rooms,
+        // Saved module: Note to self is pinned first and counts as a DM;
+        // a selected chat folder narrows the list before the filters.
+        final saved = _saved;
+        final noteId = saved?.noteToSelfRoomId;
+        final folderList = saved?.folders.folders ?? const <ChatFolder>[];
+        final folder = folderList.where((f) => f.id == _folderId).firstOrNull;
+        final allRooms = [
+          for (final room in widget.backend.rooms)
+            room.id == noteId && !room.invited ? presentNoteToSelf(room) : room,
+        ];
+        FolderRoomFacts facts(ChatRoom room) =>
+            _facts(room, favourites, failedRooms);
+        final unreadByFolder = {
+          for (final f in folderList)
+            f.id: folderUnreadCount(f, allRooms, facts),
+        };
+        final filtered = filterRoomList(
+          folder == null
+              ? allRooms
+              : [
+                  for (final room in allRooms)
+                    if (folderContainsRoom(folder, room, facts(room))) room,
+                ],
           _filters,
           RoomListContext(
             favourites: favourites,
@@ -616,10 +749,27 @@ class _InboxScreenState extends State<InboxScreen> {
             query: _query,
           ),
         );
-        final emptyState = roomListEmptyState(
-          _filters,
-          spaceSelected: spaceId != null,
-        );
+        final rooms = [
+          ...filtered.where((room) => room.id == noteId),
+          ...filtered.where((room) => room.id != noteId),
+        ];
+        final showNotePrompt =
+            saved != null &&
+            noteId == null &&
+            !saved.noteToSelfPromptDismissed &&
+            _filters.isEmpty &&
+            _query.isEmpty &&
+            spaceId == null &&
+            folder == null &&
+            widget.backend.roomSyncState == RoomSyncState.ready;
+        final emptyState = folder != null && _filters.isEmpty && spaceId == null
+            ? (
+                title: 'No chats in this folder yet',
+                subtitle:
+                    'Long-press a chat and choose Add to folder…, or '
+                    'long-press the folder tab to edit it.',
+              )
+            : roomListEmptyState(_filters, spaceSelected: spaceId != null);
         return Scaffold(
           body: GlowBackdrop(
             palette: p,
@@ -737,6 +887,15 @@ class _InboxScreenState extends State<InboxScreen> {
                                 ),
                               ),
                             ),
+                            if (saved != null)
+                              IconButton(
+                                tooltip: 'Saved messages',
+                                onPressed: _openSaved,
+                                icon: Icon(
+                                  Icons.bookmarks_outlined,
+                                  color: p.secondary,
+                                ),
+                              ),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 11,
@@ -796,6 +955,18 @@ class _InboxScreenState extends State<InboxScreen> {
                             palette: p,
                             onSelected: (id) => setState(() => _spaceId = id),
                             onOptions: _showSpaceOptions,
+                          ),
+                        ],
+                        if (folderList.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          FolderTabs(
+                            folders: folderList,
+                            selectedId: folder?.id,
+                            unreadCounts: unreadByFolder,
+                            palette: p,
+                            onSelected: (id) => setState(() => _folderId = id),
+                            onOptions: _showFolderOptions,
+                            onNewFolder: _newFolder,
                           ),
                         ],
                         const SizedBox(height: 12),
@@ -877,13 +1048,42 @@ class _InboxScreenState extends State<InboxScreen> {
                                     icon: const Icon(Icons.filter_alt_off),
                                     label: const Text('Clear filters'),
                                   )
+                                : _query.isEmpty && folder != null
+                                ? OutlinedButton.icon(
+                                    onPressed: () => _showFolderOptions(folder),
+                                    icon: const Icon(Icons.edit_outlined),
+                                    label: const Text('Edit folder'),
+                                  )
                                 : null,
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                            itemCount: rooms.length,
+                            itemCount: rooms.length + (showNotePrompt ? 1 : 0),
                             itemBuilder: (context, index) {
+                              if (showNotePrompt) {
+                                if (index == 0) {
+                                  return StartNoteToSelfRow(
+                                    key: const ValueKey('note-to-self-prompt'),
+                                    palette: p,
+                                    busy: _openingNote,
+                                    onStart: _openNoteToSelf,
+                                    onDismiss: _dismissNotePrompt,
+                                  );
+                                }
+                                index--;
+                              }
                               final room = rooms[index];
+                              if (room.id == noteId) {
+                                return NoteToSelfTile(
+                                  key: ValueKey('room-${room.id}'),
+                                  room: room,
+                                  palette: p,
+                                  compact: compact,
+                                  busy: _pendingRoomAction == room.id,
+                                  onTap: () => _open(room.id),
+                                  onLongPress: () => _showRoomActions(room),
+                                );
+                              }
                               return RoomListTile(
                                 key: ValueKey('room-${room.id}'),
                                 room: room,
