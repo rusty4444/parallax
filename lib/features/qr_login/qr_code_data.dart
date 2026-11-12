@@ -157,6 +157,28 @@ class QrCodeData {
     throw const QrCodeDecodeException(QrCodeDecodeError.invalidPrefix);
   }
 
+  /// Decodes bytes from a camera scanner. Scanners normally hand over the
+  /// decoded byte segment; some return the raw QR data codewords instead
+  /// (4-bit byte-mode indicator, 8- or 16-bit length, nibble-shifted data),
+  /// which is unwrapped here as a fallback.
+  static QrCodeData decodeScanned(List<int> scanned) {
+    try {
+      return decode(scanned);
+    } on QrCodeDecodeException catch (e) {
+      if (e.error != QrCodeDecodeError.invalidPrefix) rethrow;
+      for (final countBits in [8, 16]) {
+        final payload = unwrapQrByteSegment(scanned, countBits: countBits);
+        if (payload == null) continue;
+        try {
+          return decode(payload);
+        } on QrCodeDecodeException {
+          continue;
+        }
+      }
+      rethrow;
+    }
+  }
+
   static QrCodeData decodeBase64(String value) {
     final Uint8List bytes;
     try {
@@ -271,4 +293,28 @@ Uint8List decodeUnpaddedBase64(String value) {
   if (remainder == 1) throw const FormatException('Invalid base64 length');
   final padded = remainder == 0 ? trimmed : trimmed + '=' * (4 - remainder);
   return base64.decode(padded);
+}
+
+/// Extracts the data of a single byte-mode segment from raw QR codewords:
+/// mode 0b0100, a [countBits]-bit length, then the data bytes, all packed
+/// MSB first. Returns null when the codewords are not of that shape.
+Uint8List? unwrapQrByteSegment(List<int> raw, {required int countBits}) {
+  if (raw.isEmpty || raw[0] >> 4 != 0x4) return null;
+  int bit(int index) => (raw[index >> 3] >> (7 - (index & 7))) & 1;
+  int read(int offset, int bits) {
+    var value = 0;
+    for (var i = 0; i < bits; i++) {
+      value = (value << 1) | bit(offset + i);
+    }
+    return value;
+  }
+
+  final totalBits = raw.length * 8;
+  if (4 + countBits > totalBits) return null;
+  final count = read(4, countBits);
+  final start = 4 + countBits;
+  if (count == 0 || start + count * 8 > totalBits) return null;
+  return Uint8List.fromList([
+    for (var i = 0; i < count; i++) read(start + i * 8, 8),
+  ]);
 }

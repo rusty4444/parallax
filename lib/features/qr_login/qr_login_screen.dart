@@ -134,7 +134,7 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
     if (_stage != _Stage.scanning || _scanProblem != null) return;
     final QrCodeData data;
     try {
-      data = QrCodeData.decode(bytes);
+      data = QrCodeData.decodeScanned(bytes);
     } on QrCodeDecodeException {
       setState(() => _scanProblem = _ScanProblem.wrongCode);
       return;

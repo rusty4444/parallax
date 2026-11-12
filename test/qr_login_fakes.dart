@@ -187,6 +187,10 @@ class FakeGrantAccount implements QrGrantAccount {
   final FakeLoginAccount? login;
   final devices = <String>{'EXISTING'};
   final opened = <Uri>[];
+  bool trustApproval = true;
+
+  @override
+  Future<bool> trustsVerificationUri(Uri uri) async => trustApproval;
 
   @override
   Future<bool> deviceExists(String deviceId) async =>

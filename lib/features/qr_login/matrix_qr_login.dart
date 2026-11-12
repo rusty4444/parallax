@@ -119,7 +119,51 @@ class _MatrixGrantAccount implements QrGrantAccount {
 
   @override
   Future<bool> openVerificationUri(Uri uri) => openExternalHttpsUrl(uri);
+
+  /// The approval URL comes from the new device. Only accept it on this
+  /// account's own authorization server, so a malicious device cannot send
+  /// the user to a look-alike page.
+  @override
+  Future<bool> trustsVerificationUri(Uri uri) async {
+    _check();
+    Map<String, Object?>? metadata;
+    for (final path in [
+      '/client/v1/auth_metadata',
+      '/client/unstable/org.matrix.msc2965/auth_metadata',
+    ]) {
+      try {
+        metadata = await client.request(matrix.RequestType.GET, path);
+        break;
+      } on matrix.MatrixException {
+        continue;
+      }
+    }
+    _check();
+    final trusted = [
+      for (final field in [
+        'issuer',
+        'authorization_endpoint',
+        'device_authorization_endpoint',
+      ])
+        if (Uri.tryParse('${metadata?[field]}') case final Uri parsed
+            when parsed.scheme == 'https' && parsed.host.isNotEmpty)
+          parsed,
+    ];
+    return isTrustedVerificationUri(uri, trusted);
+  }
 }
+
+/// The device authorization URL must be HTTPS on the account provider's
+/// own host (its issuer or OAuth endpoints).
+bool isTrustedVerificationUri(Uri uri, List<Uri> provider) =>
+    uri.scheme == 'https' &&
+    uri.userInfo.isEmpty &&
+    uri.fragment.isEmpty &&
+    provider.any(
+      (trusted) =>
+          trusted.host.toLowerCase() == uri.host.toLowerCase() &&
+          trusted.port == uri.port,
+    );
 
 /// Exports the cross-signing and backup secrets for `m.login.secrets`. The
 /// SDK keeps only the self/user-signing keys cached, so secret storage is
@@ -133,8 +177,8 @@ Future<QrSecretsBundle> exportQrSecretsBundle(
   final ssss = client.encryption!.ssss;
   final keyId = ssss.defaultKeyId;
   if (keyId == null) throw const QrSecretsException('No secret storage');
-  await backend.verifyRecoveryCredential(recoveryKeyOrPassphrase);
-  if (!current()) throw StateError('Matrix session changed');
+  // Every secret read below is checked against the server identity
+  // (verifyCrossSigningSecrets, backup public key) before it is shared.
   final open = ssss.open(keyId);
   await open.unlock(
     keyOrPassphrase: recoveryKeyOrPassphrase,

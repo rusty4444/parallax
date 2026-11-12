@@ -94,6 +94,9 @@ abstract interface class QrGrantAccount {
   /// Whether [deviceId] is already one of this account's devices.
   Future<bool> deviceExists(String deviceId);
 
+  /// Whether [uri] is on this account's authorization server.
+  Future<bool> trustsVerificationUri(Uri uri);
+
   /// Opens the approval page (the OAuth server's verification URL).
   Future<bool> openVerificationUri(Uri uri);
 }
@@ -188,11 +191,18 @@ class QrGrantFlow {
         );
         throw const QrGrantException(QrGrantError.deviceIdAlreadyInUse);
       }
+      final approval = protocol.grant.approvalUri;
+      if (!await account.trustsVerificationUri(approval)) {
+        await _sendQuietly(
+          channel,
+          qrFailure(QrFailureReason.unsupportedProtocol),
+        );
+        throw const QrGrantException(QrGrantError.unknown);
+      }
       cancellation.check();
       await channel.sendJson({
         'type': QrMessageType.protocolAccepted,
       }, cancellation: cancellation);
-      final approval = protocol.grant.approvalUri;
       onStep(QrGrantWaitingForAuth(approval));
       await account.openVerificationUri(approval);
 

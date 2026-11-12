@@ -205,6 +205,54 @@ void main() {
     });
   });
 
+  test('scanner raw codewords are unwrapped (byte mode, 8/16-bit count)', () {
+    List<int> wrap(List<int> payload, int countBits) {
+      final bits = <int>[0, 1, 0, 0];
+      for (var i = countBits - 1; i >= 0; i--) {
+        bits.add((payload.length >> i) & 1);
+      }
+      for (final byte in payload) {
+        for (var i = 7; i >= 0; i--) {
+          bits.add((byte >> i) & 1);
+        }
+      }
+      bits.addAll([0, 0, 0, 0]); // terminator
+      while (bits.length % 8 != 0) {
+        bits.add(0);
+      }
+      return [
+        for (var i = 0; i < bits.length; i += 8)
+          bits.sublist(i, i + 8).fold(0, (v, b) => (v << 1) | b),
+        0xEC, 0x11, // pad codewords
+      ];
+    }
+
+    expect(
+      QrCodeData.decodeScanned(_msc4108Reciprocate).serverName,
+      'matrix.org',
+    );
+    expect(
+      QrCodeData.decodeScanned(wrap(_msc4108Reciprocate, 8)).serverName,
+      'matrix.org',
+    );
+    final long = [..._msc4108Reciprocate.sublist(0, 40)];
+    final url = utf8.encode('https://rz.example/${'a' * 300}');
+    final big = [
+      ...long,
+      url.length >> 8,
+      url.length & 0xff,
+      ...url,
+      0,
+      10,
+      ...utf8.encode('matrix.org'),
+    ];
+    expect(QrCodeData.decodeScanned(wrap(big, 16)).serverName, 'matrix.org');
+    expect(
+      () => QrCodeData.decodeScanned(utf8.encode('hello')),
+      throwsA(isA<QrCodeDecodeException>()),
+    );
+  });
+
   test('unpadded base64 helpers accept both forms', () {
     expect(decodeUnpaddedBase64('AAE'), [0, 1]);
     expect(decodeUnpaddedBase64('AAE='), [0, 1]);

@@ -7,6 +7,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/features/qr_login/ecies.dart';
+import 'package:parallax/features/qr_login/matrix_qr_login.dart'
+    show isTrustedVerificationUri;
 import 'package:parallax/features/qr_login/qr_code_data.dart';
 import 'package:parallax/features/qr_login/qr_grant_flow.dart';
 import 'package:parallax/features/qr_login/qr_login_flow.dart';
@@ -190,6 +192,16 @@ void main() {
       final (login, grant) = await run.run();
       expect((grant as QrGrantFailed).error, QrGrantError.deviceIdAlreadyInUse);
       expect((login as QrLoginFailed).error, QrLoginError.unknown);
+    });
+
+    test('an approval URL off the account provider is refused', () async {
+      final run = _Run(server);
+      run.grantAccount.trustApproval = false;
+      final (login, grant) = await run.run();
+      expect((grant as QrGrantFailed).error, QrGrantError.unknown);
+      expect(run.grantAccount.opened, isEmpty);
+      // The new device is told the protocol was not accepted.
+      expect((login as QrLoginFailed).error, QrLoginError.linkingNotSupported);
     });
 
     test('secrets import failure still finishes the sign-in', () async {
@@ -401,6 +413,33 @@ void main() {
       expect(ready.first.serverName, 'https://hs.example');
       expect(result.error, QrGrantError.notFound);
     });
+  });
+
+  test('approval URLs must be on the account provider host', () {
+    final provider = [
+      Uri.parse('https://example.com/'),
+      Uri.parse('https://auth.example.com/authorize'),
+    ];
+    expect(
+      isTrustedVerificationUri(
+        Uri.parse('https://auth.example.com/link?code=ABCD'),
+        provider,
+      ),
+      isTrue,
+    );
+    for (final bad in [
+      'https://auth.example.com.evil.test/link',
+      'http://auth.example.com/link',
+      'https://user@auth.example.com/link',
+      'https://auth.example.com:8443/link',
+      'https://auth.example.com/link#x',
+    ]) {
+      expect(isTrustedVerificationUri(Uri.parse(bad), provider), isFalse);
+    }
+    expect(
+      isTrustedVerificationUri(Uri.parse('https://example.com/link'), []),
+      isFalse,
+    );
   });
 
   group('error mapping (Element X HumanQrLoginError)', () {
