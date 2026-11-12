@@ -9,6 +9,8 @@ import '../../crypto_setup_screen.dart';
 import '../../feature_settings_scope.dart';
 import '../../widgets.dart';
 import 'change_recovery_key_screen.dart';
+import 'key_export_features.dart';
+import 'key_export_screens.dart';
 import 'key_storage_screen.dart';
 import 'reset_identity_screen.dart';
 import 'security_features.dart';
@@ -25,6 +27,7 @@ class SecuritySettingsSection extends StatefulWidget {
     required this.palette,
     this.setSecureWindow,
     this.openUrl,
+    this.keyTransfer,
   });
 
   final ChatBackend backend;
@@ -32,6 +35,9 @@ class SecuritySettingsSection extends StatefulWidget {
   final AppPalette palette;
   final SetSecureWindow? setSecureWindow;
   final ExternalUrlOpener? openUrl;
+
+  /// Room key export/import; resolved from [backend] when null.
+  final RoomKeyTransfer? keyTransfer;
 
   @override
   State<SecuritySettingsSection> createState() =>
@@ -56,6 +62,9 @@ class _SecuritySettingsSectionState extends State<SecuritySettingsSection> {
   }
 
   bool get _current => mounted && _owner.isCurrent;
+
+  RoomKeyTransfer? get _keyTransfer =>
+      widget.keyTransfer ?? RoomKeyTransfer.of(widget.backend);
 
   void _reload() {
     if (!_current) return;
@@ -114,6 +123,22 @@ class _SecuritySettingsSectionState extends State<SecuritySettingsSection> {
       palette: widget.palette,
       setSecureWindow: widget.setSecureWindow,
       openUrl: widget.openUrl,
+    ),
+  );
+
+  Future<void> _exportRoomKeys(RoomKeyTransfer transfer) => _push<bool>(
+    KeyExportScreen(
+      transfer: transfer,
+      palette: widget.palette,
+      setSecureWindow: widget.setSecureWindow,
+    ),
+  );
+
+  Future<void> _importRoomKeys(RoomKeyTransfer transfer) => _push<bool>(
+    KeyImportScreen(
+      transfer: transfer,
+      palette: widget.palette,
+      setSecureWindow: widget.setSecureWindow,
     ),
   );
 
@@ -331,6 +356,43 @@ class _SecuritySettingsSectionState extends State<SecuritySettingsSection> {
             'this account.',
             style: muted,
           ),
+        if (_keyTransfer case final transfer?) ...[
+          Divider(height: 30, color: p.stroke),
+          // Manual room key export/import (Element Web's Cryptography panel).
+          Text('Room keys', style: title()),
+          const SizedBox(height: 2),
+          Text(
+            'Keep a passphrase-protected copy of your message keys, or bring '
+            'in keys exported from Element or another Matrix app.',
+            style: muted,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.file_upload_outlined, color: p.secondary),
+            title: Text(
+              'Export room keys',
+              style: TextStyle(
+                color: p.foreground,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            subtitle: Text('Save them to an encrypted file', style: muted),
+            onTap: _busy ? null : () => _exportRoomKeys(transfer),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.file_download_outlined, color: p.secondary),
+            title: Text(
+              'Import room keys',
+              style: TextStyle(
+                color: p.foreground,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            subtitle: Text('Restore keys from an exported file', style: muted),
+            onTap: _busy ? null : () => _importRoomKeys(transfer),
+          ),
+        ],
         Divider(height: 30, color: p.stroke),
         // Reset.
         ListTile(
