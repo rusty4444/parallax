@@ -1,14 +1,21 @@
 name: Android APK
 
-# Gitea Actions workflow for a self-hosted runner labelled `parallax-android`
-# with Flutter 3.44, JDK 17, Android SDK 36 (build-tools 36.0.0, NDK
-# 28.2.13676358) and rustup Android targets installed on the host. The runner
-# must also hold the personal signing key at ~/.android/debug.keystore
-# (SHA-256 2E:1C:94:…:EF:F7). Without a registered runner nothing runs; the
-# coordinator then builds and publishes the same artifacts manually.
+# Runs on Sam's Mac (Gitea runner `sam-mac-parallax`, host mode, label
+# `parallax-android`; LaunchAgent ai.hermes.gitea-runner). The host provides
+# Flutter 3.44, JDK 17, Android SDK 36 (build-tools 36.0.0, NDK
+# 28.2.13676358), the Rust toolchain in ~/.cargo/bin and the personal signing
+# key at ~/.android/debug.keystore (SHA-256 2E:1C:94:…:EF:F7).
+#
+# Gitea's public URL (git.samprim.net) sits behind Cloudflare Access, so the
+# job talks to Gitea over the LAN address in GITEA_LAN_URL (set by the runner
+# config) instead of gitea.server_url, and checks out without a JS action.
 on:
   push:
     branches: [main, 'feat/**', 'fix/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   android-apk:
@@ -16,20 +23,40 @@ jobs:
     timeout-minutes: 60
     env:
       APK: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+      REPO: ${{ gitea.repository }}
+      SHA: ${{ gitea.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out over the LAN
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${GITEA_LAN_URL:?runner must set GITEA_LAN_URL}"
+          AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
+          git init -q .
+          git remote add origin "$GITEA_LAN_URL/$REPO.git"
+          # Header via environment config, so the token never appears in argv.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader \
+            GIT_CONFIG_VALUE_0="Authorization: Basic $AUTH" \
+            git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SHA"
+          git log -1 --format='%h %s'
 
       - name: Resolve and check Dart
         run: |
+          set -euo pipefail
+          flutter --version
           flutter pub get
           dart format --output=none --set-exit-if-changed lib test
           flutter analyze
           flutter test
 
       - name: Build arm64 release-optimised test APK
-        id: build
         run: |
-          BUILD_NUMBER=$((30000 + ${{ gitea.run_number }}))
+          set -euo pipefail
+          # Above the last hand-built number (30030) so CI builds upgrade it.
+          BUILD_NUMBER=$((30100 + ${{ gitea.run_number }}))
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           # Flutter's arm64 split adds 2000 to the requested build number.
           echo "APK_VERSION_CODE=$((BUILD_NUMBER + 2000))" >> "$GITHUB_ENV"
@@ -37,28 +64,44 @@ jobs:
 
       - name: Inspect APK
         run: |
+          set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           test -s "$APK"
           "$BT/apksigner" verify --print-certs "$APK" |
             grep -Fq 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7'
           "$BT/aapt" dump badging "$APK" | grep -Fq "package: name='net.samrussell.parallax' versionCode='$APK_VERSION_CODE'"
           unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so'
+          shasum -a 256 "$APK"
 
       - name: Publish a per-commit test release
         if: ${{ gitea.ref == 'refs/heads/main' }}
         env:
           TOKEN: ${{ secrets.GITEA_TOKEN }}
-          API: ${{ gitea.server_url }}/api/v1/repos/${{ gitea.repository }}
         run: |
-          TAG="build-${GITEA_SHA:-${{ gitea.sha }}}"
-          TAG="${TAG:0:18}"
+          set -euo pipefail
+          API="$GITEA_LAN_URL/api/v1/repos/$REPO"
+          TAG="build-${SHA:0:12}"
           ASSET="parallax-${TAG}-arm64.apk"
-          if curl -fsS -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" >/dev/null; then
+          if curl -fsS -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; not replacing its APK."
             exit 0
           fi
+          VERSION=$(sed -n 's/^version: \([0-9.]*\)+.*/\1/p' pubspec.yaml)
+          SUBJECT=$(git log -1 --format=%s)
+          BODY=$(jq -n --arg tag "$TAG" --arg sha "$SHA" --arg v "$VERSION" \
+            --arg code "$APK_VERSION_CODE" --arg subject "$SUBJECT" \
+            '{tag_name: $tag, target_commitish: $sha, name: ("Parallax " + $v + " " + $tag), prerelease: true,
+              body: ("Automatic test build of " + $sha + " (" + $subject + "), version " + $v + ", version code " + $code + ". Signed with the personal debug key. Not production-signed and not live two-device validated.")}')
           ID=$(curl -fsS -X POST -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
-            -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"${{ gitea.sha }}\",\"name\":\"Parallax $TAG\",\"prerelease\":true,\"body\":\"Personal Android test build (version code $APK_VERSION_CODE). Signed with the personal debug key. Not a production-signed or live two-device E2EE-validated release.\"}" \
-            "$API/releases" | jq -r .id)
+            -d "$BODY" "$API/releases" | jq -r .id)
           curl -fsS -X POST -H "Authorization: token $TOKEN" \
             -F "attachment=@$APK;filename=$ASSET" "$API/releases/$ID/assets?name=$ASSET" >/dev/null
+          # Read the asset back and compare it with the built file.
+          curl -fsS -H "Authorization: token $TOKEN" -o remote.apk \
+            "$GITEA_LAN_URL/$REPO/releases/download/$TAG/$ASSET"
+          LOCAL=$(shasum -a 256 "$APK" | cut -d' ' -f1)
+          REMOTE=$(shasum -a 256 remote.apk | cut -d' ' -f1)
+          echo "local  $LOCAL"
+          echo "remote $REMOTE"
+          test "$LOCAL" = "$REMOTE"
+          echo "Published $TAG ($ASSET)"
