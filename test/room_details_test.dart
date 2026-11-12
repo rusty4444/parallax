@@ -183,7 +183,8 @@ void main() {
         ],
       );
       expect(modern.can(RoomAction.name), isTrue);
-      expect(modern.ownPowerLevel, 100);
+      expect(modern.ownPowerLevel, RoomDetails.creatorPowerLevel);
+      expect(modern.member(owner)?.role, RoomRole.owner);
       final missing = RoomDetails.fromState(
         roomId: roomId,
         userId: owner,
@@ -209,54 +210,63 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(RoomDetailsScreen), findsOneWidget);
       expect(find.text('Announcements'), findsOneWidget);
-      expect(find.text('Guest'), findsOneWidget);
+      expect(find.text('2 people'), findsOneWidget);
       expect(backend.reads, 1);
 
-      await tester.tap(find.byTooltip('Edit room name'));
+      await tester.tap(find.byTooltip('Edit details'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, 'New name');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Room name'),
+        'New name',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Topic'),
+        'New topic',
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      expect(backend.writes, contains('name:New name'));
+      expect(backend.writes, containsAll(['name:New name', 'topic:New topic']));
       expect(find.text('New name'), findsOneWidget);
+      expect(find.text('New topic'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Edit room topic'));
+      await tester.tap(find.byTooltip('Invite'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, 'New topic');
-      await tester.tap(find.text('Save'));
+      await tester.enterText(find.byType(TextField).first, '@new:example.org');
       await tester.pumpAndSettle();
-      expect(backend.writes, contains('topic:New topic'));
-
-      await tester.tap(find.text('Invite'));
+      await tester.tap(find.text('@new:example.org').last);
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, '@new:example.org');
-      await tester.tap(find.text('Save'));
+      await tester.tap(find.text('Invite (1)'));
       await tester.pumpAndSettle();
       expect(backend.writes, contains('invite:@new:example.org'));
+      expect(find.byType(RoomDetailsScreen), findsOneWidget);
 
+      await tester.tap(find.text('People'));
+      await tester.pumpAndSettle();
+      expect(find.text('Guest'), findsOneWidget);
       await tester.tap(find.byTooltip('Moderate $guest'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Kick').last);
+      await tester.tap(find.text('Remove user'));
       await tester.pumpAndSettle();
       expect(backend.writes, isNot(contains('kick:$guest')));
-      await tester.tap(find.text('Kick').last);
+      await tester.tap(find.text('Remove'));
       await tester.pumpAndSettle();
       expect(backend.writes, contains('kick:$guest'));
 
       await tester.tap(find.byTooltip('Moderate $guest'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ban').last);
+      await tester.tap(find.text('Ban user'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ban').last);
+      await tester.tap(find.text('Ban'));
       await tester.pumpAndSettle();
       expect(backend.writes, contains('ban:$guest'));
 
+      await tester.tap(find.text('Banned (1)'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Moderate $banned'));
       await tester.pumpAndSettle();
-      expect(find.text('Unban'), findsWidgets);
-      await tester.tap(find.text('Unban').last);
+      await tester.tap(find.text('Unban user'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Unban').last);
+      await tester.tap(find.text('Unban'));
       await tester.pumpAndSettle();
       expect(backend.writes, contains('unban:$banned'));
     },
@@ -277,20 +287,28 @@ void main() {
     );
     await tester.pumpAndSettle();
     backend.failWrite = true;
-    await tester.tap(find.byTooltip('Edit room name'));
+    await tester.tap(find.byTooltip('Edit details'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Denied');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Room name'),
+      'Denied',
+    );
+    await tester.pump();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(backend.writes, isEmpty);
-    expect(find.textContaining('Couldn’t update room name'), findsOneWidget);
-    expect(find.byTooltip('Edit room name'), findsNothing);
+    expect(find.textContaining('Unable to update room'), findsOneWidget);
     backend.failWrite = false;
     backend.failRead = true;
-    await tester.tap(find.text('Retry'));
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Couldn’t load room details'), findsOneWidget);
-    expect(find.text('Invite'), findsNothing);
+    expect(find.byTooltip('Invite'), findsNothing);
+    expect(find.byTooltip('Edit details'), findsNothing);
+    backend.failRead = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Invite'), findsOneWidget);
   });
 
   testWidgets(
@@ -307,17 +325,23 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Edit room name'), findsNothing);
-      expect(find.text('Invite'), findsOneWidget);
-      await tester.tap(find.text('Invite'));
+      expect(find.byTooltip('Edit details'), findsNothing);
+      expect(find.byTooltip('Invite'), findsOneWidget);
+      await tester.tap(find.byTooltip('Invite'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, 'bad-id');
-      await tester.tap(find.text('Save'));
+      await tester.enterText(find.byType(TextField).first, 'bad-id');
       await tester.pumpAndSettle();
-      expect(find.textContaining('Enter a valid Matrix ID'), findsOneWidget);
+      expect(find.byType(Checkbox), findsNothing);
+      expect(find.textContaining('full Matrix ID'), findsOneWidget);
       expect(backend.writes, isEmpty);
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('People'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Moderate $guest'), findsNothing);
     },
   );
+
   testWidgets('server read must finish before controls appear', (tester) async {
     final backend = DetailsBackend()..pendingRead = Completer<RoomDetails>();
     await tester.pumpWidget(
@@ -329,10 +353,11 @@ void main() {
         ),
       ),
     );
-    expect(find.byTooltip('Edit room name'), findsNothing);
-    expect(find.text('Invite'), findsNothing);
+    expect(find.byTooltip('Edit details'), findsNothing);
+    expect(find.byTooltip('Invite'), findsNothing);
     backend.pendingRead!.complete(backend.details);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Edit room name'), findsOneWidget);
+    expect(find.byTooltip('Edit details'), findsOneWidget);
+    expect(find.byTooltip('Invite'), findsOneWidget);
   });
 }

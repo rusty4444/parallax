@@ -2,9 +2,29 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'feature_settings_scope.dart';
+import 'features/rooms_admin/admin_ui.dart';
+import 'features/rooms_admin/edit_room_details_screen.dart';
+import 'features/rooms_admin/invite_people_screen.dart';
+import 'features/rooms_admin/knock_requests_screen.dart';
+import 'features/rooms_admin/leave_room.dart';
+import 'features/rooms_admin/report_room_screen.dart';
+import 'features/rooms_admin/roles_permissions_screen.dart';
+import 'features/rooms_admin/room_members_screen.dart';
+import 'features/rooms_admin/room_notifications_screen.dart';
+import 'features/rooms_admin/rooms_admin_features.dart';
+import 'features/rooms_admin/rooms_admin_hooks.dart' show roomsAdminCallAction;
+import 'features/rooms_admin/rooms_admin_models.dart';
+import 'features/rooms_admin/security_privacy_screen.dart';
+import 'features/rooms_admin/share_text.dart';
 import 'hooks/registry.dart';
+import 'messaging_features.dart';
+import 'room_avatar.dart';
 import 'room_details.dart';
 
+/// Element X style "Room info": header, quick actions and the room's
+/// settings sections. Everything permission-related comes from a fresh server
+/// state read; failures clear the controls rather than keep stale ones.
 class RoomDetailsScreen extends StatefulWidget {
   const RoomDetailsScreen({
     super.key,
@@ -22,11 +42,24 @@ class RoomDetailsScreen extends StatefulWidget {
 }
 
 class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
+  late final _owner = BackendSessionOwner(widget.backend);
   RoomDetails? _details;
+  RoomNotificationSettings? _notifications;
   bool _loading = false;
   bool _busy = false;
   String? _error;
   int _generation = 0;
+
+  RoomsAdminFeatures? get _admin => roomsAdminFeaturesOf(widget.backend);
+  MessagingFeatures? get _messaging => switch (widget.backend) {
+    final MessagingFeatures features => features,
+    _ => null,
+  };
+
+  ChatRoom? get _room => [
+    for (final room in widget.backend.rooms)
+      if (room.id == widget.roomId) room,
+  ].firstOrNull;
 
   @override
   void initState() {
@@ -37,6 +70,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   @override
   void dispose() {
     _generation++;
+    _owner.release();
     super.dispose();
   }
 
@@ -49,11 +83,12 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     });
     try {
       final details = await widget.backend.getRoomDetails(widget.roomId);
-      if (mounted && generation == _generation) {
+      if (mounted && _owner.isCurrent && generation == _generation) {
         setState(() => _details = details);
+        _loadNotifications(generation);
       }
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (mounted && _owner.isCurrent && generation == _generation) {
         setState(() {
           _details = null; // Never retain stale permissions on fetch failure.
           _error =
@@ -67,290 +102,497 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     }
   }
 
-  Future<void> _run(String label, Future<void> Function() action) async {
-    if (_busy || _loading) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+  Future<void> _loadNotifications(int generation) async {
+    final admin = _admin;
+    if (admin == null) return;
     try {
-      await action(); // Backend re-fetches power levels immediately before write.
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _details = null;
-          _error =
-              'Couldn’t $label. Your permissions or the room may have changed. Refresh to retry.';
-        });
+      final settings = await admin.notificationSettings(widget.roomId);
+      if (mounted && _owner.isCurrent && generation == _generation) {
+        setState(() => _notifications = settings);
       }
-      return;
+    } catch (_) {
+      if (mounted && _owner.isCurrent && generation == _generation) {
+        setState(() => _notifications = null);
+      }
+    }
+  }
+
+  /// Runs a quick action; success is not optimistic — the server's state is
+  /// shown afterwards, or a refresh error.
+  Future<void> _run(String failure, Future<void> Function() action) async {
+    if (_busy || _loading) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } catch (_) {
+      if (mounted && _owner.isCurrent) showAdminMessage(context, failure);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (!mounted) return;
-    // Success is not optimistic: show the server's state, or a refresh error.
-    await _load();
+    if (mounted && _owner.isCurrent) await _load();
   }
 
-  Future<String?> _askText({
-    required String title,
-    required String initial,
-    required String label,
-    bool allowEmpty = false,
-  }) async {
-    var value = initial;
-    return showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: TextFormField(
-          initialValue: initial,
-          onChanged: (text) => value = text,
-          autofocus: true,
-          maxLines: label == 'Topic' ? 3 : 1,
-          decoration: InputDecoration(labelText: label),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final trimmed = value.trim();
-              if (trimmed.isEmpty && !allowEmpty) return;
-              Navigator.pop(dialogContext, trimmed);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _edit(RoomAction action) async {
-    final details = _details;
-    if (details == null || !details.can(action) || _busy) return;
-    final name = action == RoomAction.name;
-    final value = await _askText(
-      title: name ? 'Edit room name' : 'Edit room topic',
-      initial: name ? details.name : details.topic,
-      label: name ? 'Room name' : 'Topic',
-      allowEmpty: !name,
-    );
-    if (value == null || !mounted) return;
-    await _run(
-      name ? 'update room name' : 'update room topic',
-      () => name
-          ? widget.backend.editRoomName(widget.roomId, value)
-          : widget.backend.editRoomTopic(widget.roomId, value),
-    );
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => screen));
+    if (mounted && _owner.isCurrent) await _load();
   }
 
   Future<void> _invite() async {
     if (_details?.can(RoomAction.invite) != true || _busy) return;
-    final id = await _askText(
-      title: 'Invite someone',
-      initial: '',
-      label: 'Matrix ID (@user:server)',
+    final invited = await Navigator.of(context).push<int>(
+      MaterialPageRoute(
+        builder: (_) => InvitePeopleScreen(
+          backend: widget.backend,
+          palette: widget.palette,
+          roomId: widget.roomId,
+          excluded: {
+            for (final member in _details?.members ?? <RoomMemberDetails>[])
+              if (member.status != RoomMemberStatus.knocking) member.id,
+          },
+        ),
+      ),
     );
-    if (id == null || !mounted) return;
-    if (!isValidRoomInviteId(id)) {
-      setState(() => _error = 'Enter a valid Matrix ID, such as @user:server.');
-      return;
+    if (!mounted || !_owner.isCurrent) return;
+    if (invited != null && invited > 0) {
+      showAdminMessage(
+        context,
+        invited == 1 ? 'Invitation sent.' : '$invited invitations sent.',
+      );
     }
+    await _load();
+  }
+
+  Future<void> _share(RoomDetails details) async {
+    final server = serverNameOf(widget.backend.userId);
+    final alias = details.canonicalAlias;
+    final link = alias != null
+        ? matrixToLink(alias)
+        : matrixToLink(widget.roomId, via: [?server]);
+    try {
+      await shareText(link, subject: details.name);
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        showAdminMessage(context, 'Couldn’t open sharing.');
+      }
+    }
+  }
+
+  Future<void> _toggleFavourite() async {
+    final messaging = _messaging;
+    if (messaging == null) return;
+    final favourite = _isFavourite;
     await _run(
-      'invite $id',
-      () => widget.backend.inviteToRoom(widget.roomId, id),
+      'Couldn’t update favourites. Try again.',
+      () => messaging.setFavourite(widget.roomId, !favourite),
     );
   }
 
-  Future<void> _moderate(RoomMemberDetails member, RoomAction action) async {
-    if (_details?.can(action, member) != true ||
-        member.id == widget.backend.userId ||
-        _busy) {
-      return;
+  bool get _isFavourite {
+    try {
+      return _messaging?.isFavourite(widget.roomId) ?? false;
+    } catch (_) {
+      return false;
     }
-    final verb = action.name;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(
-          '${verb[0].toUpperCase()}${verb.substring(1)} ${member.name}?',
-        ),
-        content: Text('$verb ${member.id} in this room?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text('${verb[0].toUpperCase()}${verb.substring(1)}'),
-          ),
-        ],
+  }
+
+  Future<void> _toggleMute() async {
+    final admin = _admin;
+    final settings = _notifications;
+    if (admin == null || settings == null) return;
+    final muted = settings.effectiveMode == RoomNotificationMode.mute;
+    await _run(
+      muted
+          ? 'Failed unmuting this room, please try again.'
+          : 'Failed muting this room, please try again.',
+      () => admin.setNotificationMode(
+        widget.roomId,
+        muted ? null : RoomNotificationMode.mute,
       ),
     );
-    if (confirmed != true || !mounted) return;
-    await _run(
-      '$verb ${member.id}',
-      () => widget.backend.moderateRoomMember(widget.roomId, member.id, action),
-    );
   }
+
+  Future<void> _leave(RoomDetails details) async {
+    final left = await leaveRoomFlow(
+      context,
+      backend: widget.backend,
+      palette: widget.palette,
+      details: details,
+      isDirect: _room?.isDirect ?? false,
+    );
+    if (left && mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
+  RoomHookContext get _hookContext => RoomHookContext(
+    backend: widget.backend,
+    roomId: widget.roomId,
+    palette: widget.palette,
+    room: _room,
+  );
 
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
     final details = _details;
-    return Scaffold(
-      body: GlowBackdrop(
-        palette: p,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Back to room',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back_rounded),
-                  ),
-                  Expanded(
-                    child: Text(
-                      'Room details',
-                      style: TextStyle(
-                        color: p.foreground,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Refresh room details',
-                    onPressed: _loading || _busy ? null : _load,
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                ],
+    final idle = !_busy && !_loading;
+    return AdminPage(
+      palette: p,
+      title: 'Room info',
+      backTooltip: 'Back to room',
+      busy: _loading || _busy,
+      actions: [
+        if (details != null && details.canEditDetails && idle)
+          IconButton(
+            tooltip: 'Edit details',
+            onPressed: () => _push(
+              EditRoomDetailsScreen(
+                backend: widget.backend,
+                palette: p,
+                details: details,
+                room: _room,
               ),
-              if (_loading || _busy) const LinearProgressIndicator(),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(_error!, style: TextStyle(color: p.foreground)),
-                ),
-              if (details == null && !_loading)
-                TextButton(onPressed: _load, child: const Text('Retry')),
-              if (details != null)
-                Expanded(
-                  child: ListView(
-                    children: [
-                      ListTile(
-                        title: Text(details.name),
-                        subtitle: Text(details.roomId),
-                        trailing:
-                            details.can(RoomAction.name) && !_busy && !_loading
-                            ? IconButton(
-                                tooltip: 'Edit room name',
-                                onPressed: () => _edit(RoomAction.name),
-                                icon: const Icon(Icons.edit_outlined),
-                              )
-                            : null,
-                      ),
-                      ListTile(
-                        title: const Text('Topic'),
-                        subtitle: Text(
-                          details.topic.isEmpty ? 'No topic' : details.topic,
-                        ),
-                        trailing:
-                            details.can(RoomAction.topic) && !_busy && !_loading
-                            ? IconButton(
-                                tooltip: 'Edit room topic',
-                                onPressed: () => _edit(RoomAction.topic),
-                                icon: const Icon(Icons.edit_outlined),
-                              )
-                            : null,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Members (${details.members.length})',
-                                style: TextStyle(
-                                  color: p.foreground,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            if (details.can(RoomAction.invite) &&
-                                !_busy &&
-                                !_loading)
-                              TextButton.icon(
-                                onPressed: _invite,
-                                icon: const Icon(
-                                  Icons.person_add_alt_1_outlined,
-                                ),
-                                label: const Text('Invite'),
-                              ),
-                          ],
-                        ),
-                      ),
-                      for (final member in details.members)
-                        ListTile(
-                          title: Text(member.name),
-                          subtitle: Text(
-                            '${member.id} · ${member.status.name}',
-                          ),
-                          trailing:
-                              member.id == widget.backend.userId ||
-                                  _busy ||
-                                  _loading ||
-                                  ![
-                                    RoomAction.kick,
-                                    RoomAction.ban,
-                                    RoomAction.unban,
-                                  ].any((action) => details.can(action, member))
-                              ? null
-                              : PopupMenuButton<RoomAction>(
-                                  tooltip: 'Moderate ${member.id}',
-                                  onSelected: (action) =>
-                                      _moderate(member, action),
-                                  itemBuilder: (_) => [
-                                    for (final action in [
-                                      RoomAction.kick,
-                                      RoomAction.ban,
-                                      RoomAction.unban,
-                                    ])
-                                      if (details.can(action, member))
-                                        PopupMenuItem(
-                                          value: action,
-                                          child: Text(
-                                            '${action.name[0].toUpperCase()}${action.name.substring(1)}',
-                                          ),
-                                        ),
-                                  ],
-                                ),
-                        ),
-                      ...roomDetailsSectionsFor(
-                        context,
-                        RoomHookContext(
-                          backend: widget.backend,
-                          roomId: widget.roomId,
-                          palette: p,
-                          room: [
-                            for (final room in widget.backend.rooms)
-                              if (room.id == widget.roomId) room,
-                          ].firstOrNull,
-                        ),
-                      ),
-                    ],
-                  ),
+            ),
+            icon: const Icon(Icons.edit_outlined),
+          ),
+        IconButton(
+          tooltip: 'Refresh room details',
+          onPressed: idle ? _load : null,
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ],
+      body: details == null
+          ? (_loading
+                ? const SizedBox.shrink()
+                : AdminPlaceholder(
+                    palette: p,
+                    icon: Icons.cloud_off_rounded,
+                    title: 'Room details unavailable',
+                    message: _error,
+                    onRetry: _load,
+                  ))
+          : ListView(
+              padding: const EdgeInsets.only(bottom: 28),
+              children: [
+                _header(details, idle),
+                ..._sections(details, idle),
+                ...roomDetailsSectionsFor(context, _hookContext),
+              ],
+            ),
+    );
+  }
+
+  Widget _header(RoomDetails details, bool idle) {
+    final p = widget.palette;
+    final room = _room;
+    final notifications = _notifications;
+    final call = idle ? roomsAdminCallAction(context, _hookContext) : null;
+    final avatarRoom = ChatRoom(
+      id: widget.roomId,
+      name: details.hasName ? details.name : (room?.name ?? details.name),
+      preview: '',
+      lastActivity: null,
+      avatarUrl: details.avatarUrl ?? room?.avatarUrl,
+      heroes: details.avatarUrl == null ? room?.heroes ?? const [] : const [],
+    );
+    final subtitle = details.canonicalAlias ?? widget.roomId;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Column(
+        children: [
+          RoomAvatar(
+            room: avatarRoom,
+            backend: widget.backend,
+            palette: p,
+            size: 96,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            avatarRoom.name,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: p.foreground,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.6,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: p.muted, fontSize: 13),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            details.joinedCount == 1
+                ? '1 person'
+                : '${details.joinedCount} people',
+            style: TextStyle(color: p.muted, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              AdminBadge(
+                palette: p,
+                icon: details.encrypted
+                    ? Icons.lock_outline_rounded
+                    : Icons.lock_open_rounded,
+                label: details.encrypted ? 'Encrypted' : 'Not encrypted',
+                highlight: details.encrypted,
+              ),
+              if (details.isPublic)
+                AdminBadge(
+                  palette: p,
+                  icon: Icons.public_rounded,
+                  label: 'Public room',
                 ),
             ],
           ),
-        ),
+          const SizedBox(height: 20),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 4,
+            runSpacing: 10,
+            children: [
+              if (_messaging != null)
+                HeaderAction(
+                  palette: p,
+                  icon: _isFavourite
+                      ? Icons.star_rounded
+                      : Icons.star_border_rounded,
+                  label: _isFavourite ? 'Unfavourite' : 'Favourite',
+                  onPressed: idle ? _toggleFavourite : null,
+                ),
+              if (notifications != null)
+                HeaderAction(
+                  palette: p,
+                  icon: notifications.effectiveMode == RoomNotificationMode.mute
+                      ? Icons.notifications_off_outlined
+                      : Icons.notifications_none_rounded,
+                  label:
+                      notifications.effectiveMode == RoomNotificationMode.mute
+                      ? 'Unmute'
+                      : 'Mute',
+                  onPressed: idle ? _toggleMute : null,
+                ),
+              if (call != null)
+                HeaderAction(
+                  palette: p,
+                  icon: Icons.call_outlined,
+                  label: 'Call',
+                  onPressed: () => call(context),
+                ),
+              if (details.can(RoomAction.invite))
+                HeaderAction(
+                  palette: p,
+                  icon: Icons.person_add_alt_1_outlined,
+                  label: 'Invite',
+                  onPressed: idle ? _invite : null,
+                ),
+              HeaderAction(
+                palette: p,
+                icon: Icons.share_outlined,
+                label: 'Share',
+                onPressed: () => _share(details),
+              ),
+            ],
+          ),
+        ],
       ),
     );
+  }
+
+  List<Widget> _sections(RoomDetails details, bool idle) {
+    final p = widget.palette;
+    final admin = _admin;
+    final direct = _room?.isDirect ?? false;
+    final notifications = _notifications;
+    final knocks = details.knockRequests.length;
+    return [
+      if (details.topic.isNotEmpty || details.can(RoomAction.topic))
+        AdminSection(
+          palette: p,
+          title: 'Topic',
+          children: [
+            if (details.topic.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SelectableText(
+                    details.topic,
+                    style: TextStyle(color: p.foreground, height: 1.35),
+                  ),
+                ),
+              )
+            else
+              AdminTile(
+                palette: p,
+                icon: Icons.short_text_rounded,
+                title: 'Add topic',
+                onTap: idle
+                    ? () => _push(
+                        EditRoomDetailsScreen(
+                          backend: widget.backend,
+                          palette: p,
+                          details: details,
+                          room: _room,
+                        ),
+                      )
+                    : null,
+              ),
+          ],
+        ),
+      AdminSection(
+        palette: p,
+        children: [
+          AdminTile(
+            palette: p,
+            icon: Icons.groups_2_outlined,
+            title: 'People',
+            trailing: Text(
+              '${details.joinedCount}',
+              style: TextStyle(color: p.muted),
+            ),
+            onTap: idle
+                ? () => _push(
+                    RoomMembersScreen(
+                      backend: widget.backend,
+                      palette: p,
+                      roomId: widget.roomId,
+                    ),
+                  )
+                : null,
+          ),
+          if (!direct && details.isKnockable && details.canManageKnocks)
+            AdminTile(
+              palette: p,
+              icon: Icons.front_hand_outlined,
+              title: 'Requests to join',
+              trailing: knocks == 0
+                  ? null
+                  : Badge(
+                      label: Text('$knocks'),
+                      backgroundColor: p.accent,
+                      textColor: p.accentOn,
+                    ),
+              onTap: idle
+                  ? () => _push(
+                      KnockRequestsScreen(
+                        backend: widget.backend,
+                        palette: p,
+                        roomId: widget.roomId,
+                      ),
+                    )
+                  : null,
+            ),
+          if (!direct && admin != null && details.canChangePowerLevels)
+            AdminTile(
+              palette: p,
+              icon: Icons.admin_panel_settings_outlined,
+              title: 'Roles & permissions',
+              onTap: idle
+                  ? () => _push(
+                      RolesPermissionsScreen(
+                        backend: widget.backend,
+                        palette: p,
+                        roomId: widget.roomId,
+                      ),
+                    )
+                  : null,
+            ),
+        ],
+      ),
+      AdminSection(
+        palette: p,
+        children: [
+          if (admin != null)
+            AdminTile(
+              palette: p,
+              icon: Icons.notifications_none_rounded,
+              title: 'Notifications',
+              subtitle: notifications == null
+                  ? null
+                  : notifications.isDefault
+                  ? 'Default · ${notifications.defaultMode.label}'
+                  : 'Custom · ${notifications.customMode!.label}',
+              onTap: idle
+                  ? () => _push(
+                      RoomNotificationsScreen(
+                        backend: widget.backend,
+                        palette: p,
+                        roomId: widget.roomId,
+                      ),
+                    )
+                  : null,
+            ),
+          if (!direct && admin != null && details.canManageSecurity)
+            AdminTile(
+              palette: p,
+              icon: Icons.shield_outlined,
+              title: 'Security & privacy',
+              onTap: idle
+                  ? () => _push(
+                      SecurityPrivacyScreen(
+                        backend: widget.backend,
+                        palette: p,
+                        roomId: widget.roomId,
+                      ),
+                    )
+                  : null,
+            ),
+        ],
+      ),
+      if (details.encrypted)
+        AdminSection(
+          palette: p,
+          title: 'Security',
+          children: [
+            AdminTile(
+              palette: p,
+              icon: Icons.lock_outline_rounded,
+              title: 'Message encryption enabled',
+              subtitle:
+                  'Messages are secured with locks. Only you and the '
+                  'recipients have the unique keys to unlock them.',
+            ),
+          ],
+        ),
+      AdminSection(
+        palette: p,
+        children: [
+          if (admin != null)
+            AdminTile(
+              palette: p,
+              icon: Icons.flag_outlined,
+              title: 'Report room',
+              destructive: true,
+              onTap: idle
+                  ? () => _push(
+                      ReportRoomScreen(
+                        backend: widget.backend,
+                        palette: p,
+                        details: details,
+                        isDirect: direct,
+                      ),
+                    )
+                  : null,
+            ),
+          AdminTile(
+            palette: p,
+            icon: Icons.logout_rounded,
+            title: direct ? 'Leave conversation' : 'Leave room',
+            destructive: true,
+            onTap: idle ? () => _leave(details) : null,
+          ),
+        ],
+      ),
+    ];
   }
 }

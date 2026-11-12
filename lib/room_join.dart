@@ -5,7 +5,13 @@ import 'package:matrix/matrix.dart' as matrix;
 import 'send_cancellation.dart';
 
 abstract interface class RecoverableRoomJoining {
-  Future<String> waitForRoomJoin(String roomId, SendCancellation cancellation);
+  /// [via] names servers to join through when ours is not in the room yet
+  /// (for example after resolving a remote alias).
+  Future<String> waitForRoomJoin(
+    String roomId,
+    SendCancellation cancellation, {
+    List<String> via,
+  });
 }
 
 /// Session-owned acknowledgement records outlive route waits. Stopping a wait
@@ -24,6 +30,7 @@ class RoomJoinOwner {
     String roomId, {
     SendCancellation? cancellation,
     Duration deadline = const Duration(seconds: 30),
+    List<String> via = const [],
   }) async {
     void check() {
       cancellation?.check();
@@ -46,8 +53,9 @@ class RoomJoinOwner {
       // The generated SDK endpoint pins URL and bearer before its first await,
       // returns acknowledgement only, and performs no post-response mutation.
       unawaited(
-        client
-            .joinRoomById(roomId)
+        (via.isEmpty
+                ? client.joinRoomById(roomId)
+                : client.joinRoom(roomId, via: via))
             .then(
               (id) {
                 record.id = id;

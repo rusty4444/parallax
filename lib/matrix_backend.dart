@@ -26,6 +26,7 @@ import 'matrix_send_guard.dart';
 import 'message_text.dart';
 import 'recipient_trust.dart';
 import 'reaction_summary.dart';
+import 'room_creation_request.dart';
 import 'room_details.dart';
 import 'room_events.dart';
 import 'timeline_kinds.dart';
@@ -1443,23 +1444,7 @@ class MatrixBackend extends ChatBackend
       // The SDK does not retain the HTTP status on generated API errors.
       // Only explicit refusal codes prove non-creation; M_UNKNOWN, generic
       // server errors, malformed replies and transport failures stay uncertain.
-      if (!const {
-        'M_FORBIDDEN',
-        'M_UNAUTHORIZED',
-        'M_UNKNOWN_TOKEN',
-        'M_MISSING_TOKEN',
-        'M_USER_DEACTIVATED',
-        'M_GUEST_ACCESS_FORBIDDEN',
-        'M_LIMIT_EXCEEDED',
-        'M_RESOURCE_LIMIT_EXCEEDED',
-        'M_BAD_JSON',
-        'M_NOT_JSON',
-        'M_MISSING_PARAM',
-        'M_INVALID_PARAM',
-        'M_UNSUPPORTED_ROOM_VERSION',
-        'M_ROOM_IN_USE',
-        'M_EXCLUSIVE',
-      }.contains(error.errcode)) {
+      if (!definiteRoomCreationRefusals.contains(error.errcode)) {
         rethrow;
       }
       throw const RoomCreationFailure.rejected();
@@ -1678,8 +1663,9 @@ class MatrixBackend extends ChatBackend
   @override
   Future<String> waitForRoomJoin(
     String roomId,
-    SendCancellation cancellation,
-  ) => _joinOwner().join(roomId, cancellation: cancellation);
+    SendCancellation cancellation, {
+    List<String> via = const [],
+  }) => _joinOwner().join(roomId, cancellation: cancellation, via: via);
 
   @override
   Future<String> joinPublicRoom(String roomId) => _joinOwner().join(roomId);
