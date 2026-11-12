@@ -32,6 +32,43 @@ class ReauthenticationRequired extends MatrixAuthException {
     : super('Sign in again to continue on this device.', retryable: false);
 }
 
+// --- OAuth 2.0 device authorization grant (QR code sign-in, MSC4108) -----
+
+enum DeviceAuthorizationFailure {
+  /// The authorization server has no device authorization grant.
+  unsupported,
+
+  /// The user declined on the other device (`access_denied`).
+  declined,
+
+  /// The device code expired (`expired_token`) before approval.
+  expired,
+
+  /// This side gave up while waiting.
+  cancelled,
+}
+
+class DeviceAuthorizationException extends MatrixAuthException {
+  const DeviceAuthorizationException(this.failure)
+    : super('The device authorization did not complete.', retryable: false);
+  final DeviceAuthorizationFailure failure;
+}
+
+/// RFC 8628 device authorization response, as forwarded to the device that
+/// approves the sign-in (never contains the device code).
+class DeviceAuthorizationGrant {
+  const DeviceAuthorizationGrant({
+    required this.deviceId,
+    required this.userCode,
+    required this.verificationUri,
+    this.verificationUriComplete,
+  });
+  final String deviceId;
+  final String userCode;
+  final Uri verificationUri;
+  final Uri? verificationUriComplete;
+}
+
 /// Authentication boundary for Matrix SDK 14.1.
 ///
 /// HTTP/browser/storage work is owner- and account-pinned. The backend must
@@ -796,6 +833,324 @@ class MatrixAuthService {
     return value;
   }
 
+  /// Signs in a new device with the OAuth 2.0 device authorization grant
+  /// (RFC 8628), as the new device does in MSC4108 QR code sign-in. Mirrors
+  /// matrix-rust-sdk: a dynamically registered public client with the
+  /// device-code grant, stable `urn:matrix:client:*` scopes binding a fresh
+  /// device ID, polling with `interval`/`slow_down`, then whoami ownership
+  /// checks before the session is committed with [_apply].
+  ///
+  /// [onGrant] receives the verification URIs and user code (never the
+  /// device code) so they can be forwarded to the approving device; polling
+  /// starts only after it returns. [cancelled] completing aborts the wait.
+  Future<void> deviceAuthorizationLogin(
+    String serverNameOrUrl, {
+    required Future<void> Function(DeviceAuthorizationGrant grant) onGrant,
+    Future<void>? cancelled,
+    Future<void> Function(Duration)? delay,
+  }) => _exclusive((pin) async {
+    var stop = false;
+    unawaited(cancelled?.then((_) => stop = true));
+    void checkCancelled() {
+      if (stop) {
+        throw const DeviceAuthorizationException(
+          DeviceAuthorizationFailure.cancelled,
+        );
+      }
+    }
+
+    if (await _existingSession(pin) != null) {
+      throw StateError('Sign out before signing in with a QR code.');
+    }
+    _check(pin);
+    final server = await _resolveHomeserver(serverNameOrUrl, pin);
+    final metadata = await _deviceGrantMetadata(server, pin);
+    final clientId = await _deviceGrantClient(metadata, pin);
+    checkCancelled();
+    final device = matrix.generateRandomDeviceId();
+    // Stable scopes as matrix-rust-sdk; providers that predate them get the
+    // MSC2967 names the browser sign-in uses.
+    Map<String, dynamic>? authorization;
+    for (final prefix in [
+      'urn:matrix:client',
+      'urn:matrix:org.matrix.msc2967.client',
+    ]) {
+      final (status, json) = await _exchange(
+        'POST',
+        metadata.deviceAuthorization,
+        pin,
+        form: {
+          'client_id': clientId,
+          'scope': '$prefix:api:* $prefix:device:$device',
+        },
+      );
+      if (status >= 200 && status < 300 && json is Map<String, dynamic>) {
+        authorization = json;
+        break;
+      }
+      if (json is Map && json['error'] == 'invalid_scope') continue;
+      throw MatrixAuthException(
+        'The authentication server could not complete the request.',
+        statusCode: status,
+        retryable: status >= 500 || status == 408 || status == 429,
+      );
+    }
+    if (authorization == null) {
+      throw const DeviceAuthorizationException(
+        DeviceAuthorizationFailure.unsupported,
+      );
+    }
+    final deviceCode = _required(authorization, 'device_code');
+    final userCode = _required(authorization, 'user_code');
+    final verification = _verificationUri(
+      _required(authorization, 'verification_uri'),
+    );
+    final completeValue = authorization['verification_uri_complete'];
+    final complete = completeValue == null
+        ? null
+        : _verificationUri(
+            _required(authorization, 'verification_uri_complete'),
+          );
+    final lifetime = authorization['expires_in'];
+    final requestedInterval = authorization['interval'];
+    if (userCode.length > 64 ||
+        (lifetime != null && (lifetime is! int || lifetime <= 0)) ||
+        (requestedInterval != null &&
+            (requestedInterval is! int || requestedInterval < 0))) {
+      throw const FormatException('Invalid device authorization response.');
+    }
+    // RFC 8628: interval defaults to 5 s; bound hostile values.
+    var interval = Duration(
+      seconds: ((requestedInterval as int?) ?? 5).clamp(1, 60),
+    );
+    final deadline = DateTime.now().add(
+      Duration(seconds: ((lifetime as int?) ?? 600).clamp(1, 1800)),
+    );
+    await _wait(
+      onGrant(
+        DeviceAuthorizationGrant(
+          deviceId: device,
+          userCode: userCode,
+          verificationUri: verification,
+          verificationUriComplete: complete,
+        ),
+      ),
+      pin,
+    );
+    final wait = delay ?? (Duration d) => Future<void>.delayed(d);
+    Map<String, dynamic> tokens;
+    while (true) {
+      checkCancelled();
+      if (DateTime.now().isAfter(deadline)) {
+        throw const DeviceAuthorizationException(
+          DeviceAuthorizationFailure.expired,
+        );
+      }
+      await _wait(Future.any([wait(interval), ?cancelled]), pin);
+      checkCancelled();
+      final (status, json) = await _exchange(
+        'POST',
+        metadata.token,
+        pin,
+        form: {
+          'grant_type': deviceCodeGrantType,
+          'device_code': deviceCode,
+          'client_id': clientId,
+        },
+      );
+      if (status >= 200 && status < 300 && json is Map<String, dynamic>) {
+        tokens = json;
+        break;
+      }
+      final error = json is Map ? json['error'] : null;
+      switch (error) {
+        case 'authorization_pending':
+          continue;
+        case 'slow_down':
+          interval += const Duration(seconds: 5);
+          continue;
+        case 'access_denied':
+          throw const DeviceAuthorizationException(
+            DeviceAuthorizationFailure.declined,
+          );
+        case 'expired_token':
+          throw const DeviceAuthorizationException(
+            DeviceAuthorizationFailure.expired,
+          );
+      }
+      throw MatrixAuthException(
+        'The authentication server could not complete the request.',
+        statusCode: status,
+        retryable: status >= 500 || status == 408 || status == 429,
+      );
+    }
+    final token = _required(tokens, 'access_token');
+    if (_required(tokens, 'token_type').toLowerCase() != 'bearer') {
+      throw const FormatException('Unsupported OAuth token type.');
+    }
+    final refresh = tokens['refresh_token'];
+    final expiresIn = tokens['expires_in'];
+    if ((refresh != null && (refresh is! String || refresh.isEmpty)) ||
+        (expiresIn != null && (expiresIn is! int || expiresIn <= 0))) {
+      throw const FormatException('Invalid token response.');
+    }
+    // Resolve ownership using an isolated bearer request, not mutable Client.
+    final identity = await _jsonRequest(
+      'GET',
+      _endpoint(server, '_matrix/client/v3/account/whoami'),
+      pin,
+      bearer: token,
+    );
+    final user = _required(identity, 'user_id');
+    final returnedDevice = _required(identity, 'device_id');
+    _verifyIdentity(user, returnedDevice, pin, null);
+    if (returnedDevice != device) {
+      throw StateError('The authorization server returned another device.');
+    }
+    await _apply(
+      pin,
+      server,
+      token,
+      user,
+      returnedDevice,
+      refresh: refresh as String?,
+      expires: expiresIn == null ? null : Duration(seconds: expiresIn as int),
+      oidcId: clientId,
+    );
+  });
+
+  /// Verification URIs carry the user code in their query, so unlike
+  /// endpoints they may have one; they must still be credential-free HTTPS.
+  static Uri _verificationUri(String value) {
+    final authority = RegExp(r'^[^:]+://([^/?#]*)').firstMatch(value)?.group(1);
+    final uri = Uri.tryParse(value);
+    if (authority == null ||
+        authority.contains('@') ||
+        uri == null ||
+        uri.scheme != 'https' ||
+        uri.host.isEmpty ||
+        uri.hasFragment ||
+        value.length > 2048 ||
+        RegExp(r'[\s\\\x00-\x1f\x7f]').hasMatch(value)) {
+      throw const FormatException('Invalid verification URI.');
+    }
+    return uri;
+  }
+
+  static const deviceCodeGrantType =
+      'urn:ietf:params:oauth:grant-type:device_code';
+
+  /// Server name or HTTPS URL to a validated homeserver base URL, following
+  /// `.well-known` delegation only to HTTPS.
+  Future<Uri> _resolveHomeserver(String input, _AccountPin pin) async {
+    var server = providerUri(input);
+    try {
+      final wellKnown = await _jsonRequest(
+        'GET',
+        _endpoint(server, '.well-known/matrix/client'),
+        pin,
+      );
+      final hs = wellKnown['m.homeserver'];
+      if (hs is Map && hs['base_url'] is String) {
+        server = _parseHttps(hs['base_url'] as String);
+      } else {
+        throw const FormatException('Invalid Matrix homeserver discovery.');
+      }
+    } on MatrixAuthException catch (e) {
+      if (e.statusCode != 404) rethrow;
+    }
+    final versions = await _jsonRequest(
+      'GET',
+      _endpoint(server, '_matrix/client/versions'),
+      pin,
+    );
+    if (versions['versions'] is! List) {
+      throw const FormatException('Invalid Matrix version response.');
+    }
+    return server;
+  }
+
+  /// Lenient auth metadata parsing: only the fields the device grant needs
+  /// (the SDK parser rejects unknown account-management actions).
+  Future<_DeviceGrantMetadata> _deviceGrantMetadata(
+    Uri server,
+    _AccountPin pin,
+  ) async {
+    Map<String, dynamic>? json;
+    for (final path in [
+      '_matrix/client/v1/auth_metadata',
+      '_matrix/client/unstable/org.matrix.msc2965/auth_metadata',
+    ]) {
+      try {
+        json = await _jsonRequest('GET', _endpoint(server, path), pin);
+        break;
+      } on MatrixAuthException catch (e) {
+        if (e.statusCode != 404 && e.statusCode != 405) rethrow;
+      }
+    }
+    if (json == null) {
+      throw const DeviceAuthorizationException(
+        DeviceAuthorizationFailure.unsupported,
+      );
+    }
+    final grants = json['grant_types_supported'];
+    final endpoint = json['device_authorization_endpoint'];
+    if (endpoint == null ||
+        (grants is List && !grants.contains(deviceCodeGrantType))) {
+      throw const DeviceAuthorizationException(
+        DeviceAuthorizationFailure.unsupported,
+      );
+    }
+    return _DeviceGrantMetadata(
+      issuer: _parseHttps(_required(json, 'issuer')),
+      token: _parseHttps(_required(json, 'token_endpoint')),
+      registration: _parseHttps(_required(json, 'registration_endpoint')),
+      deviceAuthorization: _parseHttps(
+        _required(json, 'device_authorization_endpoint'),
+      ),
+    );
+  }
+
+  /// Dynamic client registration including the device-code grant, cached
+  /// separately from the browser OIDC registration (whose grant types MAS
+  /// would reject for the device flow).
+  Future<String> _deviceGrantClient(
+    _DeviceGrantMetadata metadata,
+    _AccountPin pin,
+  ) async {
+    final cacheKey =
+        'parallax.oidc.device.${sha256.convert(utf8.encode('${metadata.issuer}\n$callbackUri\n$deviceCodeGrantType'))}';
+    final cached = await _wait(_storage.read(cacheKey), pin);
+    if (cached != null && cached.isNotEmpty) return cached;
+    final information = matrix.OidcClientInformation(
+      clientName: 'Parallax',
+      clientUri: Uri.parse('https://samrusselltech.net/'),
+      logoUri: null,
+      tosUri: null,
+      policyUri: null,
+    );
+    final registration = await _jsonRequest(
+      'POST',
+      metadata.registration,
+      pin,
+      body: {
+        ...information.toJson(),
+        'redirect_uris': [callbackUri.toString()],
+        'application_type': matrix.OidcApplicationType.native.name,
+        'token_endpoint_auth_method': 'none',
+        'response_types': ['code'],
+        'grant_types': [
+          'authorization_code',
+          'refresh_token',
+          deviceCodeGrantType,
+        ],
+      },
+    );
+    final clientId = _required(registration, 'client_id');
+    await _wait(_storage.write(cacheKey, clientId), pin);
+    return clientId;
+  }
+
   Future<Map<String, dynamic>> _jsonRequest(
     String method,
     Uri uri,
@@ -804,6 +1159,44 @@ class MatrixAuthService {
     Map<String, String>? form,
     String? bearer,
     bool reauthOnRejection = false,
+  }) async {
+    final (status, decoded) = await _exchange(
+      method,
+      uri,
+      pin,
+      body: body,
+      form: form,
+      bearer: bearer,
+    );
+    if (status < 200 || status >= 300) {
+      if (reauthOnRejection &&
+          status >= 400 &&
+          status < 500 &&
+          status != 408 &&
+          status != 429) {
+        throw const ReauthenticationRequired();
+      }
+      throw MatrixAuthException(
+        'The authentication server could not complete the request.',
+        statusCode: status,
+        retryable: status >= 500 || status == 408 || status == 429,
+      );
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Invalid authentication response.');
+    }
+    return decoded;
+  }
+
+  /// One bounded, owner-pinned request. Returns the status and the decoded
+  /// JSON body (null when the body is not JSON) without judging the status.
+  Future<(int, Object?)> _exchange(
+    String method,
+    Uri uri,
+    _AccountPin pin, {
+    Map<String, Object?>? body,
+    Map<String, String>? form,
+    String? bearer,
   }) async {
     _check(pin);
     _validateHttps(uri);
@@ -831,25 +1224,16 @@ class MatrixAuthService {
       }
       _check(pin);
       final status = response.statusCode;
+      Object? decoded;
       if (status < 200 || status >= 300) {
-        if (reauthOnRejection &&
-            status >= 400 &&
-            status < 500 &&
-            status != 408 &&
-            status != 429) {
-          throw const ReauthenticationRequired();
+        try {
+          decoded = jsonDecode(utf8.decode(bytes));
+        } on FormatException {
+          decoded = null;
         }
-        throw MatrixAuthException(
-          'The authentication server could not complete the request.',
-          statusCode: status,
-          retryable: status >= 500 || status == 408 || status == 429,
-        );
+        return (status, decoded);
       }
-      final decoded = jsonDecode(utf8.decode(bytes));
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Invalid authentication response.');
-      }
-      return decoded;
+      return (status, jsonDecode(utf8.decode(bytes)));
     } on matrix.MatrixException {
       // Even an injected/wrapped transport must not cause SDK session deletion.
       throw const MatrixAuthException('The authentication request failed.');
@@ -884,4 +1268,17 @@ class _AccountPin {
       device == client.deviceID &&
       token == client.accessToken &&
       homeserver == client.homeserver;
+}
+
+class _DeviceGrantMetadata {
+  const _DeviceGrantMetadata({
+    required this.issuer,
+    required this.token,
+    required this.registration,
+    required this.deviceAuthorization,
+  });
+  final Uri issuer;
+  final Uri token;
+  final Uri registration;
+  final Uri deviceAuthorization;
 }
