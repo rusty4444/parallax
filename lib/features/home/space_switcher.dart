@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../room_avatar.dart';
+import '../../room_screen.dart';
+import '../spaces_admin/space_options_sheet.dart';
+import '../spaces_admin/spaces_admin_features.dart';
 import 'home_features.dart';
 
 /// Element X HomeSpaces filter: pick a joined Space to show only its chats.
+///
+/// Long-press opens the Space menu (explore, manage rooms, settings, leave)
+/// from the spaces_admin module, falling back to [onOptions] for backends
+/// without Space administration. A trailing "New space" pill creates one.
 class SpaceSwitcher extends StatelessWidget {
   const SpaceSwitcher({
     super.key,
@@ -24,9 +31,37 @@ class SpaceSwitcher extends StatelessWidget {
   final ValueChanged<String?> onSelected;
   final ValueChanged<HomeSpace> onOptions;
 
+  Future<void> _spaceMenu(BuildContext context, HomeSpace space) =>
+      showSpaceOptionsSheet(
+        context,
+        backend: backend,
+        palette: palette,
+        spaceId: space.id,
+        spaceName: space.name,
+        onOpenRoom: (roomId) => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                RoomScreen(backend: backend, palette: palette, roomId: roomId),
+          ),
+        ),
+        onLeft: () {
+          if (selected == space.id) onSelected(null);
+        },
+      );
+
+  Future<void> _newSpace(BuildContext context) async {
+    final spaceId = await openCreateSpace(
+      context,
+      backend: backend,
+      palette: palette,
+    );
+    if (spaceId != null && context.mounted) onSelected(spaceId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = palette;
+    final spacesAdmin = spacesAdminFeaturesOf(backend) != null;
     Widget pill({
       required String label,
       required bool active,
@@ -92,7 +127,8 @@ class SpaceSwitcher extends StatelessWidget {
               active: space.id == selected,
               tooltip: 'Long-press for Space options',
               onTap: () => onSelected(space.id == selected ? null : space.id),
-              onLongPress: () => onOptions(space),
+              onLongPress: () =>
+                  spacesAdmin ? _spaceMenu(context, space) : onOptions(space),
               leading: RoomAvatar(
                 room: ChatRoom(
                   id: space.id,
@@ -106,6 +142,13 @@ class SpaceSwitcher extends StatelessWidget {
                 palette: p,
                 size: 28,
               ),
+            ),
+          if (spacesAdmin)
+            pill(
+              label: 'New space',
+              active: false,
+              onTap: () => _newSpace(context),
+              leading: Icon(Icons.add_rounded, size: 18, color: p.secondary),
             ),
         ],
       ),

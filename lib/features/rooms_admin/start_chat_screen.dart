@@ -5,6 +5,9 @@ import '../../chat_backend.dart';
 import '../../directory_screen.dart';
 import '../../messaging_features.dart';
 import '../../room_avatar.dart';
+import '../../space_browser_screen.dart';
+import '../spaces_admin/space_options_sheet.dart' show openCreateSpace;
+import '../spaces_admin/spaces_admin_features.dart';
 import 'admin_ui.dart';
 import 'create_room_screen.dart';
 import 'join_room_screen.dart';
@@ -97,6 +100,28 @@ class _StartChatScreenState extends State<StartChatScreen>
     _finish(roomId);
   }
 
+  /// Element X "Create space": after creating it, browse the new Space;
+  /// a room opened there is returned to the inbox.
+  Future<void> _newSpace() async {
+    final spaceId = await openCreateSpace(
+      context,
+      backend: widget.backend,
+      palette: widget.palette,
+    );
+    if (spaceId == null || !mounted || !searchOwner.isCurrent) return;
+    final roomId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => SpaceBrowserScreen(
+          backend: widget.backend,
+          palette: widget.palette,
+          spaceId: spaceId,
+        ),
+      ),
+    );
+    if (!mounted || !searchOwner.isCurrent) return;
+    Navigator.pop(context, roomId);
+  }
+
   Future<void> _invitePeople() async {
     final userId = widget.backend.userId;
     if (userId == null) return;
@@ -155,6 +180,13 @@ class _StartChatScreenState extends State<StartChatScreen>
                                     ),
                                   ),
                           ),
+                          if (spacesAdminFeaturesOf(widget.backend) != null)
+                            AdminTile(
+                              palette: p,
+                              icon: Icons.workspaces_outline,
+                              title: 'New space',
+                              onTap: _starting ? null : _newSpace,
+                            ),
                           if (_admin != null)
                             AdminTile(
                               palette: p,
