@@ -19,6 +19,8 @@ import 'package:vodozemac/vodozemac.dart' as vod;
 import 'chat_backend.dart';
 import 'client_caches.dart';
 import 'crypto_setup_policy.dart';
+import 'features/link_previews/link_preview_cache.dart';
+import 'features/link_previews/link_previews.dart';
 import 'features/scheduled/delayed_events.dart';
 import 'features/scheduled/undo_send.dart';
 import 'crypto_signature_validation.dart';
@@ -63,7 +65,8 @@ class MatrixBackend extends ChatBackend
         MatrixSdkAccess,
         DelayedRoomEventSender,
         UndoSendFeatures,
-        MediaCacheAccess {
+        MediaCacheAccess,
+        LinkPreviewSource {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     bool Function()? sendTypingNotifications,
@@ -1681,6 +1684,48 @@ class MatrixBackend extends ChatBackend
   Uint8List? cachedAvatar(Uri url) => _disposed ? null : _avatarCache[url];
 
   @override
+  String get linkPreviewNamespace {
+    final client = _client;
+    if (client == null || _disposed || _loggingOut || !client.isLogged()) {
+      return '';
+    }
+    return mediaCacheAccount(client.homeserver, client.userID, client.deviceID);
+  }
+
+  /// Asks the homeserver for a page's Open Graph title and image. The
+  /// caller decides whether the room's privacy allows it.
+  @override
+  Future<LinkPreview?> fetchLinkPreview(Uri url, {int? timestamp}) async {
+    final client = _client;
+    if (client == null ||
+        _disposed ||
+        _loggingOut ||
+        !client.isLogged() ||
+        (url.scheme != 'https' && url.scheme != 'http')) {
+      return null;
+    }
+    final response = await client.getUrlPreview(url, ts: timestamp);
+    if (_disposed || !identical(client, _client)) return null;
+    final fields = response.additionalProperties;
+    String? text(String key, int limit) {
+      final value = fields[key];
+      if (value is! String) return null;
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      return trimmed.length <= limit ? trimmed : trimmed.substring(0, limit);
+    }
+
+    final image = response.ogImage;
+    return LinkPreview(
+      url: url,
+      title: text('og:title', 300),
+      description: text('og:description', 500),
+      siteName: text('og:site_name', 120),
+      image: image != null && image.scheme == 'mxc' ? image : null,
+    );
+  }
+
+  @override
   Future<Uint8List?> loadAvatar(Uri url) async {
     if (url.scheme != 'mxc' || _disposed) return null;
     final cached = _avatarCache.remove(url);
@@ -3102,8 +3147,11 @@ class MatrixBackend extends ChatBackend
   /// remote session end or a different account).
   void _dropMediaCache() {
     final opening = _mediaCache;
+    final account = _mediaCacheAccount;
     _mediaCache = null;
     _mediaCacheAccount = null;
+    // Link previews name the pages linked from this account's chats.
+    if (account != null) unawaited(LinkPreviewCache.deleteAccount(account));
     if (opening == null) return;
     unawaited(
       opening

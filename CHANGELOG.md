@@ -12,6 +12,12 @@
 - Device search reads each room's stored history once instead of on every launch, and writes in batches.
 - More profile pictures and animated stickers stay cached, and room backgrounds are decoded at screen size.
 
+### Link previews
+
+- Links in messages show a small card with the page's title, description and image, under the message. Your homeserver fetches the preview, so your phone doesn't contact the site; tapping the card opens the link.
+- Previews are remembered on the phone (newest 300 per account), so scrolling back over a link doesn't fetch it again, and are deleted on sign-out. A page that fails is retried after ten minutes rather than on every rebuild.
+- In encrypted chats previews are off unless you turn on Settings → Media → **Preview links in encrypted chats**, because fetching one tells your homeserver which link was sent. Settings → Media → **Show link previews** turns them off everywhere.
+
 ### Message bubbles
 
 - Bubbles are as wide as their message: a short message gets a short bubble, on the right for your own messages and after the sender's picture for others. Before, every bubble stretched to its widest because the time's right alignment took the full width.

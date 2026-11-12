@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../features/call/call_hooks.dart';
 import '../features/composer/composer_hooks.dart';
 import '../features/home/home_hooks.dart';
+import '../features/link_previews/link_preview_hooks.dart';
 import '../features/live_location/live_location_hooks.dart';
 import '../features/media/media_hooks.dart';
 import '../features/notifications/notification_hooks.dart';
@@ -34,6 +35,7 @@ Widget? entryBodyFor(BuildContext context, EntryHookContext ctx) =>
 
 List<Widget> entryFootersFor(BuildContext context, EntryHookContext ctx) => [
   ?threadEntryFooter(context, ctx),
+  ?linkPreviewEntryFooter(context, ctx),
 ];
 
 List<MessageActionItem> messageActionsFor(
@@ -143,7 +145,10 @@ List<Widget> chatSettingsSectionsFor(
 List<Widget> mediaSettingsSectionsFor(
   BuildContext context,
   SettingsHookContext ctx,
-) => [...mediaSettingsSections(context, ctx)];
+) => [
+  ...mediaSettingsSections(context, ctx),
+  ...linkPreviewSettingsSections(context, ctx),
+];
 
 /// Settings → Privacy: the on-device message search index.
 List<Widget> privacySettingsSectionsFor(

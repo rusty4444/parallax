@@ -70,6 +70,9 @@ class AppearancePreferences extends ChangeNotifier {
   static const _homeRowStyleKey = 'parallax.appearance.v1.home_row_style';
   static const _homePreviewKey = 'parallax.appearance.v1.home_preview';
   static const _networkLogosKey = 'parallax.appearance.v1.network_logos';
+  static const _linkPreviewsKey = 'parallax.appearance.v1.link_previews';
+  static const _linkPreviewsEncryptedKey =
+      'parallax.appearance.v1.link_previews_encrypted';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -89,6 +92,8 @@ class AppearancePreferences extends ChangeNotifier {
   HomeRowStyle _homeRowStyle = HomeRowStyle.cards;
   HomePreview _homePreview = HomePreview.long;
   bool _networkLogos = false;
+  bool _linkPreviews = true;
+  bool _linkPreviewsEncrypted = false;
 
   double get textScale => _textScale;
 
@@ -123,6 +128,13 @@ class AppearancePreferences extends ChangeNotifier {
   /// Chats without a picture show their app's logo (WhatsApp, Messenger,
   /// Matrix …) instead of a letter (off by default).
   bool get networkLogos => _networkLogos;
+
+  /// Show the page title and image for links in messages (on by default).
+  bool get linkPreviews => _linkPreviews;
+
+  /// Also preview links in encrypted rooms. Off by default: the homeserver
+  /// fetches the preview, so it would learn links from encrypted messages.
+  bool get linkPreviewsInEncryptedRooms => _linkPreviewsEncrypted;
 
   /// One emoji (a single grapheme of at most 32 UTF-16 units, no spaces).
   static bool isQuickReaction(String value) =>
@@ -173,7 +185,14 @@ class AppearancePreferences extends ChangeNotifier {
         HomePreview.values.where((s) => s.name == rawPreview).firstOrNull ??
         HomePreview.long;
     final networkLogos = _boolOr(prefs.get(_networkLogosKey), false);
+    final linkPreviews = _boolOr(prefs.get(_linkPreviewsKey), true);
+    final linkPreviewsEncrypted = _boolOr(
+      prefs.get(_linkPreviewsEncryptedKey),
+      false,
+    );
     final changed =
+        linkPreviews != _linkPreviews ||
+        linkPreviewsEncrypted != _linkPreviewsEncrypted ||
         networkLogos != _networkLogos ||
         homeRowStyle != _homeRowStyle ||
         homePreview != _homePreview ||
@@ -198,6 +217,8 @@ class AppearancePreferences extends ChangeNotifier {
     _homeRowStyle = homeRowStyle;
     _homePreview = homePreview;
     _networkLogos = networkLogos;
+    _linkPreviews = linkPreviews;
+    _linkPreviewsEncrypted = linkPreviewsEncrypted;
     if (changed) _notifyIfActive();
   });
 
@@ -294,6 +315,23 @@ class AppearancePreferences extends ChangeNotifier {
     _haptics = value;
     _notifyIfActive();
   });
+
+  Future<void> setLinkPreviews(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_linkPreviewsKey, value));
+    if (_linkPreviews == value) return;
+    _linkPreviews = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setLinkPreviewsInEncryptedRooms(bool value) =>
+      _ordered(() async {
+        final prefs = await _preferences();
+        _requireSaved(await prefs.setBool(_linkPreviewsEncryptedKey, value));
+        if (_linkPreviewsEncrypted == value) return;
+        _linkPreviewsEncrypted = value;
+        _notifyIfActive();
+      });
 
   Future<void> setNetworkLogos(bool value) => _ordered(() async {
     final prefs = await _preferences();
