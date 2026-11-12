@@ -5,6 +5,8 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
+import '../packs/pack_image.dart';
+import '../packs/pack_model.dart';
 import 'linkify.dart';
 import 'permalinks.dart';
 
@@ -16,6 +18,9 @@ const _maxTableRows = 100;
 const _maxTableCells = 12;
 const _maxRenderedChars = 40000;
 const _maxCodeChars = 20000;
+
+/// Custom emoji images rendered per message; the rest show their alt text.
+const _maxEmoticons = 100;
 
 /// Tags whose content is never rendered (including `<mx-reply>` fallbacks).
 const _droppedTags = {
@@ -60,6 +65,7 @@ class MessageContentView extends StatefulWidget {
     this.resolveName,
     this.onLink,
     this.onPermalink,
+    this.backend,
   });
 
   final ChatEntry entry;
@@ -69,6 +75,11 @@ class MessageContentView extends StatefulWidget {
   final NameResolver? resolveName;
   final LinkHandler? onLink;
   final PermalinkHandler? onPermalink;
+
+  /// Loads custom emoji (`<img data-mx-emoticon>`) images. Defaults to the
+  /// signed-in backend known to the packs module; without one, emoticons
+  /// show their `:shortcode:` alt text.
+  final ChatBackend? backend;
 
   @override
   State<MessageContentView> createState() => _MessageContentViewState();
@@ -117,6 +128,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       widget.style,
       widget.palette,
       widget.ownUserId,
+      widget.backend,
       _revealed.length,
     );
     if (key != _key || _built == null) {
@@ -177,6 +189,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       onPermalink: (link) => widget.onPermalink?.call(link),
       revealed: _revealed,
       reveal: _reveal,
+      backend: widget.backend,
     );
     final formatted = entry.formattedBody;
     if (formatted != null &&
@@ -295,6 +308,7 @@ class _Renderer {
     required this.onPermalink,
     required this.revealed,
     required this.reveal,
+    this.backend,
   });
 
   final TextStyle base;
@@ -307,8 +321,14 @@ class _Renderer {
   final PermalinkHandler onPermalink;
   final Set<int> revealed;
   final void Function(int index) reveal;
+  final ChatBackend? backend;
   int _spoilers = 0;
   int _chars = 0;
+  int _emoticons = 0;
+
+  /// Emoticons render at text height, or larger when a message holds only a
+  /// few of them (like emoji-only messages).
+  double _emoticonSize = 0;
 
   bool get _exhausted => _chars > _maxRenderedChars;
 
@@ -337,6 +357,10 @@ class _Renderer {
     } catch (_) {
       return null;
     }
+    final fontSize = base.fontSize ?? 15;
+    _emoticonSize = leading.isEmpty && _onlyEmoticons(fragment)
+        ? (fontSize * 2.4).clamp(28.0, 48.0)
+        : (fontSize * 1.45).clamp(14.0, 32.0);
     final block = _BlockBuilder(this);
     for (final span in leading) {
       block.addSpan(span);
@@ -344,6 +368,55 @@ class _Renderer {
     _visitAll(fragment.nodes, block, _Ctx(style: base), 0);
     if (block.isEmpty) return null;
     return block.build(base);
+  }
+
+  /// A custom emoji image: `<img data-mx-emoticon>` with an `mxc://` source.
+  /// Any other `<img>` (remote URLs, data URIs, plain mxc images) is never
+  /// fetched and only contributes its alt text.
+  static Uri? _emoticonSource(dom.Element node) =>
+      node.attributes.containsKey('data-mx-emoticon')
+      ? parseMxcUri(node.attributes['src'])
+      : null;
+
+  static bool _onlyEmoticons(dom.DocumentFragment fragment) {
+    var count = 0;
+    for (final node in fragment.nodes) {
+      if (node is dom.Text && node.data.trim().isEmpty) continue;
+      if (node is dom.Element &&
+          node.localName == 'img' &&
+          _emoticonSource(node) != null) {
+        if (++count > 5) return false;
+        continue;
+      }
+      return false;
+    }
+    return count > 0;
+  }
+
+  void _image(dom.Element node, _BlockBuilder block, _Ctx ctx) {
+    final alt = (node.attributes['alt'] ?? node.attributes['title'] ?? '')
+        .trim();
+    final source = _emoticonSource(node);
+    if (source == null || _emoticons >= _maxEmoticons || _exhausted) {
+      if (alt.isNotEmpty) block.addText(alt, ctx);
+      return;
+    }
+    _emoticons++;
+    final label = alt.isEmpty ? ':emoji:' : alt;
+    final bounded = label.length > 102 ? '${label.substring(0, 100)}…' : label;
+    _chars += bounded.length;
+    block.addSpan(
+      WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: EmoticonInline(
+          url: source,
+          alt: bounded,
+          size: _emoticonSize > 0 ? _emoticonSize : 22,
+          style: ctx.style,
+          backend: backend,
+        ),
+      ),
+    );
   }
 
   void _visitAll(
@@ -419,8 +492,7 @@ class _Renderer {
       case 'a':
         _link(node, block, ctx, next);
       case 'img':
-        final alt = node.attributes['alt'] ?? node.attributes['title'] ?? '';
-        if (alt.trim().isNotEmpty) block.addText(alt, ctx);
+        _image(node, block, ctx);
       case 'b' || 'strong':
         _visitAll(
           node.nodes,
