@@ -280,7 +280,11 @@ void main() {
       expect(shares.single.mine, isTrue);
       expect(shares.single.live, isTrue);
 
+      // Hidden at once, before the stop's sync echo replaces room state.
+      h.backend.echo = false;
       await h.live.stopSharing(_roomId);
+      expect(h.live.liveShares(_roomId), isEmpty);
+      expect(h.live.shareSnapshot(_roomId, shares.single.info).live, isFalse);
       final stop = h.backend.stateWrites.last;
       expect(stop.type, 'org.matrix.msc3672.beacon_info');
       expect(stop.content, {...write.content, 'live': false});

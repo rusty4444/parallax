@@ -62,6 +62,10 @@ class MatrixLiveLocation extends ChangeNotifier
   final _aggregates = <String, _AggregateRecord>{};
   final _subscriptions = <StreamSubscription<Object?>>[];
 
+  /// Own shares being or just stopped here, hidden until sync replaces them
+  /// in room state (so the banner does not flash "another device").
+  final _stopped = <String>{};
+
   /// Shares of a session that ended before [stopAllShares] ran (sign-out
   /// invalidates the session before the pre-logout hook).
   ({String accountKey, String userId, List<PersistedShare> shares})? _retired;
@@ -113,6 +117,7 @@ class MatrixLiveLocation extends ChangeNotifier
     }
     _subscriptions.clear();
     _aggregates.clear();
+    _stopped.clear();
     final sharer = _sharer;
     _sharer = null;
     if (sharer != null) {
@@ -245,7 +250,8 @@ class MatrixLiveLocation extends ChangeNotifier
     final now = clock.now();
     final shares = [
       for (final info in _currentInfos(room).values)
-        if (info.isLiveAt(now)) _snapshot(client, room, info, live: true),
+        if (info.isLiveAt(now) && !_stopped.contains(info.eventId))
+          _snapshot(client, room, info, live: true),
     ];
     final me = client.userID;
     shares.sort((a, b) {
@@ -281,7 +287,10 @@ class MatrixLiveLocation extends ChangeNotifier
       client,
       room,
       info,
-      live: !replaced && info.isLiveAt(clock.now()),
+      live:
+          !replaced &&
+          !_stopped.contains(info.eventId) &&
+          info.isLiveAt(clock.now()),
     );
   }
 
@@ -314,8 +323,21 @@ class MatrixLiveLocation extends ChangeNotifier
       _requireSharer().start(roomId, duration);
 
   @override
-  Future<void> stopSharing(String roomId) async =>
-      _requireSharer().stop(roomId);
+  Future<void> stopSharing(String roomId) async {
+    final sharer = _requireSharer();
+    final client = _client!;
+    final room = client.getRoomById(roomId);
+    final me = client.userID;
+    final own = room == null || me == null ? null : _currentInfos(room)[me];
+    final hide = own != null && own.live && _stopped.add(own.eventId);
+    if (hide) notifyListeners();
+    try {
+      await sharer.stop(roomId);
+    } catch (_) {
+      if (hide && _stopped.remove(own.eventId)) notifyListeners();
+      rethrow;
+    }
+  }
 
   // --- Beacon aggregation ---------------------------------------------------
 
