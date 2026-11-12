@@ -1297,9 +1297,6 @@ class MatrixBackend extends ChatBackend
     if (room == null || timeline == null || _activeRoomId != roomId) {
       throw StateError('Room unavailable');
     }
-    if (room.encrypted) {
-      throw StateError('Encrypted reactions are unavailable in this SDK');
-    }
     if (emoji.isEmpty || emoji.runes.length > 8) {
       throw ArgumentError('Invalid reaction');
     }
@@ -1325,9 +1322,22 @@ class MatrixBackend extends ChatBackend
           )
           .firstOrNull;
       if (ownReaction == null) {
+        // Encrypted rooms use the same recipient approval, fail-closed
+        // encryption and final HTTP guard as messages. The content keeps the
+        // SDK from sending a relation-only plaintext m.reaction (see
+        // reactionEventContent); the guard refuses anything not encrypted.
         await _ensureTrusted(room);
         _requireEncryptedTransport(room);
-        await _protectSend(room, () => room.sendReaction(eventId, emoji));
+        final sentId = await _protectSend(
+          room,
+          () => room.sendEvent(
+            Map<String, dynamic>.of(
+              reactionEventContent(eventId, emoji, encrypted: room.encrypted),
+            ),
+            type: matrix.EventTypes.Reaction,
+          ),
+        );
+        if (sentId == null) throw StateError('Reaction was not sent');
       } else {
         await room.redactEvent(ownReaction.eventId);
       }
@@ -1357,11 +1367,28 @@ class MatrixBackend extends ChatBackend
 
   @override
   Future<void> setTyping(String roomId, bool typing) async {
-    final room = _requireClient().getRoomById(roomId);
-    if (room == null || room.membership != matrix.Membership.join) return;
-    // The SDK pre-shares Megolm keys on typing before recipient approval.
-    if (room.encrypted) return;
-    await room.setTyping(typing, timeout: 5000);
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    final userId = client.userID;
+    if (room == null ||
+        userId == null ||
+        room.membership != matrix.Membership.join) {
+      return;
+    }
+    if (!room.encrypted) {
+      await room.setTyping(typing, timeout: 5000);
+      return;
+    }
+    // Client.setTyping also starts an unawaited Megolm session pre-share,
+    // outside any recipient approval. The typing notification itself is a
+    // plaintext EDU that carries no keys, so send only the EDU here and leave
+    // key sharing to the guarded message send path.
+    await client.request(
+      matrix.RequestType.PUT,
+      '/client/v3/rooms/${Uri.encodeComponent(roomId)}'
+      '/typing/${Uri.encodeComponent(userId)}',
+      data: {'typing': typing, if (typing) 'timeout': 5000},
+    );
   }
 
   @override
