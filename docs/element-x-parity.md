@@ -19,8 +19,8 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | SAS emoji verification, both directions | Built | `lib/security_overlay.dart` |
 | Identity-change warnings (reset, verified-user violation) | Partial | Only resets this device has observed are detected. Anything else falls back to the existing prompt before sending. |
 | Key storage on/off, recovery setup and change, reset identity | Built | Changing the recovery key needs the current key, because SDK 14.1.0 doesn't keep the master key on the device. Turning key storage off keeps recovery. |
-| Export/import room keys | Missing | SDK 14.1.0 has no Megolm export. |
-| Sign in by scanning a QR code (MSC4108) | Missing | Showing a QR code to sign in *another* device is **off in Element X**. |
+| Export/import room keys | Built | Settings → Security → Room keys. Pure-Dart codec in the Element file format; Element Web's test vectors decrypt. |
+| Sign in by scanning a QR code (MSC4108) | Built | `lib/features/qr_login/`. The secure channel matches vodozemac 0.11.2 test vectors. Full key import needs secret storage on the account. Parallax can also show a QR to link a new device (Settings → Devices); that side is off in Element X. |
 | App lock (PIN, biometrics) | Built | `lib/features/home/app_lock/`. Also covers incoming verification prompts. |
 | Multiple accounts | Off in Element X | |
 
@@ -33,7 +33,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Room menu: read/unread, favourite, low priority, mute, copy link, leave | Built | `room_list_menu.dart` |
 | Invites: accept, decline, decline and block (with optional report) | Built | |
 | Spaces filter and browser, join and leave | Built | `space_switcher.dart`, `lib/space_browser_screen.dart` |
-| Space administration (add rooms, space settings) | Missing | Element X has AddRoomToSpace and SpaceSettings. |
+| Space administration (add rooms, space settings) | Built | `lib/features/spaces_admin/`: create Spaces, add/remove/order rooms, Space settings, leave with room choice. Reordering is move up/down, not drag and drop. |
 | Message search (on-device index of encrypted history) | Built | `lib/features/threads/`. An FTS5 index kept in app storage and deleted on sign-out. Unencrypted rooms are searched on the server. |
 
 ## Timeline and composer
@@ -56,7 +56,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Copy text, copy link, view source, report content | Built | |
 | Jump to a message (search results, permalinks) | Partial | The room opens on the message and marks it, but doesn't scroll or animate to it. |
 | @-mention suggestions, markdown, `/me` | Built | |
-| Rich-text (WYSIWYG) editor | Partial | Markdown only, with no formatting toolbar. |
+| Rich-text (WYSIWYG) editor | Partial | Element X's formatting toolbar with live markdown styling in the field (`lib/features/composer/`); not a true WYSIWYG editor. |
 | Drafts, and an outbox with retry | Built | Parallax extra. |
 | Jump to first unread, slash commands, multi-image gallery messages | Off in Element X | |
 
@@ -67,7 +67,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Start chat; create a room (private, ask to join or public); join by address; request to join | Built | `lib/features/rooms_admin/` |
 | Room info: edit name, topic and avatar; share; favourite | Built | |
 | Per-room notifications (all, mentions, mute) | Built | Stored as push rules, the way Element X does it. |
-| Security and privacy: join rule, address, directory listing, encryption, history visibility | Partial | Managing which Spaces can join is missing. |
+| Security and privacy: join rule, address, directory listing, encryption, history visibility | Built | Includes the authorised-Spaces list for restricted rooms. |
 | Roles and permissions, members, bans, join requests | Built | |
 | Report room; leave room (with a last-admin warning) | Built | |
 | User profile: message, verify, block/unblock, moderation | Built | |
@@ -87,7 +87,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 |---|---|---|
 | Push through your own Firebase project or UnifiedPush (for example ntfy) | Built | Opt-in, and must be re-enabled after each restart (existing design). |
 | Global notification settings (direct chats, groups, @room, invites, calls) | Built | |
-| Sender and message text in notifications; inline reply | Missing | Parallax notifications are deliberately generic. "Mark as read" works while the app is still running. |
+| Sender and message text in notifications; inline reply | Built | `lib/features/notifications/`: fetched and decrypted on the device, so the push provider sees only IDs. Can be turned off in Settings. A reply sent while the app is closed waits until it next opens. |
 | Notification troubleshooting screen | Missing | |
 | Sharing into Parallax; matrix.to and `matrix:` links | Built | Direct-share shortcuts are missing. |
 
@@ -105,6 +105,8 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 ## Parallax extras (not in Element X)
 
 Room backgrounds, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry/cancel, server message search, a choice of palettes, and "Ask to join" room creation plus the thread timeline (both off by default in Element X).
+
+Round 2 added, from other messaging apps: send later (MSC4140 delayed events; needs homeserver support) and undo send; Note to self, saved messages and chat folders (account data); live location sharing (MSC3672 beacons); custom emoji and sticker packs (MSC2545); slash commands and Element Web chat effects.
 
 ## Room-creation failure contract
 
