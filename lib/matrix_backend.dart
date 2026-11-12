@@ -18,6 +18,7 @@ import 'chat_backend.dart';
 import 'crypto_setup_policy.dart';
 import 'crypto_signature_validation.dart';
 import 'encrypted_media.dart';
+import 'features/rich_timeline/message_composition.dart';
 import 'homeserver_security.dart';
 import 'key_query_validation.dart';
 import 'media_download.dart';
@@ -534,6 +535,7 @@ class MatrixBackend extends ChatBackend
         if (record.replyToId != null && (reply == null || reply.redacted)) {
           throw StateError('Reply target is unavailable');
         }
+        matrix.Event? edited;
         if (record.editEventId != null) {
           final edit = await room.getEventById(record.editEventId!);
           check();
@@ -543,6 +545,7 @@ class MatrixBackend extends ChatBackend
               edit.messageType != matrix.MessageTypes.Text) {
             throw StateError('Message can no longer be edited');
           }
+          edited = edit;
         }
         await _ensureTrusted(room, cancellation: cancellation);
         check();
@@ -565,14 +568,20 @@ class MatrixBackend extends ChatBackend
                 threadRootId: record.threadRootId,
               );
             } else {
-              final eventId = await room.sendTextEvent(
-                record.body,
+              // The outbox stores plain text; markdown, /me and m.mentions
+              // are derived deterministically here (rich_timeline module).
+              final isEdit = record.editEventId != null;
+              final eventId = await room.sendEvent(
+                composeTextMessage(
+                  record.body,
+                  ownUserId: client.userID,
+                  replyToSender: reply?.senderId,
+                  editEventId: record.editEventId,
+                  previousMentions: mentionedUserIds(edited?.content),
+                ),
                 txid: record.id,
-                parseCommands: false,
-                parseMarkdown: false,
-                inReplyTo: reply,
-                editEventId: record.editEventId,
-                threadRootEventId: record.threadRootId,
+                inReplyTo: isEdit ? null : reply,
+                threadRootEventId: isEdit ? null : record.threadRootId,
               );
               check();
               if (eventId == null) {
@@ -944,6 +953,7 @@ class MatrixBackend extends ChatBackend
         if (replyToId != null && (reply == null || reply.redacted)) {
           throw StateError('Reply target unavailable');
         }
+        matrix.Event? edited;
         if (editEventId != null) {
           final original = await timeline!.getEventById(editEventId);
           _checkSendOwner(owner);
@@ -954,6 +964,7 @@ class MatrixBackend extends ChatBackend
               original.messageType != matrix.MessageTypes.Text) {
             throw StateError('Message cannot be edited');
           }
+          edited = original;
         }
         if ((replyToId != null || editEventId != null) &&
             (_activeRoomId != roomId || _timeline != timeline)) {
@@ -966,14 +977,20 @@ class MatrixBackend extends ChatBackend
           throw StateError('Room changed before sending');
         }
         _requireEncryptedTransport(room);
+        // Markdown, /me and m.mentions are derived from the plain text here
+        // (rich_timeline module); the guards above are unchanged.
+        final content = composeTextMessage(
+          text.trim(),
+          ownUserId: client.userID,
+          replyToSender: reply?.senderId,
+          editEventId: editEventId,
+          previousMentions: mentionedUserIds(edited?.content),
+        );
         final sentId = await _protectSend(
           room,
-          () => room.sendTextEvent(
-            text.trim(),
-            parseCommands: false,
-            parseMarkdown: false,
-            inReplyTo: reply,
-            editEventId: editEventId,
+          () => room.sendEvent(
+            content,
+            inReplyTo: editEventId == null ? reply : null,
           ),
           ownerCurrent: owner,
         );

@@ -81,6 +81,34 @@ class RoomAvatar extends StatelessWidget {
   }
 }
 
+/// One person's avatar (an `mxc://` URI loaded through the backend's bounded
+/// avatar cache), falling back to their initial.
+class UserAvatar extends StatelessWidget {
+  const UserAvatar({
+    super.key,
+    required this.name,
+    required this.url,
+    required this.backend,
+    required this.palette,
+    this.size = 32,
+  });
+
+  final String name;
+  final Uri? url;
+  final ChatBackend backend;
+  final AppPalette palette;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => _AvatarFace(
+    name: name,
+    url: url,
+    backend: backend,
+    palette: palette,
+    size: size,
+  );
+}
+
 class _AvatarFace extends StatefulWidget {
   const _AvatarFace({
     required this.name,

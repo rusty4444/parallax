@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'features/reactions/reaction_hooks.dart';
+import 'features/rich_timeline/mention_suggestions.dart';
 import 'hooks/hook_types.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
@@ -37,6 +38,7 @@ class RichMessageComposer extends StatefulWidget {
     this.pickFile,
     this.recorder,
     this.extraAttachments = const [],
+    this.mentionSource,
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
@@ -61,6 +63,10 @@ class RichMessageComposer extends StatefulWidget {
   /// Feature-provided attachment options (poll, location …) shown after the
   /// built-in media sources.
   final List<ComposerAttachmentAction> extraAttachments;
+
+  /// Room members offered after typing `@`. When null, the room shown by the
+  /// timeline on the same route is used (see `bindTimelineRoute`).
+  final MentionSource? mentionSource;
 
   @override
   State<RichMessageComposer> createState() => _RichMessageComposerState();
@@ -91,6 +97,8 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   Future<void> _voiceWork = Future<void>.value();
   int _recordingSeconds = 0;
   Timer? _durationTimer;
+  MentionQuery? _mentionQuery;
+  List<MentionSuggestion> _mentionSuggestions = const [];
 
   bool get _alive => mounted && !_closed;
   bool get _voiceIdle => _voiceMode == _VoiceMode.idle;
@@ -108,6 +116,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     _recorder = widget.recorder;
     _lastText = widget.controller.text;
     widget.controller.addListener(_draftChanged);
+    widget.controller.addListener(_updateMentions);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -116,11 +125,90 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.removeListener(_draftChanged);
+      oldWidget.controller.removeListener(_updateMentions);
       _lastText = widget.controller.text;
       _textVersion++;
       widget.controller.addListener(_draftChanged);
+      widget.controller.addListener(_updateMentions);
+      _mentionQuery = null;
+      _mentionSuggestions = const [];
     }
   }
+
+  /// Offers room members while an `@mention` is typed at the caret. The
+  /// inserted user ID stays plain text; pills and `m.mentions` are derived
+  /// when the message is sent.
+  void _updateMentions() {
+    if (!_alive) return;
+    final query = mentionQueryAt(widget.controller.value);
+    var suggestions = const <MentionSuggestion>[];
+    if (query != null) {
+      final source = widget.mentionSource ?? mentionSourceFor(context);
+      if (source != null) {
+        try {
+          suggestions = source(query.query);
+        } catch (_) {
+          suggestions = const [];
+        }
+      }
+    }
+    if (suggestions.isEmpty && _mentionSuggestions.isEmpty) {
+      _mentionQuery = query;
+      return;
+    }
+    setState(() {
+      _mentionQuery = query;
+      _mentionSuggestions = suggestions;
+    });
+  }
+
+  void _pickMention(MentionSuggestion suggestion) {
+    final query = _mentionQuery;
+    if (!_alive || query == null) return;
+    final controller = widget.controller;
+    // Re-check that the typed @query is still where it was.
+    final current = mentionQueryAt(controller.value);
+    if (current == null || current.start != query.start) return;
+    controller.value = applyMention(controller.value, current, suggestion);
+    setState(() {
+      _mentionQuery = null;
+      _mentionSuggestions = const [];
+    });
+  }
+
+  Widget _mentionList() => Card(
+    margin: const EdgeInsets.only(bottom: 8),
+    clipBehavior: Clip.antiAlias,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 216),
+      child: ListView(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        children: [
+          for (final suggestion in _mentionSuggestions)
+            ListTile(
+              key: ValueKey('mention-${suggestion.id}'),
+              dense: true,
+              leading: suggestion.leading,
+              title: Text(
+                suggestion.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: suggestion.subtitle == null
+                  ? null
+                  : Text(
+                      suggestion.subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+              onTap: () => _pickMention(suggestion),
+            ),
+        ],
+      ),
+    ),
+  );
 
   void _draftChanged() {
     if (!_alive || _lastText == widget.controller.text) return;
@@ -736,6 +824,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     _voiceEpoch++;
     _durationTimer?.cancel();
     widget.controller.removeListener(_draftChanged);
+    widget.controller.removeListener(_updateMentions);
     WidgetsBinding.instance.removeObserver(this);
     final voice = _voiceWork;
     final recorder = _recorder;
@@ -871,6 +960,8 @@ class _RichMessageComposerState extends State<RichMessageComposer>
               ),
             ),
           if (_media != null) _attachmentPreview(_media!),
+          if (_mentionSuggestions.isNotEmpty && _mentionQuery != null)
+            _mentionList(),
           if (voiceActive)
             Row(
               children: [
