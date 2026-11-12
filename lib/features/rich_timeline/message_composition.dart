@@ -6,6 +6,7 @@ import 'package:matrix/matrix.dart' show MatrixIdExtension;
 // ignore: implementation_imports
 import 'package:matrix/src/utils/markdown.dart' as sdk_markdown;
 
+import '../composer/markdown_format.dart' show InlineFormat, scanMarkdown;
 import 'permalinks.dart';
 
 /// Builds `m.room.message` content from the composer's plain text.
@@ -119,19 +120,60 @@ MessageMentions mentionsFor(
   return MessageMentions(userIds: ids, room: _roomMention.hasMatch(text));
 }
 
+const _underlineOpen = '\uE000';
+const _underlineClose = '\uE001';
+
+/// Replaces paired `<u>…</u>` outside code with placeholders the SDK
+/// converter leaves alone (it escapes all other inline HTML).
+String _protectUnderline(String body) {
+  if (!body.contains('<u>') ||
+      body.contains(_underlineOpen) ||
+      body.contains(_underlineClose)) {
+    return body;
+  }
+  final spans = [
+    for (final span in scanMarkdown(body).spans)
+      if (span.format == InlineFormat.underline) span,
+  ];
+  if (spans.isEmpty) return body;
+  final buffer = StringBuffer();
+  var cursor = 0;
+  for (final span in spans) {
+    buffer
+      ..write(body.substring(cursor, span.start))
+      ..write(_underlineOpen)
+      ..write(body.substring(span.contentStart, span.contentEnd))
+      ..write(_underlineClose);
+    cursor = span.end;
+  }
+  buffer.write(body.substring(cursor));
+  return buffer.toString();
+}
+
 /// Converts composer markdown to Matrix HTML, or returns null when the
 /// result carries no formatting beyond paragraphs and line breaks.
+///
+/// Besides the SDK's Matrix-flavoured markdown, `<u>text</u>` (the
+/// composer's underline, as in Element Web's markdown mode) becomes `<u>`.
 String? markdownToMatrixHtml(String body) {
   if (body.trim().isEmpty) return null;
-  final String html;
+  final protected = _protectUnderline(body);
+  String html;
   try {
     html = sdk_markdown.markdown(
-      body,
+      protected,
       convertLinebreaks: true,
       enableLatex: false,
     );
   } catch (_) {
     return null;
+  }
+  if (!identical(protected, body)) {
+    html = html
+        .replaceAll(_underlineOpen, '<u>')
+        .replaceAll(_underlineClose, '</u>');
+    // Re-serialise so underline crossing other inline markup stays nested.
+    html = html_parser.parseFragment(html).outerHtml;
   }
   final fragment = html_parser.parseFragment(html);
   final tags = <String>{};
