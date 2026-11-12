@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:matrix/matrix.dart' as matrix;
 
+import 'features/notifications/background_push.dart';
 import 'features/platform/unified_push.dart';
 
 /// How push messages reach this device.
@@ -37,6 +38,17 @@ const unifiedPushInstance = 'parallax';
 
 /// Notification action that marks the notified room as read.
 const pushMarkReadActionId = 'parallax.mark_read';
+
+/// Inline quick-reply action on rich room notifications. It never opens the
+/// app: flutter_local_notifications delivers it to a background isolate,
+/// which hands it to the main isolate (lib/features/notifications).
+const pushReplyActionId = 'parallax.reply';
+
+/// Renders a verified envelope with sender, text and media. Implemented by
+/// the notifications module while the signed-in app is mounted. [isCurrent]
+/// turns false when push is disabled or re-registered meanwhile.
+typedef PushRichRenderer =
+    Future<void> Function(PushEnvelope envelope, bool Function() isCurrent);
 
 /// Client identifiers only. Never put gateway service-account/private keys here.
 @immutable
@@ -513,6 +525,12 @@ class PushNotifications extends ChangeNotifier {
   /// [PushNavigationRequest.isCurrent] after every await.
   Future<void> Function(PushNavigationRequest request)? markReadHandler;
 
+  /// Rich notifications (sender, text, media) for verified pushes. When
+  /// unset, or when it throws, the driver's generic notification is shown.
+  PushRichRenderer? richRenderer;
+
+  final _renders = <Future<void>>{};
+
   PushConfiguration get configuration => _configuration;
   PushProvider get provider => _configuration.provider;
   PushStatus get status => _status;
@@ -713,7 +731,7 @@ class PushNotifications extends ChangeNotifier {
       driver.messages.listen((data) {
         _backgroundJob(() async {
           final envelope = _envelope(data, generation);
-          if (envelope != null) await driver.showNotification(envelope);
+          if (envelope != null) await _present(envelope, driver, generation);
         }, generation);
       }, onError: (Object error) => _streamFailure(generation, error)),
     );
@@ -761,6 +779,69 @@ class PushNotifications extends ChangeNotifier {
     final registration = _activeRegistration;
     if (!_current(generation) || registration == null || !active) return null;
     return PushEnvelope.parse(data, registration.registrationId);
+  }
+
+  /// Shows [envelope]: rich when a renderer is attached (detached from the
+  /// serial queue so a slow fetch cannot hold up registration or disable),
+  /// generic otherwise or when rich rendering fails.
+  Future<void> _present(
+    PushEnvelope envelope,
+    PushDriver driver,
+    int generation,
+  ) async {
+    final renderer = richRenderer;
+    if (renderer == null) {
+      await driver.showNotification(envelope);
+      return;
+    }
+    bool current() =>
+        _current(generation) &&
+        _activeRegistration?.registrationId == envelope.registrationId;
+    late final Future<void> render;
+    render =
+        Future<void>.microtask(() async {
+          try {
+            await renderer(envelope, current);
+          } catch (_) {
+            if (!current()) return;
+            try {
+              await driver.showNotification(envelope);
+            } catch (_) {
+              // A failed alert must not tear down push delivery.
+            }
+          }
+        }).whenComplete(() {
+          _renders.remove(render);
+        });
+    _renders.add(render);
+  }
+
+  /// A push handed over by a background isolate of this process (FCM
+  /// background handler, UnifiedPush service). Validated synchronously
+  /// against the live registration exactly like foreground messages; returns
+  /// false (rejected) when it does not belong to it.
+  bool acceptHandedOffPush(Map<String, dynamic> data) {
+    final generation = _generation;
+    final driver = _touched;
+    final envelope = _envelope(data, generation);
+    if (envelope == null || driver == null) return false;
+    _backgroundJob(() async {
+      if (_envelope(data, generation) == null) return;
+      await _present(envelope, driver, generation);
+    }, generation);
+    return true;
+  }
+
+  /// Verifies a locally generated notification payload (for example a quick
+  /// reply handed over from the notification-action isolate) against the
+  /// live registration and session. Null when stale.
+  PushNavigationRequest? verifiedRequest(Map<String, dynamic> data) {
+    final generation = _generation;
+    final envelope = _envelope(data, generation);
+    final session = _session;
+    if (envelope == null || session == null) return null;
+    final request = _request(envelope, session, generation);
+    return request.isCurrent ? request : null;
   }
 
   void _backgroundJob(
@@ -959,6 +1040,10 @@ class PushNotifications extends ChangeNotifier {
     while (true) {
       final current = _tail;
       await current;
+      if (_renders.isNotEmpty) {
+        await Future.wait(List.of(_renders));
+        continue;
+      }
       if (identical(current, _tail)) return;
     }
   }
@@ -1123,12 +1208,17 @@ class FirebasePushDriver implements PushDriver, PushActionSource {
 
 Map<String, dynamic>? _decodeMap(String? value) {
   try {
-    final json = jsonDecode(value ?? '');
+    if (value == null || value.length > 16 * 1024) return null;
+    final json = jsonDecode(value);
     return json is Map<String, dynamic> ? json : null;
   } catch (_) {
     return null;
   }
 }
+
+/// Decodes a local notification payload (routing data only).
+Map<String, dynamic>? decodeNotificationPayload(String? value) =>
+    _decodeMap(value);
 
 /// Routes local notification taps. Only the locally generated payload is
 /// trusted for shape; ownership is still verified against the live
@@ -1166,6 +1256,10 @@ Future<void> initializePushLocalNotifications(
             onOpen: onOpen,
             onMarkRead: onMarkRead,
           ),
+    // Every initialisation must register this: the plugin stores the
+    // callback handle used for actions that do not open the app (Reply).
+    onDidReceiveBackgroundNotificationResponse:
+        parallaxNotificationActionBackground,
   );
   if (initialized != true) throw StateError('Local notifications unavailable');
 }
@@ -1223,9 +1317,15 @@ Future<void> showGenericPushNotification(
   payload: jsonEncode(envelope.toJson()),
 );
 
-/// Data-only gateway contract; no Firebase initialization or Matrix network here.
-/// Fails closed if secure storage is locked, consent/config is absent, the
-/// account/device binding is missing, or the registration nonce is stale.
+/// Data-only gateway contract; no Firebase initialization here. Fails closed
+/// if secure storage is locked, consent/config is absent, the account/device
+/// binding is missing, or the registration nonce is stale.
+///
+/// A verified push is handed to the main isolate when it is running;
+/// otherwise its event is fetched and decrypted on this device by a
+/// short-lived read-only client (lib/features/notifications/background_push
+/// .dart), falling back to the generic notification. The push itself only
+/// carries room and event IDs.
 @pragma('vm:entry-point')
 Future<void> matrixPushBackgroundHandler(RemoteMessage message) async {
   if (message.notification != null) return;
@@ -1236,10 +1336,11 @@ Future<void> matrixPushBackgroundHandler(RemoteMessage message) async {
     if (binding == null || binding.configuration.isUnifiedPush) return;
     final envelope = binding.envelope(message.data);
     if (envelope == null) return;
-    final local = FlutterLocalNotificationsPlugin();
-    await initializePushLocalNotifications(local);
-    if (await store.read() != raw) return;
-    await showGenericPushNotification(local, envelope);
+    await handleBackgroundPushEnvelope(
+      binding: binding,
+      envelope: envelope,
+      stillBound: () async => await store.read() == raw,
+    );
   } catch (_) {
     // Never log payloads/account identifiers or synthesize an unbound alert.
   }

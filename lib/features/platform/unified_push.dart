@@ -5,8 +5,10 @@
 // server's Matrix gateway (`<endpoint origin>/_matrix/push/v1/notify`,
 // discovered with a GET as Element X does, or entered manually) as its URL.
 // The gateway relays the homeserver's notification JSON to the endpoint and
-// the distributor delivers it here. Notifications stay generic; the payload's
-// pusher data must echo this registration's nonce.
+// the distributor delivers it here. The payload carries only room/event IDs
+// (`event_id_only`) and its pusher data must echo this registration's nonce;
+// the event itself is fetched and decrypted on the device
+// (lib/features/notifications).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -19,6 +21,7 @@ import 'package:http/http.dart' as http;
 import 'package:unifiedpush/unifiedpush.dart';
 
 import '../../push_notifications.dart';
+import '../notifications/background_push.dart';
 
 /// Largest relayed notification body accepted (the Matrix push payload is
 /// small; this bounds hostile distributors).
@@ -519,14 +522,18 @@ class UnifiedPushDriver
   }
 }
 
-/// Shows a generic alert for a relayed UnifiedPush message when the process
-/// has no foreground push owner. Fails closed like the FCM background
-/// handler: the stored binding must be UnifiedPush, current and echoed.
+/// Shows a relayed UnifiedPush message when the process has no foreground
+/// push owner. Fails closed like the FCM background handler: the stored
+/// binding must be UnifiedPush, current and echoed. The push is handed to a
+/// running main isolate, or resolved on this device by a short-lived
+/// read-only client, with the generic alert as fallback ([show] replaces
+/// all of that in tests).
 Future<void> handleUnifiedPushBackgroundMessage(
   Uint8List content,
   String instance, {
   PushStateStore store = const SecurePushStateStore(),
   Future<void> Function(PushEnvelope envelope)? show,
+  BackgroundPushEnvironment? environment,
 }) async {
   if (instance != unifiedPushInstance) return;
   try {
@@ -542,10 +549,12 @@ Future<void> handleUnifiedPushBackgroundMessage(
       await show(envelope);
       return;
     }
-    final local = FlutterLocalNotificationsPlugin();
-    await initializePushLocalNotifications(local);
-    if (await store.read() != raw) return;
-    await showGenericPushNotification(local, envelope);
+    await handleBackgroundPushEnvelope(
+      binding: binding,
+      envelope: envelope,
+      stillBound: () async => await store.read() == raw,
+      environment: environment,
+    );
   } catch (_) {
     // Never log payloads/account identifiers or synthesise an unbound alert.
   }
@@ -570,7 +579,8 @@ Future<void> handleUnifiedPushBackgroundUnregistered(
 
 /// Dart entrypoint for MainActivity.kt's ParallaxUnifiedPushService. Runs in
 /// a headless engine when a push arrives and Parallax has no UI engine: it
-/// must not start the Matrix client or the app UI.
+/// never starts the app UI or a syncing Matrix client (at most a short-lived
+/// read-only client fetches the one notified event).
 @pragma('vm:entry-point')
 Future<void> unifiedPushBackgroundMain() async {
   WidgetsFlutterBinding.ensureInitialized();

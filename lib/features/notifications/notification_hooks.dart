@@ -6,16 +6,20 @@
 import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
+import 'notification_settings_section.dart';
+import 'notifications_host.dart';
 
-/// Wraps the signed-in app (for example to receive pushes handed over from
-/// background isolates while the main isolate is alive).
+/// Wraps the signed-in app: receives pushes handed over from background
+/// isolates while the main isolate is alive, renders rich notifications with
+/// the live client, sends quick replies and clears notifications of rooms
+/// that are opened or read.
 Widget wrapWithNotifications(
   BuildContext context,
   AppHookContext ctx,
   Widget child,
-) => child;
+) => NotificationsHost(app: ctx, child: child);
 
 List<Widget> notificationSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
-) => const [];
+) => [NotificationContentSection(palette: ctx.palette, backend: ctx.backend)];

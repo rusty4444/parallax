@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only decrypted, re-encoded notification previews are exposed, and only
+     to the URIs attached to a posted notification. -->
+<paths>
+    <cache-path
+        name="notification_media"
+        path="notification_media/" />
+</paths>
