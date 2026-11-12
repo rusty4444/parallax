@@ -14,9 +14,16 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+/// Element X ChooseAccountProvider: matrix.org or another provider.
+enum AccountProviderChoice { matrixOrg, other }
+
+const matrixOrgHomeserver = 'https://matrix.org';
+
 class _LoginScreenState extends State<LoginScreen> {
   final _form = GlobalKey<FormState>();
-  final _server = TextEditingController(text: 'https://matrix.org');
+  final _server = TextEditingController(text: matrixOrgHomeserver);
+  final _serverFocus = FocusNode();
+  AccountProviderChoice _choice = AccountProviderChoice.matrixOrg;
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
@@ -107,8 +114,57 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _chooseProvider(AccountProviderChoice choice) {
+    if (_busy || choice == _choice) return;
+    setState(() {
+      _generation++;
+      _choice = choice;
+      _provider = null;
+      _error = null;
+      if (choice == AccountProviderChoice.matrixOrg) {
+        _server.text = matrixOrgHomeserver;
+      } else if (_isMatrixOrg(_server.text)) {
+        _server.clear();
+      }
+    });
+    if (choice == AccountProviderChoice.other) _serverFocus.requestFocus();
+  }
+
+  static bool _isMatrixOrg(String value) {
+    final host = Uri.tryParse(
+      value.contains('://') ? value.trim() : 'https://${value.trim()}',
+    )?.host;
+    return host == 'matrix.org' || host == 'matrix-client.matrix.org';
+  }
+
+  /// Host the user is about to sign in to, for the confirmation line.
+  String? get _providerHost {
+    final value = _server.text.trim();
+    if (value.isEmpty) return null;
+    if (_choice == AccountProviderChoice.matrixOrg) return 'matrix.org';
+    try {
+      return MatrixAuthService.providerUri(value).host;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// A full Matrix ID on another server cannot sign in to matrix.org.
+  String? _providerMismatch() {
+    if (_choice != AccountProviderChoice.matrixOrg) return null;
+    final user = _username.text.trim();
+    if (!user.startsWith('@')) return null;
+    final colon = user.indexOf(':');
+    if (colon < 0) return null;
+    final domain = user.substring(colon + 1).toLowerCase();
+    if (domain == 'matrix.org') return null;
+    return 'This Matrix ID belongs to $domain. Choose Other and enter that '
+        'provider to sign in there.';
+  }
+
   @override
   void dispose() {
+    _serverFocus.dispose();
     _server.dispose();
     _username.dispose();
     _password.dispose();
@@ -117,6 +173,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     if (!_form.currentState!.validate() || _busy) return;
+    final mismatch = _providerMismatch();
+    if (mismatch != null) {
+      setState(() => _error = mismatch);
+      return;
+    }
     final backend = widget.backend;
     final generation = ++_generation;
     setState(() {
@@ -209,10 +270,65 @@ class _LoginScreenState extends State<LoginScreen> {
                                 letterSpacing: 1.8,
                               ),
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Account provider',
+                              style: TextStyle(
+                                color: p.muted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _ProviderTile(
+                              palette: p,
+                              icon: Icons.public_rounded,
+                              title: 'matrix.org',
+                              subtitle:
+                                  'Matrix.org is a large, free server on the '
+                                  'public Matrix network for secure, '
+                                  'decentralised communication, run by the '
+                                  'Matrix.org Foundation.',
+                              selected:
+                                  _choice == AccountProviderChoice.matrixOrg,
+                              onTap: _busy
+                                  ? null
+                                  : () => _chooseProvider(
+                                      AccountProviderChoice.matrixOrg,
+                                    ),
+                            ),
+                            const SizedBox(height: 8),
+                            _ProviderTile(
+                              palette: p,
+                              icon: Icons.dns_outlined,
+                              title: 'Other',
+                              subtitle:
+                                  'Use a different account provider, such as '
+                                  'your own private server or a work account.',
+                              selected: _choice == AccountProviderChoice.other,
+                              onTap: _busy
+                                  ? null
+                                  : () => _chooseProvider(
+                                      AccountProviderChoice.other,
+                                    ),
+                            ),
+                            const SizedBox(height: 18),
+                            if (_providerHost case final host?) ...[
+                              Text(
+                                'You’re about to sign in to $host',
+                                style: TextStyle(
+                                  color: p.foreground,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             TextFormField(
                               controller: _server,
+                              focusNode: _serverFocus,
                               enabled: !_busy,
+                              readOnly:
+                                  _choice == AccountProviderChoice.matrixOrg,
                               onChanged: (_) => setState(() {
                                 _generation++;
                                 _provider = null;
@@ -222,9 +338,19 @@ class _LoginScreenState extends State<LoginScreen> {
                               textInputAction: TextInputAction.next,
                               autocorrect: false,
                               decoration: InputDecoration(
-                                labelText: features
+                                labelText:
+                                    _choice == AccountProviderChoice.matrixOrg
+                                    ? 'Account provider'
+                                    : features
                                     ? 'Homeserver URL or Matrix ID'
                                     : 'Homeserver URL',
+                                helperText:
+                                    _choice == AccountProviderChoice.other
+                                    ? 'If your account is provided by your '
+                                          'company or a community, enter its '
+                                          'address (example: companyname.com).'
+                                    : null,
+                                helperMaxLines: 3,
                                 prefixIcon: const Icon(Icons.dns_outlined),
                               ),
                               validator: (value) {
@@ -363,6 +489,90 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderTile extends StatelessWidget {
+  const _ProviderTile({
+    required this.palette,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+  final AppPalette palette;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = palette;
+    return Semantics(
+      button: true,
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      child: Material(
+        color: selected ? p.raised : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: selected ? p.accent : p.stroke,
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: selected ? p.accent : p.muted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: p.foreground,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: p.muted,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected ? p.accent : p.muted,
+                  size: 20,
+                ),
+              ],
             ),
           ),
         ),

@@ -2244,6 +2244,48 @@ class MatrixBackend extends ChatBackend
     await client.encryption!.keyManager.loadAllKeys();
   }
 
+  /// Unlocks secret storage with [keyOrPassphrase] and proves every stored
+  /// signing/backup secret matches the server's current public keys. Throws
+  /// without writing anything when the credential or identity does not match.
+  Future<void> verifyRecoveryCredential(String keyOrPassphrase) async {
+    if (keyOrPassphrase.trim().isEmpty) {
+      throw ArgumentError('Recovery credential required');
+    }
+    await _verifyExistingCryptoMaterial(_requireClient(), keyOrPassphrase);
+  }
+
+  /// Runs an exclusive encryption-identity operation for the security module
+  /// (key storage, recovery key rotation, identity reset). Sends, sign-in and
+  /// sign-out stay blocked until the SDK work settles, even if the session is
+  /// invalidated meanwhile: SDK bootstrap callbacks use the mutable user ID.
+  /// [action] must re-check `isCurrent` after every await before writing.
+  Future<T> runCryptoMaintenance<T>(
+    Future<T> Function(matrix.Client client, bool Function() isCurrent) action,
+  ) async {
+    if (_cryptoSetupBusy) throw StateError('Encryption setup already running');
+    final client = _requireClient();
+    if (!client.isLogged() || client.encryption == null) {
+      throw StateError('Encryption is unavailable');
+    }
+    if (_verificationRequest != null || _verificationStarting) {
+      throw StateError('Finish verification before changing encryption');
+    }
+    _cryptoSetupBusy = true;
+    final generation = _securityGeneration;
+    bool current() =>
+        !_disposed &&
+        !_loggingOut &&
+        identical(_client, client) &&
+        generation == _securityGeneration &&
+        client.isLogged();
+    try {
+      return await action(client, current);
+    } finally {
+      _cryptoSetupBusy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   @override
   Future<List<VerificationDevice>> ownDevices() async {
     final client = _requireClient();
