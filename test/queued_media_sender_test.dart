@@ -5,6 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' as matrix;
+import 'package:parallax/features/media/image_optimiser.dart';
+import 'package:parallax/features/media/media_preferences.dart';
+import 'package:parallax/features/media/voice_waveform.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/queued_media_sender.dart';
 import 'package:parallax/send_cancellation.dart';
@@ -222,6 +225,224 @@ void main() {
       expect(room.ids, ['stable-txid']);
     },
   );
+
+  Future<void> sendMedia(
+    MediaSelection media, {
+    String? caption,
+    ImagePreparer? prepareImage,
+    bool optimise = true,
+  }) => sendQueuedAttachment(
+    client: client,
+    room: room,
+    media: media,
+    transactionId: 'media-txid',
+    ownerCurrent: () => current,
+    cancellation: cancellation,
+    onProgress: progress.add,
+    caption: caption,
+    uploadOptions: MediaUploadOptions(optimiseImages: optimise),
+    prepareImage: prepareImage,
+  );
+
+  group('voice messages', () {
+    setUp(VoiceMessageRegistry.instance.clear);
+    tearDown(VoiceMessageRegistry.instance.clear);
+
+    test('recorded clips carry MSC3245 markers and the waveform', () async {
+      final bytes = Uint8List.fromList(List.filled(2048, 7));
+      VoiceMessageRegistry.instance.register(
+        bytes,
+        const VoiceMetadata(durationMs: 3200, waveform: [0, 512, 1024]),
+      );
+      await sendMedia(
+        MediaSelection(
+          // The outbox stores its own copy: lookup is by content.
+          bytes: Uint8List.fromList(bytes),
+          name: 'voice-1731400000000.m4a',
+          mimeType: 'audio/mp4',
+          durationMs: 3200,
+        ),
+      );
+      final content = room.contents.single;
+      expect(content['msgtype'], 'm.audio');
+      expect(content['body'], 'Voice message');
+      expect(content['filename'], 'voice-1731400000000.m4a');
+      expect(content['org.matrix.msc3245.voice'], isEmpty);
+      expect(content['org.matrix.msc1767.audio'], {
+        'duration': 3200,
+        'waveform': [0, 512, 1024],
+      });
+      expect((content['info'] as Map)['duration'], 3200);
+    });
+
+    test('a restored recorder clip is still a voice message', () async {
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(512),
+          name: 'voice-1731400000001.m4a',
+          mimeType: 'audio/mp4',
+          durationMs: 800,
+        ),
+      );
+      final content = room.contents.single;
+      expect(content['org.matrix.msc3245.voice'], isEmpty);
+      expect(content['org.matrix.msc1767.audio'], {'duration': 800});
+    });
+
+    test('picked audio files stay ordinary audio', () async {
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(512),
+          name: 'voice-1731400000002.m4a',
+          mimeType: 'audio/mp4',
+        ),
+      );
+      final content = room.contents.single;
+      expect(content.containsKey('org.matrix.msc3245.voice'), isFalse);
+      expect(content['body'], 'voice-1731400000002.m4a');
+    });
+  });
+
+  group('image preparation', () {
+    test('uploads the prepared image, info and a thumbnail', () async {
+      final requests = <ImagePrepareRequest>[];
+      final optimised = Uint8List.fromList(List.filled(300, 1));
+      final thumbnail = Uint8List.fromList(List.filled(40, 2));
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(1000),
+          name: 'holiday.jpeg',
+          mimeType: 'image/jpeg',
+        ),
+        caption: 'Beach day',
+        prepareImage: (request) async {
+          requests.add(request);
+          return PreparedImage(
+            bytes: optimised,
+            mimeType: 'image/jpeg',
+            width: 2048,
+            height: 1536,
+            optimised: true,
+            thumbnail: thumbnail,
+            thumbnailMimeType: 'image/jpeg',
+            thumbnailWidth: 800,
+            thumbnailHeight: 600,
+          );
+        },
+      );
+      expect(requests.single.optimise, isTrue);
+      expect(transport.requests, hasLength(2));
+      expect(transport.bodies.first, thumbnail);
+      expect(transport.requests.first.headers['content-type'], 'image/jpeg');
+      expect(transport.bodies.last, optimised);
+      final content = room.contents.single;
+      expect(content['msgtype'], 'm.image');
+      expect(content['body'], 'Beach day');
+      expect(content['filename'], 'holiday.jpeg');
+      final info = content['info'] as Map;
+      expect(info['w'], 2048);
+      expect(info['h'], 1536);
+      expect(info['size'], 300);
+      expect(info['mimetype'], 'image/jpeg');
+      expect(info['thumbnail_url'], 'mxc://matrix.example/media');
+      expect(info['thumbnail_info'], {
+        'w': 800,
+        'h': 600,
+        'mimetype': 'image/jpeg',
+        'size': 40,
+      });
+      expect(progress.last, 1);
+    });
+
+    test(
+      'optimisation off is passed through and failures send the original',
+      () async {
+        final requests = <ImagePrepareRequest>[];
+        final original = Uint8List.fromList(List.filled(64, 3));
+        await sendMedia(
+          MediaSelection(bytes: original, name: 'a.png', mimeType: 'image/png'),
+          optimise: false,
+          prepareImage: (request) async {
+            requests.add(request);
+            throw const FormatException('corrupt');
+          },
+        );
+        expect(requests.single.optimise, isFalse);
+        expect(transport.requests, hasLength(1));
+        expect(transport.bodies.single, original);
+        final info = room.contents.single['info'] as Map;
+        expect(info.containsKey('thumbnail_url'), isFalse);
+      },
+    );
+
+    test('the upload limit applies to the optimised size', () async {
+      client.config = matrix.MediaConfig(mUploadSize: 500);
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(1000),
+          name: 'big.jpg',
+          mimeType: 'image/jpeg',
+        ),
+        prepareImage: (_) async => PreparedImage(
+          bytes: Uint8List(400),
+          mimeType: 'image/jpeg',
+          width: 2048,
+          height: 1024,
+          optimised: true,
+        ),
+      );
+      expect(transport.bodies.single, hasLength(400));
+      await expectLater(
+        sendMedia(
+          MediaSelection(
+            bytes: Uint8List(1000),
+            name: 'big.jpg',
+            mimeType: 'image/jpeg',
+          ),
+          optimise: false,
+          prepareImage: (_) async => null,
+        ),
+        throwsArgumentError,
+      );
+      expect(transport.requests, hasLength(1));
+    });
+
+    test('GIFs are never re-encoded', () async {
+      var called = false;
+      await sendMedia(
+        MediaSelection(
+          bytes: Uint8List(64),
+          name: 'party.gif',
+          mimeType: 'image/gif',
+        ),
+        prepareImage: (_) async {
+          called = true;
+          return null;
+        },
+      );
+      expect(called, isFalse);
+      expect(room.contents.single['msgtype'], 'm.image');
+    });
+
+    test('a session change during preparation uploads nothing', () async {
+      await expectLater(
+        sendMedia(
+          MediaSelection(
+            bytes: Uint8List(64),
+            name: 'a.jpg',
+            mimeType: 'image/jpeg',
+          ),
+          prepareImage: (_) async {
+            current = false;
+            return null;
+          },
+        ),
+        throwsStateError,
+      );
+      expect(transport.requests, isEmpty);
+      expect(room.ids, isEmpty);
+    });
+  });
 }
 
 class _ManualTimer implements Timer {
@@ -271,6 +492,8 @@ class _AbortingTransport extends http.BaseClient {
 
 class _UploadClient extends http.BaseClient {
   http.BaseRequest? request;
+  final requests = <http.BaseRequest>[];
+  final bodies = <List<int>>[];
   final body = <int>[];
   int status = 200;
   String response = '{"content_uri":"mxc://matrix.example/media"}';
@@ -279,11 +502,13 @@ class _UploadClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     this.request = request;
+    requests.add(request);
     body.clear();
     await for (final chunk in request.finalize()) {
       body.addAll(chunk);
       onChunk?.call();
     }
+    bodies.add(List.of(body));
     onBody?.call();
     return http.StreamedResponse(Stream.value(utf8.encode(response)), status);
   }
@@ -295,6 +520,7 @@ class _Client extends Fake implements matrix.Client {
   bool cryptoAvailable = true;
   int configCalls = 0;
   Completer<matrix.MediaConfig>? configGate;
+  matrix.MediaConfig? config;
   @override
   Uri get homeserver => Uri.parse('https://matrix.example/prefix');
   @override
@@ -311,7 +537,7 @@ class _Client extends Fake implements matrix.Client {
     bool throwOnUpdateFailure = false,
   }) async {
     configCalls++;
-    return configGate?.future ?? matrix.MediaConfig();
+    return configGate?.future ?? config ?? matrix.MediaConfig();
   }
 }
 

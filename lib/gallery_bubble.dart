@@ -36,6 +36,7 @@ class GalleryBubble extends StatelessWidget {
           palette: palette,
           roomId: roomId,
           eventId: entry.id,
+          entry: entry,
           width: width,
           height: height,
         ),
@@ -109,7 +110,7 @@ class GalleryBubble extends StatelessWidget {
             children: [
               if (!mine) ...[
                 Text(
-                  entries.first.sender,
+                  entries.first.senderLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

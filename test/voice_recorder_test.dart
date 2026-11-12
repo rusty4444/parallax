@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parallax/features/media/voice_waveform.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/voice_recorder.dart';
 import 'package:record/record.dart';
@@ -20,6 +21,17 @@ class RecordingPlatform extends RecordPlatform {
   bool failStop = false;
   bool failDispose = false;
   int size = 4;
+  double level = -30;
+  int amplitudeCalls = 0;
+
+  @override
+  Future<bool> isRecording(String recorderId) async => true;
+
+  @override
+  Future<Amplitude> getAmplitude(String recorderId) async {
+    amplitudeCalls++;
+    return Amplitude(current: level, max: 0);
+  }
 
   @override
   Future<void> create(String recorderId) async {
@@ -259,6 +271,27 @@ void main() {
         ]);
       },
     );
+
+    test('stop registers an MSC1767 waveform from sampled levels', () async {
+      VoiceMessageRegistry.instance.clear();
+      final recorder = NativeVoiceRecorder();
+      await recorder.requestPermission();
+      await recorder.start();
+      // Real timers: the recorder samples levels every 100 ms.
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      final media = await recorder.stop();
+      final calls = platform.amplitudeCalls;
+      expect(calls, greaterThan(0));
+      final metadata = VoiceMessageRegistry.instance.lookup(media.bytes)!;
+      expect(metadata.durationMs, media.durationMs);
+      expect(metadata.waveform, isNotEmpty);
+      expect(metadata.waveform.length, lessThanOrEqualTo(maxWaveformPoints));
+      expect(metadata.waveform.every((value) => value == 512), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(platform.amplitudeCalls, calls, reason: 'sampling stopped');
+      await recorder.dispose();
+      VoiceMessageRegistry.instance.clear();
+    });
 
     test(
       'dispose joins a pending start and a pending native stop before deleting files',

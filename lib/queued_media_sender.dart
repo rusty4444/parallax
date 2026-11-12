@@ -6,11 +6,21 @@ import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' as matrix;
 
 import 'encrypted_media.dart';
+import 'features/media/image_optimiser.dart';
+import 'features/media/media_preferences.dart';
+import 'features/media/voice_waveform.dart';
 import 'homeserver_security.dart';
 import 'messaging_features.dart';
 import 'send_cancellation.dart';
 
 /// Uploads only after preparation/encryption, then uses the stable outbox txid.
+///
+/// JPEG/PNG images are prepared in a background isolate first: dimensions,
+/// an 800×600 thumbnail for large images and, when "Optimise image upload
+/// quality" is on ([uploadOptions], default: saved preference), a 2048 px /
+/// quality 80 re-encode. Recorder voice clips gain MSC3245 voice markers and
+/// an MSC1767 waveform. Every upload (thumbnail included) is encrypted before
+/// it leaves the device in an encrypted room.
 Future<void> sendQueuedAttachment({
   required matrix.Client client,
   required matrix.Room room,
@@ -24,6 +34,8 @@ Future<void> sendQueuedAttachment({
   String? threadRootId,
   Duration uploadTimeout = const Duration(minutes: 2),
   Timer Function(Duration, void Function())? createUploadTimer,
+  MediaUploadOptions? uploadOptions,
+  ImagePreparer? prepareImage,
 }) async {
   final encryptedRoom = room.encrypted;
   void check() {
@@ -42,10 +54,51 @@ Future<void> sendQueuedAttachment({
   }
   final maximum = (await client.getConfig()).mUploadSize;
   check();
-  if (maximum != null && maximum > 0 && media.bytes.length > maximum) {
+  final preparable = isPreparableImage(media.mimeType);
+  // Optimised images are checked against the limit after preparation.
+  if (!preparable &&
+      maximum != null &&
+      maximum > 0 &&
+      media.bytes.length > maximum) {
     throw ArgumentError('Attachment exceeds the homeserver upload limit');
   }
-  final file = media.mimeType.startsWith('audio/')
+  PreparedImage? prepared;
+  if (preparable) {
+    final options =
+        uploadOptions ?? await MediaPreferences.shared.resolveUploadOptions();
+    check();
+    try {
+      prepared = await (prepareImage ?? prepareImageForUpload)(
+        ImagePrepareRequest(
+          bytes: media.bytes,
+          mimeType: media.mimeType,
+          optimise: options.optimiseImages,
+        ),
+      );
+    } catch (_) {
+      prepared = null; // Unreadable images are sent unchanged.
+    }
+    check();
+    if (prepared != null &&
+        (prepared.bytes.isEmpty ||
+            prepared.bytes.length > media.bytes.length)) {
+      prepared = null;
+    }
+  }
+  final uploadLength = prepared?.bytes.length ?? media.bytes.length;
+  if (maximum != null && maximum > 0 && uploadLength > maximum) {
+    throw ArgumentError('Attachment exceeds the homeserver upload limit');
+  }
+  final voice = _voiceMetadata(media);
+  final file = prepared != null
+      ? matrix.MatrixImageFile(
+          bytes: prepared.bytes,
+          name: _renamed(media.name, prepared.mimeType),
+          mimeType: prepared.mimeType,
+          width: prepared.width,
+          height: prepared.height,
+        )
+      : media.mimeType.startsWith('audio/')
       ? matrix.MatrixAudioFile(
           bytes: media.bytes,
           name: media.name,
@@ -66,29 +119,83 @@ Future<void> sendQueuedAttachment({
     throw StateError('Attachment homeserver is unavailable');
   }
   final base = homeserver!.toString().replaceFirst(RegExp(r'/+$'), '');
-  final uri = Uri.parse('$base/_matrix/media/v3/upload').replace(
-    queryParameters: {'filename': encrypted == null ? file.name : 'crypt'},
-  );
+  Uri uploadUri(String filename) => Uri.parse(
+    '$base/_matrix/media/v3/upload',
+  ).replace(queryParameters: {'filename': filename});
+  final info = Map<String, dynamic>.of(file.info);
+  final thumbnail = prepared?.thumbnail;
+  if (prepared != null && thumbnail != null) {
+    final thumbMime = prepared.thumbnailMimeType ?? 'image/jpeg';
+    final thumbFile = matrix.MatrixFile(
+      bytes: thumbnail,
+      name: thumbMime == 'image/png' ? 'thumbnail.png' : 'thumbnail.jpg',
+      mimeType: thumbMime,
+    );
+    final thumbEncrypted = encryptedRoom ? await thumbFile.encrypt() : null;
+    check();
+    final thumbMxc = await _uploadContent(
+      client.httpClient,
+      uploadUri(thumbEncrypted == null ? thumbFile.name : 'crypt'),
+      thumbEncrypted?.data ?? thumbFile.bytes,
+      accessToken: accessToken,
+      contentType: thumbEncrypted == null
+          ? thumbMime
+          : 'application/octet-stream',
+      cancellation: cancellation,
+      check: check,
+      onProgress: (fraction) => onProgress(fraction * 0.05),
+      deadline: uploadTimeout,
+      createTimer: createUploadTimer ?? Timer.new,
+    );
+    info['thumbnail_info'] = {
+      'w': prepared.thumbnailWidth,
+      'h': prepared.thumbnailHeight,
+      'mimetype': thumbMime,
+      'size': thumbnail.length,
+    };
+    if (thumbEncrypted == null) {
+      info['thumbnail_url'] = thumbMxc.toString();
+    } else {
+      info['thumbnail_file'] = encryptedFileContent(
+        thumbMxc,
+        thumbMime,
+        thumbEncrypted,
+      );
+    }
+  }
   final mxc = await _uploadContent(
     client.httpClient,
-    uri,
+    uploadUri(encrypted == null ? file.name : 'crypt'),
     bytes,
     accessToken: accessToken,
     contentType: encrypted == null ? file.mimeType : 'application/octet-stream',
     cancellation: cancellation,
     check: check,
-    onProgress: (fraction) => onProgress(fraction * 0.9),
+    onProgress: (fraction) =>
+        onProgress(thumbnail == null ? fraction * 0.9 : 0.05 + fraction * 0.85),
     deadline: uploadTimeout,
     createTimer: createUploadTimer ?? Timer.new,
   );
+  final trimmedCaption = caption?.trim();
   final content = <String, dynamic>{
     'msgtype': file.msgType,
-    'body': caption?.trim().isNotEmpty == true ? caption!.trim() : file.name,
+    'body': trimmedCaption?.isNotEmpty == true
+        ? trimmedCaption
+        : voice != null
+        ? 'Voice message'
+        : file.name,
     'filename': file.name,
-    'info': file.info,
+    'info': info,
     if (encrypted == null) 'url': mxc.toString(),
     if (encrypted != null)
       'file': encryptedFileContent(mxc, file.mimeType, encrypted),
+    if (voice != null) ...{
+      'org.matrix.msc1767.audio': {
+        'duration': voice.durationMs,
+        if (voice.waveform.isNotEmpty) 'waveform': voice.waveform,
+      },
+      'org.matrix.msc3245.voice': <String, dynamic>{},
+    },
   };
   check();
   final eventId = await room.sendEvent(
@@ -100,6 +207,35 @@ Future<void> sendQueuedAttachment({
   check();
   if (eventId == null) throw StateError('Attachment was not acknowledged');
   onProgress(1);
+}
+
+/// Voice metadata for a clip recorded in-app: the waveform registered by the
+/// recorder (matched by content), or duration only for a recorder clip that
+/// was restored from the outbox after a restart. Picked audio files have no
+/// recorder duration and stay ordinary audio.
+VoiceMetadata? _voiceMetadata(MediaSelection media) {
+  if (!media.mimeType.startsWith('audio/')) return null;
+  final registered = VoiceMessageRegistry.instance.lookup(media.bytes);
+  if (registered != null) return registered;
+  final duration = media.durationMs;
+  if (duration != null &&
+      media.mimeType == 'audio/mp4' &&
+      VoiceMessageRegistry.isRecorderName(media.name)) {
+    return VoiceMetadata(durationMs: duration, waveform: const []);
+  }
+  return null;
+}
+
+/// Keeps the base name and fixes the extension after re-encoding.
+String _renamed(String name, String mimeType) {
+  final extension = mimeType == 'image/png' ? 'png' : 'jpg';
+  final dot = name.lastIndexOf('.');
+  final base = dot > 0 ? name.substring(0, dot) : name;
+  final current = dot > 0 ? name.substring(dot + 1).toLowerCase() : '';
+  if (current == extension || (extension == 'jpg' && current == 'jpeg')) {
+    return name;
+  }
+  return '$base.$extension';
 }
 
 Future<Uri> _uploadContent(

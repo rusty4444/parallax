@@ -6,7 +6,13 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
+import 'features/media/media_content.dart';
+import 'features/media/media_features.dart';
 import 'media_viewer.dart';
+
+/// Animated GIF/WebP originals up to this size play in the timeline; larger
+/// ones show their (static) thumbnail.
+const maxTimelineAnimationBytes = 4 * 1024 * 1024;
 
 /// Loads one visible attachment through the SDK, including decryption.
 class MessageImage extends StatefulWidget {
@@ -18,6 +24,8 @@ class MessageImage extends StatefulWidget {
     required this.eventId,
     this.width = 228,
     this.height = 170,
+    this.entry,
+    this.entries,
   });
   final ChatBackend backend;
   final AppPalette palette;
@@ -25,6 +33,12 @@ class MessageImage extends StatefulWidget {
   final String eventId;
   final double width;
   final double height;
+
+  /// Event metadata: enables animated GIF/WebP playback and stickers.
+  final ChatEntry? entry;
+
+  /// Loaded timeline (oldest first) for swiping in the viewer.
+  final List<ChatEntry>? entries;
 
   @override
   State<MessageImage> createState() => _MessageImageState();
@@ -34,12 +48,44 @@ class _MessageImageState extends State<MessageImage> {
   Future<Uint8List?>? _image;
   late BackendSessionOwner _owner = BackendSessionOwner(widget.backend);
   bool _autoLoad = true;
+  bool _animate = false;
+
+  /// Whether this image should load its (bounded) animated original.
+  bool _wantsAnimation(BuildContext context) {
+    final entry = widget.entry;
+    if (entry == null || entry.kind != EntryKind.image) return false;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return false;
+    final info = MediaInfo.fromEntry(entry);
+    final size = info.size;
+    return info.mayBeAnimated &&
+        size != null &&
+        size <= maxTimelineAnimationBytes &&
+        mediaFeaturesOf(widget.backend) != null;
+  }
 
   Future<Uint8List?> _load() async {
     final owner = _owner;
     final roomId = widget.roomId;
     final eventId = widget.eventId;
-    final bytes = await widget.backend.loadImage(roomId, eventId);
+    final features = mediaFeaturesOf(widget.backend);
+    Uint8List? bytes;
+    try {
+      if (_animate && features != null) {
+        bytes = (await features.loadOriginal(
+          roomId,
+          eventId,
+          maxBytes: maxTimelineAnimationBytes,
+        )).bytes;
+      } else if (widget.entry?.kind == EntryKind.sticker && features != null) {
+        bytes = await features.loadPreview(roomId, eventId);
+      } else {
+        bytes = await widget.backend.loadImage(roomId, eventId);
+      }
+    } catch (_) {
+      if (!_animate) rethrow;
+      // Fall back to the static thumbnail if the original is unavailable.
+      bytes = await widget.backend.loadImage(roomId, eventId);
+    }
     if (!mounted ||
         !owner.isCurrent ||
         roomId != widget.roomId ||
@@ -56,6 +102,11 @@ class _MessageImageState extends State<MessageImage> {
     _autoLoad =
         FeatureSettingsScope.maybeOf(context)?.preferences.autoLoadMedia ??
         true;
+    final animate = _wantsAnimation(context);
+    if (animate != _animate) {
+      _animate = animate;
+      _image = null;
+    }
     if (_autoLoad) {
       _image ??= _load();
     } else {
@@ -73,6 +124,7 @@ class _MessageImageState extends State<MessageImage> {
     if (oldWidget.backend != widget.backend ||
         oldWidget.roomId != widget.roomId ||
         oldWidget.eventId != widget.eventId) {
+      _animate = _wantsAnimation(context);
       _image = _autoLoad ? _load() : null;
     }
   }
@@ -95,6 +147,7 @@ class _MessageImageState extends State<MessageImage> {
           backend: widget.backend,
           roomId: widget.roomId,
           eventId: widget.eventId,
+          entries: widget.entries,
         ),
       );
     },
@@ -106,13 +159,14 @@ class _MessageImageState extends State<MessageImage> {
               if (_owner.isCurrent && snapshot.hasData) {
                 return ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(
-                    snapshot.data!,
+                  // Multi-frame GIF/WebP animate; frames are decoded one at a
+                  // time within the bounded size.
+                  child: Image(
+                    image: boundedMemoryImage(snapshot.data!),
                     width: widget.width,
                     height: widget.height,
                     fit: BoxFit.cover,
-                    cacheWidth: (widget.width * 3).round().clamp(1, 1024),
-                    cacheHeight: (widget.height * 3).round().clamp(1, 1024),
+                    gaplessPlayback: true,
                     errorBuilder: (_, _, _) =>
                         _placeholder('Image unavailable'),
                   ),
