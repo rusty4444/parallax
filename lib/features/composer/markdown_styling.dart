@@ -143,6 +143,8 @@ TextSpan buildMarkdownTextSpan(
   return TextSpan(style: style, children: children);
 }
 
+const _monospaceFallback = ['RobotoMono', 'Menlo', 'Courier'];
+
 TextStyle _styleFor(int flags, MarkdownStyleColours colours) {
   final decorations = <TextDecoration>[
     if (flags & (_underline | _link | _composing) != 0)
@@ -162,6 +164,7 @@ TextStyle _styleFor(int flags, MarkdownStyleColours colours) {
     fontWeight: flags & (_bold | _listMarker) != 0 ? FontWeight.w700 : null,
     fontStyle: flags & (_italic | _quote) != 0 ? FontStyle.italic : null,
     fontFamily: flags & _code != 0 ? 'monospace' : null,
+    fontFamilyFallback: flags & _code != 0 ? _monospaceFallback : null,
     backgroundColor: flags & _code != 0 && flags & _marker == 0
         ? colours.codeBackground
         : flags & _spoiler != 0
