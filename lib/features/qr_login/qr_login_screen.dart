@@ -94,11 +94,39 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
   bool _requesting = false;
 
   QrLoginFeatures? get _features => qrLoginFeaturesOf(widget.backend);
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.backend.addListener(_backendChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant QrLoginScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.backend, widget.backend)) {
+      oldWidget.backend.removeListener(_backendChanged);
+      widget.backend.addListener(_backendChanged);
+    }
+  }
 
   @override
   void dispose() {
+    widget.backend.removeListener(_backendChanged);
     _cancellation?.cancel();
     super.dispose();
+  }
+
+  /// However the sign-in ended (even if a late cancel lost the race with
+  /// the session commit), leave this flow once the app is signed in.
+  void _backendChanged() {
+    if (!mounted || _closing) return;
+    if (widget.backend.connection == SessionStatus.ready) {
+      _closing = true;
+      _cancellation?.cancel();
+      Navigator.of(context).pop(true);
+    }
   }
 
   void _reset() {
@@ -194,6 +222,8 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
         setState(() => _stage = _Stage.finishing);
       case QrLoginFinished():
         // pop, not maybePop: PopScope blocks back while signing in.
+        if (_closing) return;
+        _closing = true;
         Navigator.of(context).pop(true);
       case QrLoginFailed(:final error):
         if (cancellation.cancelled) return; // we cancelled ourselves

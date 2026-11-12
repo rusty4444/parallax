@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:parallax/app_theme.dart';
+import 'package:parallax/chat_backend.dart';
 import 'package:parallax/features/qr_login/link_new_device_screen.dart';
 import 'package:parallax/features/qr_login/qr_code_data.dart';
 import 'package:parallax/features/qr_login/qr_grant_flow.dart';
@@ -316,6 +317,33 @@ void main() {
       }
     });
 
+    testWidgets('closes once the app is signed in, however it got there', (
+      tester,
+    ) async {
+      init();
+      final signingIn = _SigningInBackend();
+      debugSetQrLoginFeatures(signingIn, features);
+      _tall(tester);
+      await tester.pumpWidget(
+        _app(
+          _Host(
+            QrLoginScreen(
+              backend: signingIn,
+              palette: _palette,
+              requestCamera: () async => true,
+              scannerBuilder: (context, onScanned) => const SizedBox(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(QrLoginScreen), findsOneWidget);
+      signingIn.signIn();
+      await tester.pumpAndSettle();
+      expect(find.byType(QrLoginScreen), findsNothing);
+      expect(find.text('home'), findsOneWidget);
+    });
+
     testWidgets('an expired session shows the Element X error', (tester) async {
       init();
       _tall(tester);
@@ -550,4 +578,14 @@ class _HostState extends State<_Host> {
   @override
   Widget build(BuildContext context) =>
       const Scaffold(body: Center(child: Text('home')));
+}
+
+class _SigningInBackend extends FakeBackend {
+  SessionStatus _status = SessionStatus.signedOut;
+  @override
+  SessionStatus get connection => _status;
+  void signIn() {
+    _status = SessionStatus.ready;
+    notifyListeners();
+  }
 }
