@@ -77,6 +77,58 @@ class AppPalette {
   final Color bubbleText;
 
   bool get isDark => background.computeLuminance() < 0.4;
+
+  AppPalette copyWith({
+    Color? surface,
+    Color? foreground,
+    Color? muted,
+    Color? bubble,
+    Color? bubbleText,
+  }) => AppPalette(
+    background: background,
+    surface: surface ?? this.surface,
+    raised: raised,
+    foreground: foreground ?? this.foreground,
+    muted: muted ?? this.muted,
+    accent: accent,
+    accentOn: accentOn,
+    secondary: secondary,
+    stroke: stroke,
+    bubble: bubble ?? this.bubble,
+    bubbleText: bubbleText ?? this.bubbleText,
+  );
+
+  // Value equality: derived palettes (per-room bubble colours) must compare
+  // equal across rebuilds so rendered message text stays cached.
+  @override
+  bool operator ==(Object other) =>
+      other is AppPalette &&
+      other.background == background &&
+      other.surface == surface &&
+      other.raised == raised &&
+      other.foreground == foreground &&
+      other.muted == muted &&
+      other.accent == accent &&
+      other.accentOn == accentOn &&
+      other.secondary == secondary &&
+      other.stroke == stroke &&
+      other.bubble == bubble &&
+      other.bubbleText == bubbleText;
+
+  @override
+  int get hashCode => Object.hash(
+    background,
+    surface,
+    raised,
+    foreground,
+    muted,
+    accent,
+    accentOn,
+    secondary,
+    stroke,
+    bubble,
+    bubbleText,
+  );
 }
 
 AppPalette paletteFor(VisualTheme style) => switch (style) {

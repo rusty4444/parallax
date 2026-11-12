@@ -6,6 +6,8 @@ import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'message_image.dart';
 import 'timeline/double_tap_react.dart';
+import 'timeline/reaction_pills.dart';
+import 'features/appearance/bubble_colours.dart';
 
 class GalleryBubble extends StatelessWidget {
   const GalleryBubble({
@@ -93,72 +95,81 @@ class GalleryBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final mine = entries.first.mine;
     final width = math.min(320.0, MediaQuery.sizeOf(context).width * 0.84);
+    // The room's bubble colours apply inside the bubble.
+    final outer = this.palette;
+    final palette = bubblePaletteOf(context, outer);
+    final pills = [
+      for (var i = 0; i < entries.length; i++)
+        for (final reaction in entries[i].reactions)
+          ReactionPill(
+            key: ValueKey('reaction-${entries[i].id}-${reaction.emoji}'),
+            palette: outer,
+            mine: reaction.mine,
+            tooltip: reaction.mine
+                ? 'Remove your ${reaction.emoji} reaction on photo ${i + 1}'
+                : 'React with ${reaction.emoji} on photo ${i + 1}',
+            label: Text('${i + 1}: ${reaction.emoji} ${reaction.count}'),
+            onTap: () => onReaction(entries[i], reaction.emoji),
+          ),
+    ];
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.only(top: 14),
-        child: Container(
-          width: width,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: mine ? palette.bubble : palette.surface,
-            borderRadius: BorderRadius.circular(19),
-            border: mine ? null : Border.all(color: palette.stroke),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!mine) ...[
-                Text(
-                  entries.first.senderLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: palette.secondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 7),
-              ],
-              LayoutBuilder(
-                builder: (_, constraints) => _layout(constraints.maxWidth),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: mine
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: width,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: mine ? palette.bubble : palette.surface,
+                borderRadius: BorderRadius.circular(19),
+                border: mine ? null : Border.all(color: palette.stroke),
               ),
-              for (var i = 0; i < entries.length; i++)
-                if (entries[i].reactions.isNotEmpty)
-                  Wrap(
-                    spacing: 5,
-                    children: [
-                      for (final reaction in entries[i].reactions)
-                        ActionChip(
-                          tooltip: reaction.mine
-                              ? 'Remove your ${reaction.emoji} reaction on photo ${i + 1}'
-                              : 'React with ${reaction.emoji} on photo ${i + 1}',
-                          label: Text(
-                            '${i + 1}: ${reaction.emoji} ${reaction.count}',
-                          ),
-                          onPressed: () =>
-                              onReaction(entries[i], reaction.emoji),
-                        ),
-                    ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!mine) ...[
+                    Text(
+                      entries.first.senderLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: palette.secondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                  ],
+                  LayoutBuilder(
+                    builder: (_, constraints) => _layout(constraints.maxWidth),
                   ),
-              const SizedBox(height: 5),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  TimeOfDay.fromDateTime(
-                    entries.last.time.toLocal(),
-                  ).format(context),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: mine
-                        ? palette.bubbleText.withValues(alpha: 0.77)
-                        : palette.muted,
+                  const SizedBox(height: 5),
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Text(
+                      TimeOfDay.fromDateTime(
+                        entries.last.time.toLocal(),
+                      ).format(context),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: mine
+                            ? palette.bubbleText.withValues(alpha: 0.77)
+                            : palette.muted,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
+            ),
+            if (pills.isNotEmpty)
+              BubbleReactions(mine: mine, maxWidth: width, pills: pills),
+          ],
         ),
       ),
     );

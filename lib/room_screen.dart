@@ -27,6 +27,8 @@ import 'widgets.dart';
 import 'features/composer/edit_markdown.dart';
 import 'haptics.dart';
 import 'timeline/double_tap_react.dart';
+import 'features/appearance/bubble_colours.dart';
+import 'features/appearance/bubble_colours_screen.dart';
 
 class RoomScreen extends StatelessWidget {
   const RoomScreen({
@@ -36,12 +38,16 @@ class RoomScreen extends StatelessWidget {
     required this.roomId,
     this.backgroundStore,
     this.draftStore,
+    this.bubbleColourStore,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final String roomId;
   final RoomBackgroundStore? backgroundStore;
   final MessageDraftStore? draftStore;
+
+  /// Per-room bubble colours (defaults to the shared store).
+  final RoomBubbleColourStore? bubbleColourStore;
 
   @override
   Widget build(BuildContext context) => _OwnedRoomScreen(
@@ -56,6 +62,7 @@ class RoomScreen extends StatelessWidget {
     roomId: roomId,
     backgroundStore: backgroundStore,
     draftStore: draftStore,
+    bubbleColourStore: bubbleColourStore,
   );
 }
 
@@ -69,12 +76,16 @@ class _OwnedRoomScreen extends StatefulWidget {
     required this.roomId,
     this.backgroundStore,
     this.draftStore,
+    this.bubbleColourStore,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final String roomId;
   final RoomBackgroundStore? backgroundStore;
   final MessageDraftStore? draftStore;
+
+  /// Per-room bubble colours (defaults to the shared store).
+  final RoomBubbleColourStore? bubbleColourStore;
 
   @override
   State<_OwnedRoomScreen> createState() => _RoomScreenState();
@@ -110,6 +121,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   ChatEntry? _replyingTo;
   ChatEntry? _editing;
   late final _backgroundStore = widget.backgroundStore ?? RoomBackgroundStore();
+  late final _bubbleStore =
+      widget.bubbleColourStore ?? RoomBubbleColourStore.shared;
+  late BubbleColours _bubbleColours =
+      _bubbleStore.cached(widget.roomId) ?? BubbleColours.none;
   File? _background;
   int _backgroundVersion = 0;
   bool _backgroundBusy = false;
@@ -122,6 +137,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     WidgetsBinding.instance.addObserver(this);
     _draft.addListener(_draftChanged);
     _loadBackground();
+    _bubbleStore.addListener(_bubbleColoursChanged);
+    unawaited(
+      _bubbleStore.load(widget.roomId).then((_) => _bubbleColoursChanged()),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _owner.isCurrent) unawaited(_open());
     });
@@ -328,6 +347,24 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     _stopTyping();
   }
 
+  void _bubbleColoursChanged() {
+    final colours = _bubbleStore.cached(widget.roomId);
+    if (!mounted || colours == null || colours == _bubbleColours) return;
+    setState(() => _bubbleColours = colours);
+  }
+
+  Future<void> _openBubbleColours(String roomName) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BubbleColoursScreen(
+            roomId: widget.roomId,
+            roomName: roomName,
+            palette: widget.palette,
+            store: _bubbleStore,
+          ),
+        ),
+      );
+
   Future<void> _loadBackground() async {
     try {
       final file = await _backgroundStore.fileFor(widget.roomId);
@@ -398,6 +435,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _bubbleStore.removeListener(_bubbleColoursChanged);
     _draftTimer?.cancel();
     unawaited(_flushClosingDraft());
     _draftOwner?.release();
@@ -1050,420 +1088,434 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
             ? widget.backend.messages
             : const <ChatEntry>[];
         final roomCtx = _roomContext(room);
-        return Scaffold(
-          body: GlowBackdrop(
-            palette: p,
-            imageLayer: _background == null
-                ? null
-                : Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.file(
-                        _background!,
-                        key: ValueKey(_backgroundVersion),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            ColoredBox(color: p.background),
-                      ),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              p.background.withValues(alpha: 0.94),
-                              p.background.withValues(alpha: 0.73),
-                              p.background.withValues(alpha: 0.58),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: p.surface.withValues(
-                        alpha: _background == null ? 0.9 : 0.4,
-                      ),
-                      border: Border(bottom: BorderSide(color: p.stroke)),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: 'Back to rooms',
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.arrow_back_rounded),
-                        ),
-                        if (room == null)
-                          InitialAvatar(
-                            name: widget.roomId,
-                            palette: p,
-                            size: 42,
-                          )
-                        else
-                          RoomAvatar(
-                            room: room,
-                            backend: widget.backend,
-                            palette: p,
-                            size: 42,
-                          ),
-                        const SizedBox(width: 11),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                room?.name ?? widget.roomId,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  color: p.foreground,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  Icon(
-                                    room?.encrypted == true
-                                        ? Icons.lock_outline
-                                        : Icons.lock_open_outlined,
-                                    size: 13,
-                                    color: p.secondary,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      room?.encrypted == true
-                                          ? 'Encrypted room'
-                                          : 'Encryption not enabled',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: p.muted,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        ...roomHeaderActionsFor(context, roomCtx),
-                        IconButton(
-                          tooltip: 'Room details',
-                          icon: Icon(
-                            Icons.info_outline_rounded,
-                            color: p.secondary,
-                          ),
-                          onPressed: _opening || _error != null
-                              ? null
-                              : () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => RoomDetailsScreen(
-                                        backend: widget.backend,
-                                        palette: widget.palette,
-                                        roomId: widget.roomId,
-                                      ),
-                                    ),
-                                  );
-                                },
-                        ),
-                        PopupMenuButton<String>(
-                          tooltip: 'Room background',
-                          enabled: !_backgroundBusy,
-                          icon: Icon(
-                            Icons.wallpaper_outlined,
-                            color: p.secondary,
-                          ),
-                          onSelected: (value) {
-                            if (value == 'choose') {
-                              _chooseBackground();
-                            } else {
-                              _clearBackground();
-                            }
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                              value: 'choose',
-                              child: Text('Choose background'),
-                            ),
-                            if (_background != null)
-                              const PopupMenuItem(
-                                value: 'clear',
-                                child: Text('Remove background'),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  ...roomBannersFor(context, roomCtx),
-                  Expanded(
-                    child: Stack(
+        // Per-room bubble colours (header menu → Bubble colours).
+        return BubbleColoursScope(
+          colours: _bubbleColours,
+          child: Scaffold(
+            body: GlowBackdrop(
+              palette: p,
+              imageLayer: _background == null
+                  ? null
+                  : Stack(
                       fit: StackFit.expand,
                       children: [
-                        _opening
-                            ? Center(
-                                child: CircularProgressIndicator(
-                                  color: p.accent,
-                                ),
-                              )
-                            : _error != null
-                            ? Center(
-                                child: Text(
-                                  _error!,
-                                  style: TextStyle(color: p.foreground),
-                                ),
-                              )
-                            : entries.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    BrandMark(palette: p, size: 53),
-                                    const SizedBox(height: 18),
-                                    Text(
-                                      'Start something good.',
-                                      style: TextStyle(
-                                        color: p.foreground,
-                                        fontSize: 21,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Messages in this room will appear here.',
-                                      style: TextStyle(color: p.muted),
-                                    ),
-                                    if (widget.backend.canLoadOlder) ...[
-                                      const SizedBox(height: 14),
-                                      TextButton(
-                                        onPressed: widget.backend.loadingHistory
-                                            ? null
-                                            : _loadOlder,
-                                        child: const Text(
-                                          'Load earlier messages',
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              )
-                            : TimelineView(
-                                backend: widget.backend,
-                                roomId: widget.roomId,
-                                palette: p,
-                                entries: entries,
-                                compact: compact,
-                                room: room,
-                                onHeart: _heart,
-                                onAction: _showActions,
-                                onReaction: _react,
-                                onLoadOlder: _loadOlder,
-                              ),
-                        // Chat effects and other full-screen overlays.
-                        ...roomOverlaysFor(context, roomCtx),
+                        Image.file(
+                          _background!,
+                          key: ValueKey(_backgroundVersion),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              ColoredBox(color: p.background),
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                p.background.withValues(alpha: 0.94),
+                                p.background.withValues(alpha: 0.73),
+                                p.background.withValues(alpha: 0.58),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  if (_features != null) _pendingPanel(p),
-                  if (_draftReadFailed)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: p.surface.withValues(
+                          alpha: _background == null ? 0.9 : 0.4,
+                        ),
+                        border: Border(bottom: BorderSide(color: p.stroke)),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                       child: Row(
                         children: [
-                          const Expanded(
-                            child: Text(
-                              'Saved draft unavailable. Not overwriting storage.',
+                          IconButton(
+                            tooltip: 'Back to rooms',
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.arrow_back_rounded),
+                          ),
+                          if (room == null)
+                            InitialAvatar(
+                              name: widget.roomId,
+                              palette: p,
+                              size: 42,
+                            )
+                          else
+                            RoomAvatar(
+                              room: room,
+                              backend: widget.backend,
+                              palette: p,
+                              size: 42,
+                            ),
+                          const SizedBox(width: 11),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  room?.name ?? widget.roomId,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    color: p.foreground,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      room?.encrypted == true
+                                          ? Icons.lock_outline
+                                          : Icons.lock_open_outlined,
+                                      size: 13,
+                                      color: p.secondary,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        room?.encrypted == true
+                                            ? 'Encrypted room'
+                                            : 'Encryption not enabled',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: p.muted,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          TextButton(
-                            onPressed: _loadDraft,
-                            child: const Text('Retry draft'),
+                          ...roomHeaderActionsFor(context, roomCtx),
+                          IconButton(
+                            tooltip: 'Room details',
+                            icon: Icon(
+                              Icons.info_outline_rounded,
+                              color: p.secondary,
+                            ),
+                            onPressed: _opening || _error != null
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => RoomDetailsScreen(
+                                          backend: widget.backend,
+                                          palette: widget.palette,
+                                          roomId: widget.roomId,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Room background',
+                            enabled: !_backgroundBusy,
+                            icon: Icon(
+                              Icons.wallpaper_outlined,
+                              color: p.secondary,
+                            ),
+                            onSelected: (value) {
+                              if (value == 'bubbles') {
+                                unawaited(
+                                  _openBubbleColours(room?.name ?? 'this room'),
+                                );
+                              } else if (value == 'choose') {
+                                _chooseBackground();
+                              } else {
+                                _clearBackground();
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'bubbles',
+                                child: Text('Bubble colours…'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'choose',
+                                child: Text('Choose background'),
+                              ),
+                              if (_background != null)
+                                const PopupMenuItem(
+                                  value: 'clear',
+                                  child: Text('Remove background'),
+                                ),
+                            ],
                           ),
                         ],
                       ),
                     ),
-                  if (widget.backend.typingUsers.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 5, 18, 5),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '${widget.backend.typingUsers.take(2).join(', ')} typing…',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: p.secondary, fontSize: 12),
+                    ...roomBannersFor(context, roomCtx),
+                    Expanded(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _opening
+                              ? Center(
+                                  child: CircularProgressIndicator(
+                                    color: p.accent,
+                                  ),
+                                )
+                              : _error != null
+                              ? Center(
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(color: p.foreground),
+                                  ),
+                                )
+                              : entries.isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      BrandMark(palette: p, size: 53),
+                                      const SizedBox(height: 18),
+                                      Text(
+                                        'Start something good.',
+                                        style: TextStyle(
+                                          color: p.foreground,
+                                          fontSize: 21,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Messages in this room will appear here.',
+                                        style: TextStyle(color: p.muted),
+                                      ),
+                                      if (widget.backend.canLoadOlder) ...[
+                                        const SizedBox(height: 14),
+                                        TextButton(
+                                          onPressed:
+                                              widget.backend.loadingHistory
+                                              ? null
+                                              : _loadOlder,
+                                          child: const Text(
+                                            'Load earlier messages',
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                )
+                              : TimelineView(
+                                  backend: widget.backend,
+                                  roomId: widget.roomId,
+                                  palette: p,
+                                  entries: entries,
+                                  compact: compact,
+                                  room: room,
+                                  onHeart: _heart,
+                                  onAction: _showActions,
+                                  onReaction: _react,
+                                  onLoadOlder: _loadOlder,
+                                ),
+                          // Chat effects and other full-screen overlays.
+                          ...roomOverlaysFor(context, roomCtx),
+                        ],
+                      ),
+                    ),
+                    if (_features != null) _pendingPanel(p),
+                    if (_draftReadFailed)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Saved draft unavailable. Not overwriting storage.',
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _loadDraft,
+                              child: const Text('Retry draft'),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  if (_replyingTo != null || _editing != null)
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
-                      decoration: BoxDecoration(
-                        color: p.surface,
-                        border: Border(top: BorderSide(color: p.stroke)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _editing == null
-                                ? Icons.reply_rounded
-                                : Icons.edit_outlined,
-                            color: p.secondary,
+                    if (widget.backend.typingUsers.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 5, 18, 5),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '${widget.backend.typingUsers.take(2).join(', ')} typing…',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: p.secondary, fontSize: 12),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
+                        ),
+                      ),
+                    if (_replyingTo != null || _editing != null)
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
+                        decoration: BoxDecoration(
+                          color: p.surface,
+                          border: Border(top: BorderSide(color: p.stroke)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
                               _editing == null
-                                  ? 'Replying to ${_replyingTo!.sender}: ${_replyingTo!.body}'
-                                  : 'Editing: ${_editing!.body}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: p.foreground),
+                                  ? Icons.reply_rounded
+                                  : Icons.edit_outlined,
+                              color: p.secondary,
                             ),
-                          ),
-                          IconButton(
-                            tooltip: 'Cancel reply or edit',
-                            onPressed: _cancelComposerContext,
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_features != null) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed:
-                            _sending ||
-                                widget.backend.sending ||
-                                _editing != null
-                            ? null
-                            : () => pickAndSendImages(
-                                context,
-                                widget.backend,
-                                widget.roomId,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _editing == null
+                                    ? 'Replying to ${_replyingTo!.sender}: ${_replyingTo!.body}'
+                                    : 'Editing: ${_editing!.body}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: p.foreground),
                               ),
-                        icon: const Icon(Icons.photo_library_outlined),
-                        label: const Text('Send a photo gallery'),
-                      ),
-                    ),
-                    RichMessageComposer(
-                      extraAttachments: composerAttachmentsFor(
-                        context,
-                        roomCtx,
-                      ),
-                      mentionSource: richTimelineMentionSource(roomCtx),
-                      hookContext: roomCtx,
-                      replyToId: _replyingTo?.id,
-                      editing: _editing != null,
-                      controller: _draft,
-                      sendContext: _sendContext,
-                      onAcknowledged: (textCleared) =>
-                          _acknowledgeComposer(composerContext, textCleared),
-                      sending:
-                          _sending ||
-                          widget.backend.sending ||
-                          !_owner.isCurrent,
-                      onChanged: _onDraftChanged,
-                      onSend: _sendContent,
-                      // The ✕ only appears while there is a reply or edit
-                      // to cancel; the banner above has its own too.
-                      onCancel: _replyingTo != null || _editing != null
-                          ? _cancelComposerContext
-                          : null,
-                    ),
-                  ] else
-                    Container(
-                      decoration: BoxDecoration(
-                        color: p.surface,
-                        border: Border(top: BorderSide(color: p.stroke)),
-                      ),
-                      padding: EdgeInsets.fromLTRB(
-                        14,
-                        12,
-                        14,
-                        12 + MediaQuery.paddingOf(context).bottom * 0.25,
-                      ),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            tooltip: 'Attach file',
-                            onPressed: widget.backend.sending
-                                ? null
-                                : () => pickAndSendAttachment(
-                                    context,
-                                    widget.backend,
-                                    widget.roomId,
-                                  ),
-                            icon: Icon(
-                              Icons.attach_file_rounded,
-                              color: p.secondary,
                             ),
-                          ),
-                          IconButton(
-                            tooltip: 'Attach photos',
-                            onPressed: widget.backend.sending
-                                ? null
-                                : () => pickAndSendImages(
-                                    context,
-                                    widget.backend,
-                                    widget.roomId,
-                                  ),
-                            icon: Icon(
-                              Icons.add_photo_alternate_outlined,
-                              color: p.secondary,
+                            IconButton(
+                              tooltip: 'Cancel reply or edit',
+                              onPressed: _cancelComposerContext,
+                              icon: const Icon(Icons.close_rounded),
                             ),
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _draft,
-                              onChanged: _onDraftChanged,
-                              minLines: 1,
-                              maxLines: 5,
-                              textCapitalization: TextCapitalization.sentences,
-                              keyboardType: TextInputType.multiline,
-                              onSubmitted: (_) => _send(),
-                              decoration: const InputDecoration(
-                                hintText: 'Write a message…',
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 13,
+                          ],
+                        ),
+                      ),
+                    if (_features != null) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed:
+                              _sending ||
+                                  widget.backend.sending ||
+                                  _editing != null
+                              ? null
+                              : () => pickAndSendImages(
+                                  context,
+                                  widget.backend,
+                                  widget.roomId,
+                                ),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Send a photo gallery'),
+                        ),
+                      ),
+                      RichMessageComposer(
+                        extraAttachments: composerAttachmentsFor(
+                          context,
+                          roomCtx,
+                        ),
+                        mentionSource: richTimelineMentionSource(roomCtx),
+                        hookContext: roomCtx,
+                        replyToId: _replyingTo?.id,
+                        editing: _editing != null,
+                        controller: _draft,
+                        sendContext: _sendContext,
+                        onAcknowledged: (textCleared) =>
+                            _acknowledgeComposer(composerContext, textCleared),
+                        sending:
+                            _sending ||
+                            widget.backend.sending ||
+                            !_owner.isCurrent,
+                        onChanged: _onDraftChanged,
+                        onSend: _sendContent,
+                        // The ✕ only appears while there is a reply or edit
+                        // to cancel; the banner above has its own too.
+                        onCancel: _replyingTo != null || _editing != null
+                            ? _cancelComposerContext
+                            : null,
+                      ),
+                    ] else
+                      Container(
+                        decoration: BoxDecoration(
+                          color: p.surface,
+                          border: Border(top: BorderSide(color: p.stroke)),
+                        ),
+                        padding: EdgeInsets.fromLTRB(
+                          14,
+                          12,
+                          14,
+                          12 + MediaQuery.paddingOf(context).bottom * 0.25,
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              tooltip: 'Attach file',
+                              onPressed: widget.backend.sending
+                                  ? null
+                                  : () => pickAndSendAttachment(
+                                      context,
+                                      widget.backend,
+                                      widget.roomId,
+                                    ),
+                              icon: Icon(
+                                Icons.attach_file_rounded,
+                                color: p.secondary,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Attach photos',
+                              onPressed: widget.backend.sending
+                                  ? null
+                                  : () => pickAndSendImages(
+                                      context,
+                                      widget.backend,
+                                      widget.roomId,
+                                    ),
+                              icon: Icon(
+                                Icons.add_photo_alternate_outlined,
+                                color: p.secondary,
+                              ),
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: _draft,
+                                onChanged: _onDraftChanged,
+                                minLines: 1,
+                                maxLines: 5,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                keyboardType: TextInputType.multiline,
+                                onSubmitted: (_) => _send(),
+                                decoration: const InputDecoration(
+                                  hintText: 'Write a message…',
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 13,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 9),
-                          IconButton.filled(
-                            tooltip: 'Send message',
-                            style: IconButton.styleFrom(
-                              backgroundColor: p.accent,
-                              foregroundColor: p.accentOn,
-                              minimumSize: const Size(48, 48),
+                            const SizedBox(width: 9),
+                            IconButton.filled(
+                              tooltip: 'Send message',
+                              style: IconButton.styleFrom(
+                                backgroundColor: p.accent,
+                                foregroundColor: p.accentOn,
+                                minimumSize: const Size(48, 48),
+                              ),
+                              onPressed: widget.backend.sending ? null : _send,
+                              icon: widget.backend.sending
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: p.accentOn,
+                                      ),
+                                    )
+                                  : const Icon(Icons.arrow_upward_rounded),
                             ),
-                            onPressed: widget.backend.sending ? null : _send,
-                            icon: widget.backend.sending
-                                ? SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: p.accentOn,
-                                    ),
-                                  )
-                                : const Icon(Icons.arrow_upward_rounded),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -14,8 +14,9 @@ import '../hooks/registry.dart';
 import '../media_viewer.dart';
 import '../message_image.dart';
 import '../room_avatar.dart';
-import '../haptics.dart';
 import 'double_tap_react.dart';
+import 'reaction_pills.dart';
+import '../features/appearance/bubble_colours.dart';
 
 /// Width of the sender-avatar column beside others' messages.
 const senderAvatarSize = 32.0;
@@ -72,29 +73,31 @@ class MessageBubble extends StatelessWidget {
   final bool sent;
   final VoidCallback? onReceipts;
 
-  EntryHookContext get _hook => EntryHookContext(
-    backend: backend,
-    roomId: roomId,
-    palette: palette,
-    entry: entry,
-    room: room,
-    entries: entries,
-  );
-
   @override
   Widget build(BuildContext context) {
+    // Inside the bubble the room's bubble colours apply; the avatar, read
+    // receipts and reactions outside it keep the theme ([outer]).
+    final outer = this.palette;
     if (entry.kind == EntryKind.state) {
       return StateEventLine(
         entry: entry,
-        palette: palette,
+        palette: outer,
         backend: backend,
         roomId: roomId,
       );
     }
+    final palette = bubblePaletteOf(context, outer);
     final mine = entry.mine;
     final compact =
         FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
-    final hook = _hook;
+    final hook = EntryHookContext(
+      backend: backend,
+      roomId: roomId,
+      palette: palette,
+      entry: entry,
+      room: room,
+      entries: entries,
+    );
     final special = entryBodyFor(context, hook);
     final footers = entryFootersFor(context, hook);
     final textColor = mine ? palette.bubbleText : palette.foreground;
@@ -241,51 +244,6 @@ class MessageBubble extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (entry.reactions.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 5,
-                              runSpacing: 3,
-                              children: [
-                                for (final reaction in entry.reactions)
-                                  GestureDetector(
-                                    // Element X: long-press a reaction to see who reacted.
-                                    onLongPress: () {
-                                      Haptics.longPress();
-                                      showReactionSummaryForEntry(
-                                        context,
-                                        hook,
-                                        emoji: reaction.emoji,
-                                      );
-                                    },
-                                    child: ActionChip(
-                                      tooltip: reaction.mine
-                                          ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
-                                          : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
-                                      // Custom emoji reactions (MSC4027) show the
-                                      // pack image; others keep the emoji text.
-                                      label:
-                                          customReactionChipLabel(
-                                            backend: backend,
-                                            roomId: roomId,
-                                            reactionKey: reaction.emoji,
-                                            count: reaction.count,
-                                          ) ??
-                                          Text(
-                                            '${reaction.emoji} ${reaction.count}',
-                                          ),
-                                      backgroundColor: reaction.mine
-                                          ? palette.accent.withValues(
-                                              alpha: 0.25,
-                                            )
-                                          : palette.background,
-                                      onPressed: () =>
-                                          onReaction(reaction.emoji),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
                           ...footers,
                           const SizedBox(height: 4),
                           Align(
@@ -313,6 +271,51 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           );
+    // Reactions hang on the bubble's bottom edge (Messenger), outside the
+    // double-tap area so tapping a reaction toggles it at once.
+    final reactions = entry.reactions.isEmpty || standalone != null
+        ? null
+        : BubbleReactions(
+            mine: mine,
+            maxWidth: maxWidth,
+            pills: [
+              for (final reaction in entry.reactions)
+                ReactionPill(
+                  key: ValueKey('reaction-${entry.id}-${reaction.emoji}'),
+                  palette: outer,
+                  mine: reaction.mine,
+                  tooltip: reaction.mine
+                      ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
+                      : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
+                  // Custom emoji reactions (MSC4027) show the pack image;
+                  // others keep the emoji text.
+                  label:
+                      customReactionChipLabel(
+                        backend: backend,
+                        roomId: roomId,
+                        reactionKey: reaction.emoji,
+                        count: reaction.count,
+                      ) ??
+                      Text('${reaction.emoji} ${reaction.count}'),
+                  onTap: () => onReaction(reaction.emoji),
+                  // Element X: long-press a reaction to see who reacted.
+                  onLongPress: () => showReactionSummaryForEntry(
+                    context,
+                    hook,
+                    emoji: reaction.emoji,
+                  ),
+                ),
+            ],
+          );
+    final reacted = reactions == null
+        ? bubble
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: mine
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [bubble, reactions],
+          );
     final row = avatars
         ? Row(
             mainAxisSize: MainAxisSize.min,
@@ -327,7 +330,7 @@ class MessageBubble extends StatelessWidget {
                         onTap: () => openUserProfile(
                           context,
                           backend,
-                          palette,
+                          outer,
                           entry.sender,
                           roomId: roomId,
                         ),
@@ -336,17 +339,17 @@ class MessageBubble extends StatelessWidget {
                           name: entry.senderLabel,
                           url: entry.senderAvatar,
                           backend: backend,
-                          palette: palette,
+                          palette: outer,
                           size: senderAvatarSize,
                         ),
                       )
                     : null,
               ),
               const SizedBox(width: _avatarGap),
-              Flexible(child: bubble),
+              Flexible(child: reacted),
             ],
           )
-        : bubble;
+        : reacted;
     return Padding(
       padding: EdgeInsets.only(top: group ? 3 : (compact ? 7 : 14)),
       child: Column(
@@ -360,7 +363,7 @@ class MessageBubble extends StatelessWidget {
             ReadReceiptsRow(
               readers: receipts,
               backend: backend,
-              palette: palette,
+              palette: outer,
               sent: sent,
               onTap: onReceipts ?? () {},
             ),

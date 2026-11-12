@@ -21,7 +21,7 @@ Parallax covers the features Element X Android v26.11.0 turns on by default, plu
 - **Notifications and links:** notifications on by default with no opt-in, through UnifiedPush when a distributor such as ntfy is installed or Parallax's own background connection otherwise (no Google needed), optional Firebase delivery, and global notification settings. Share into Parallax from other apps, and open matrix.to or `matrix:` links in Parallax.
 - **Search:** an on-device search index of your encrypted history alongside server search.
 - **Account and settings:** profile, sessions, blocked users, account management, sign out (warns if key backup isn't on) and account deactivation.
-- **Parallax extras:** room backgrounds, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.
+- **Parallax extras:** room backgrounds, per-room bubble colours (yours and theirs, with automatic or custom text colour), Messenger-style reactions on the bubble's bottom edge, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.
 
 Ideas from other messaging apps for after parity are in [docs/feature-ideas.md](docs/feature-ideas.md).
 
