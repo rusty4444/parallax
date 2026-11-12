@@ -122,12 +122,13 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   String _query = '';
+  bool _searchOpen = false;
   Set<RoomListFilter> _filters = const {};
   String? _spaceId;
   String? _folderId;
   bool _openingNote = false;
 
-  /// Home options menu (search, filters, Spaces, folders) is open.
+  /// Home options menu (Explore rooms, filters, Spaces, folders) is open.
   bool _optionsOpen = false;
   final _search = TextEditingController();
   String? _pendingRoomAction;
@@ -760,6 +761,18 @@ class _InboxScreenState extends State<InboxScreen> {
       if (_filters.contains(filter)) filter.label,
   ];
 
+  void _toggleConversationSearch() {
+    Haptics.selection();
+    setState(() {
+      _searchOpen = !_searchOpen;
+      if (!_searchOpen) {
+        // Never leave an invisible query narrowing the room list.
+        _search.clear();
+        _query = '';
+      }
+    });
+  }
+
   void _clearNarrowing() {
     Haptics.selection();
     _search.clear();
@@ -967,7 +980,28 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
           ),
         );
+        final conversationSearch = TextField(
+          key: const ValueKey('home.conversation_search'),
+          controller: _search,
+          autofocus: true,
+          onChanged: (value) => setState(() => _query = value),
+          decoration: InputDecoration(
+            hintText: 'Find a conversation',
+            prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: IconButton(
+              tooltip: 'Search messages',
+              onPressed: _searchMessages,
+              icon: const Icon(Icons.manage_search_rounded),
+            ),
+          ),
+        );
         final quickLinks = <Widget>[
+          TextButton.icon(
+            key: const ValueKey('home.explore_rooms'),
+            onPressed: _explore,
+            icon: const Icon(Icons.travel_explore_rounded),
+            label: const Text('Explore rooms'),
+          ),
           if (_features != null) ...[
             TextButton.icon(
               onPressed: _findPeople,
@@ -981,22 +1015,10 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
           ],
         ];
-        // Search, quick links, Space switcher, folders and filters: always
-        // shown with "Show all home options", otherwise in the options menu.
+        // Quick links, Space switcher, folders and filters: always shown with
+        // "Show all home options", otherwise in the options menu. Conversation
+        // search pops in independently from its top-bar button.
         final options = <Widget>[
-          TextField(
-            controller: _search,
-            onChanged: (value) => setState(() => _query = value),
-            decoration: InputDecoration(
-              hintText: 'Find a conversation',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: IconButton(
-                tooltip: 'Search messages',
-                onPressed: _searchMessages,
-                icon: const Icon(Icons.manage_search_rounded),
-              ),
-            ),
-          ),
           if (expandedHome) ...[
             if (quickLinks.isNotEmpty) Wrap(spacing: 12, children: quickLinks),
           ] else
@@ -1115,9 +1137,20 @@ class _InboxScreenState extends State<InboxScreen> {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Explore public rooms',
-                          onPressed: _explore,
-                          icon: const Icon(Icons.travel_explore_rounded),
+                          key: const ValueKey('home.search_toggle'),
+                          tooltip: _searchOpen
+                              ? 'Hide conversation search'
+                              : 'Search conversations',
+                          onPressed: _toggleConversationSearch,
+                          icon: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: Icon(
+                              _searchOpen
+                                  ? Icons.close_rounded
+                                  : Icons.search_rounded,
+                              key: ValueKey(_searchOpen),
+                            ),
+                          ),
                         ),
                         IconButton(
                           tooltip: 'Create room',
@@ -1151,11 +1184,28 @@ class _InboxScreenState extends State<InboxScreen> {
                       ],
                     ),
                   ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: _searchOpen
+                        ? Padding(
+                            key: const ValueKey('home.search_panel'),
+                            padding: EdgeInsets.fromLTRB(
+                              24,
+                              compact ? 10 : 16,
+                              24,
+                              0,
+                            ),
+                            child: conversationSearch,
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
                   if (expandedHome)
                     Padding(
                       padding: EdgeInsets.fromLTRB(
                         24,
-                        compact ? 12 : 30,
+                        compact ? 12 : 20,
                         24,
                         0,
                       ),

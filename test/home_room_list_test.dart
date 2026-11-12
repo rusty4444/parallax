@@ -399,46 +399,85 @@ void main() {
       expect(find.text('Team'), findsNothing);
     });
 
-    testWidgets('home shows only the top bar and rooms until options open', (
-      tester,
-    ) async {
-      await pump(tester);
-      expect(find.text('Team'), findsOneWidget);
-      expect(find.text('Alex'), findsOneWidget);
-      for (final hidden in [
-        'Find a conversation',
-        'Favourites',
-        'Work',
-        '4 ROOMS',
-        'Messages',
-      ]) {
-        expect(find.text(hidden), findsNothing, reason: hidden);
-      }
-      expect(find.byType(TextField), findsNothing);
+    testWidgets(
+      'search pops in from the top bar and Explore rooms stays in options',
+      (tester) async {
+        await pump(tester);
+        final search = find.byKey(const ValueKey('home.conversation_search'));
+        expect(find.text('Team'), findsOneWidget);
+        expect(find.text('Alex'), findsOneWidget);
+        expect(search, findsNothing);
+        expect(find.byType(TextField), findsNothing);
+        expect(find.byTooltip('Search conversations'), findsOneWidget);
+        for (final hidden in [
+          'Explore rooms',
+          'Favourites',
+          'Work',
+          '4 ROOMS',
+          'Messages',
+        ]) {
+          expect(find.text(hidden), findsNothing, reason: hidden);
+        }
+        expect(find.byTooltip('Explore public rooms'), findsNothing);
 
-      await openHomeOptions(tester);
-      expect(find.text('Find a conversation'), findsOneWidget);
-      expect(find.text('Favourites'), findsOneWidget);
-      expect(find.text('Work'), findsOneWidget);
-      expect(find.text('4 ROOMS'), findsOneWidget);
-      // Options sit between the top bar and the list.
-      expect(
-        tester.getTopLeft(find.text('Favourites')).dy,
-        lessThan(tester.getTopLeft(find.text('Team')).dy),
-      );
+        await tester.tap(find.byTooltip('Search conversations'));
+        await tester.pumpAndSettle();
+        expect(search, findsOneWidget);
+        expect(find.text('Find a conversation'), findsOneWidget);
+        expect(FocusScope.of(tester.element(search)).hasFocus, isTrue);
+        expect(
+          tester.getTopLeft(search).dy,
+          lessThan(tester.getTopLeft(find.text('Team')).dy),
+        );
 
-      await tester.tap(find.byTooltip('Hide options'));
-      await tester.pumpAndSettle();
-      expect(find.text('Favourites'), findsNothing);
-      expect(find.byTooltip('Show options'), findsOneWidget);
-    });
+        // Search works without opening the options panel.
+        await tester.enterText(search, 'ale');
+        await tester.pump();
+        expect(find.text('Alex'), findsOneWidget);
+        expect(find.text('Team'), findsNothing);
+
+        // Closing search also removes its now-invisible room-list filter.
+        await tester.tap(find.byTooltip('Hide conversation search'));
+        await tester.pumpAndSettle();
+        expect(search, findsNothing);
+        expect(find.text('Team'), findsOneWidget);
+        await tester.tap(find.byTooltip('Search conversations'));
+        await tester.pumpAndSettle();
+        expect(tester.widget<TextField>(search).controller!.text, isEmpty);
+        await tester.tap(find.byTooltip('Hide conversation search'));
+        await tester.pumpAndSettle();
+
+        await openHomeOptions(tester);
+        expect(search, findsNothing);
+        expect(find.text('Explore rooms'), findsOneWidget);
+        expect(find.text('Favourites'), findsOneWidget);
+        expect(find.text('Work'), findsOneWidget);
+        expect(find.text('4 ROOMS'), findsOneWidget);
+        expect(
+          tester.getTopLeft(find.text('Favourites')).dy,
+          lessThan(tester.getTopLeft(find.text('Team')).dy),
+        );
+
+        await tester.tap(find.byTooltip('Hide options'));
+        await tester.pumpAndSettle();
+        expect(find.text('Explore rooms'), findsNothing);
+        expect(find.text('Favourites'), findsNothing);
+        expect(search, findsNothing);
+        expect(find.byTooltip('Show options'), findsOneWidget);
+      },
+    );
 
     testWidgets('a collapsed menu says what narrows the list and can clear', (
       tester,
     ) async {
       await pump(tester);
+      await tester.tap(find.byTooltip('Search conversations'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('home.conversation_search')),
+        'ale',
+      );
       await openHomeOptions(tester);
-      await tester.enterText(find.byType(TextField), 'ale');
       await tester.tap(find.text('People'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Hide options'));
@@ -451,10 +490,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Showing'), findsNothing);
       expect(find.text('Team'), findsOneWidget);
-      // The search text is cleared too, not just the hidden query.
-      await openHomeOptions(tester);
+      // The still-open search field is cleared too, not just the query.
       expect(
-        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('home.conversation_search')),
+            )
+            .controller!
+            .text,
         isEmpty,
       );
     });
@@ -469,11 +512,19 @@ void main() {
       await pump(tester, prefs: prefs);
       expect(find.byTooltip('Show options'), findsNothing);
       expect(find.text('Messages'), findsOneWidget);
-      expect(find.text('Find a conversation'), findsOneWidget);
+      expect(find.text('Find a conversation'), findsNothing);
+      expect(find.text('Explore rooms'), findsOneWidget);
       expect(find.text('Favourites'), findsOneWidget);
       expect(find.text('4 ROOMS'), findsOneWidget);
 
-      // Turning it off live folds them back into the menu.
+      // Search remains an independent pop-in even in the expanded layout.
+      await tester.tap(find.byTooltip('Search conversations'));
+      await tester.pumpAndSettle();
+      expect(find.text('Find a conversation'), findsOneWidget);
+      await tester.tap(find.byTooltip('Hide conversation search'));
+      await tester.pumpAndSettle();
+
+      // Turning it off live folds the options back into the menu.
       await prefs.setExpandedHome(false);
       await tester.pumpAndSettle();
       expect(find.text('Favourites'), findsNothing);
