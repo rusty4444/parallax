@@ -77,6 +77,67 @@ TextEditingValue applyMention(
   );
 }
 
+/// A trigger (`@`, `:`, `/` …) and the query typed after it, immediately
+/// before a collapsed caret. Generalises [MentionQuery] for the composer's
+/// other autocomplete sources.
+@immutable
+class ComposerTriggerQuery {
+  const ComposerTriggerQuery(this.trigger, this.start, this.end, this.query);
+  final String trigger;
+
+  /// Index of the trigger character.
+  final int start;
+
+  /// Caret position.
+  final int end;
+  final String query;
+}
+
+/// Finds [trigger] typed after whitespace, `(` or at the start of the text,
+/// followed by up to [maxQueryLength] non-space characters up to the caret.
+/// With [startOfTextOnly] the trigger must be the first character (slash
+/// commands).
+ComposerTriggerQuery? triggerQueryAt(
+  TextEditingValue value,
+  String trigger, {
+  bool startOfTextOnly = false,
+  int maxQueryLength = 40,
+}) {
+  if (trigger.length != 1 || trigger.trim().isEmpty) return null;
+  if (trigger == '@') {
+    final mention = mentionQueryAt(value);
+    return mention == null
+        ? null
+        : ComposerTriggerQuery('@', mention.start, mention.end, mention.query);
+  }
+  final selection = value.selection;
+  if (!selection.isValid || !selection.isCollapsed) return null;
+  final caret = selection.baseOffset;
+  if (caret < 1 || caret > value.text.length) return null;
+  final escaped = RegExp.escape(trigger);
+  final pattern = RegExp(
+    '${startOfTextOnly ? '^' : r'(?:^|[\s(])'}'
+    '$escaped([^\\s$escaped]{0,$maxQueryLength})\$',
+  );
+  final match = pattern.firstMatch(value.text.substring(0, caret));
+  if (match == null) return null;
+  final query = match[1]!;
+  return ComposerTriggerQuery(trigger, caret - query.length - 1, caret, query);
+}
+
+/// Replaces the typed trigger and query with [insertText].
+TextEditingValue applySuggestionText(
+  TextEditingValue value,
+  ComposerTriggerQuery query,
+  String insertText,
+) {
+  final text = value.text.replaceRange(query.start, query.end, insertText);
+  return TextEditingValue(
+    text: text,
+    selection: TextSelection.collapsed(offset: query.start + insertText.length),
+  );
+}
+
 /// Builds a [MentionSource] for a room: cached joined/invited members and,
 /// when the user may notify everyone, `@room` ("Everyone").
 MentionSource? roomMentionSource({

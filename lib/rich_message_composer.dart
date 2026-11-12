@@ -2,12 +2,17 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:image_picker/image_picker.dart';
 
+import 'features/composer/formatting_toolbar.dart';
+import 'features/composer/markdown_format.dart';
+import 'features/composer/markdown_styling.dart';
+import 'features/composer/slash_commands.dart';
 import 'features/reactions/reaction_hooks.dart';
 import 'features/rich_timeline/mention_suggestions.dart';
-import 'hooks/hook_types.dart';
+import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
 
@@ -42,6 +47,8 @@ class RichMessageComposer extends StatefulWidget {
     this.hookContext,
     this.replyToId,
     this.editing = false,
+    this.sendOptions,
+    this.suggestionSources,
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
@@ -83,6 +90,16 @@ class RichMessageComposer extends StatefulWidget {
   /// Whether the draft is an edit of an existing message.
   final bool editing;
 
+  /// Long-press send options. When null, [composerSendOptionsFor] supplies
+  /// them for [hookContext].
+  final List<ComposerSendOption>? sendOptions;
+
+  /// Extra autocomplete sources (`:` custom emoji …). When null,
+  /// [composerSuggestionSourcesFor] supplies them for [hookContext]. The
+  /// built-in `/` command source is always offered at the start of a new
+  /// message.
+  final List<ComposerSuggestionSource>? suggestionSources;
+
   @override
   State<RichMessageComposer> createState() => _RichMessageComposerState();
 }
@@ -112,8 +129,24 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   Future<void> _voiceWork = Future<void>.value();
   int _recordingSeconds = 0;
   Timer? _durationTimer;
-  MentionQuery? _mentionQuery;
-  List<MentionSuggestion> _mentionSuggestions = const [];
+  ComposerTriggerQuery? _suggestionQuery;
+  List<ComposerSuggestion> _suggestions = const [];
+
+  /// `mention` or the suggestion source ID, for row keys.
+  String _suggestionKind = '';
+
+  /// Composer-owned styled mirror of the caller's controller: the TextField
+  /// renders live markdown styling while the caller keeps plain text.
+  late final ComposerTextController _input = ComposerTextController.fromValue(
+    widget.controller.value,
+  );
+  final _focus = FocusNode(debugLabel: 'RichMessageComposer');
+  bool _formatting = false;
+  bool _linkDialogOpen = false;
+  bool _sendOptionsOpen = false;
+  FormattingState _formatState = const FormattingState();
+
+  static const _maxSuggestions = 50;
 
   bool get _alive => mounted && !_closed;
   bool get _voiceIdle => _voiceMode == _VoiceMode.idle;
@@ -130,8 +163,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     super.initState();
     _recorder = widget.recorder;
     _lastText = widget.controller.text;
+    widget.controller.addListener(_syncFromCaller);
     widget.controller.addListener(_draftChanged);
-    widget.controller.addListener(_updateMentions);
+    widget.controller.addListener(_updateSuggestions);
+    _input.addListener(_syncToCaller);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -139,71 +174,168 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   void didUpdateWidget(RichMessageComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller.removeListener(_syncFromCaller);
       oldWidget.controller.removeListener(_draftChanged);
-      oldWidget.controller.removeListener(_updateMentions);
+      oldWidget.controller.removeListener(_updateSuggestions);
       _lastText = widget.controller.text;
       _textVersion++;
+      widget.controller.addListener(_syncFromCaller);
       widget.controller.addListener(_draftChanged);
-      widget.controller.addListener(_updateMentions);
-      _mentionQuery = null;
-      _mentionSuggestions = const [];
+      widget.controller.addListener(_updateSuggestions);
+      _suggestionQuery = null;
+      _suggestions = const [];
+      _syncFromCaller();
+    }
+    if (oldWidget.editing != widget.editing) _updateSuggestions();
+  }
+
+  /// Caller edits (clear after send, draft restore, emoji) → the field.
+  void _syncFromCaller() {
+    final value = widget.controller.value;
+    if (_input.value != value) _input.value = value;
+  }
+
+  /// Typing and toolbar edits → the caller's controller.
+  void _syncToCaller() {
+    if (_closed) return;
+    final value = _input.value;
+    final controller = widget.controller;
+    if (controller.value != value) controller.value = value;
+    if (_formatting && mounted) {
+      final state = formattingStateFor(value);
+      if (state != _formatState) setState(() => _formatState = state);
     }
   }
 
-  /// Offers room members while an `@mention` is typed at the caret. The
-  /// inserted user ID stays plain text; pills and `m.mentions` are derived
-  /// when the message is sent.
-  void _updateMentions() {
+  List<ComposerSuggestionSource> _suggestionSources() {
+    final ctx = widget.hookContext;
+    List<ComposerSuggestionSource>? extra = widget.suggestionSources;
+    if (extra == null && ctx != null) {
+      try {
+        extra = composerSuggestionSourcesFor(context, ctx);
+      } catch (_) {
+        extra = null;
+      }
+    }
+    return [
+      // Commands apply to new text messages only (not edits or captions).
+      if (!widget.editing && _media == null) slashCommandSource,
+      ...?extra,
+    ];
+  }
+
+  /// Offers room members while an `@mention` is typed at the caret, and
+  /// suggestions from other sources by trigger character (`/` commands at
+  /// the start of the text, `:` custom emoji …). Inserted text stays plain;
+  /// pills, `m.mentions` and commands are derived when the message is sent.
+  void _updateSuggestions() {
     if (!_alive) return;
-    final query = mentionQueryAt(widget.controller.value);
-    var suggestions = const <MentionSuggestion>[];
-    if (query != null) {
+    final value = widget.controller.value;
+    ComposerTriggerQuery? query;
+    var suggestions = const <ComposerSuggestion>[];
+    var kind = '';
+    final mention = mentionQueryAt(value);
+    if (mention != null) {
+      query = ComposerTriggerQuery(
+        '@',
+        mention.start,
+        mention.end,
+        mention.query,
+      );
+      kind = 'mention';
       final source = widget.mentionSource ?? mentionSourceFor(context);
       if (source != null) {
         try {
-          suggestions = source(query.query);
+          suggestions = [
+            for (final member in source(mention.query).take(_maxSuggestions))
+              ComposerSuggestion(
+                id: member.id,
+                label: member.label,
+                subtitle: member.subtitle,
+                insertText: member.insertText,
+                leading: member.leading,
+              ),
+          ];
         } catch (_) {
           suggestions = const [];
         }
       }
+    } else if (value.text.contains(RegExp(r'[^\w\s]'))) {
+      for (final source in _suggestionSources()) {
+        final found = triggerQueryAt(
+          value,
+          source.trigger,
+          startOfTextOnly: source.id == slashCommandSourceId,
+        );
+        if (found == null || found.query.length < source.minQueryLength) {
+          continue;
+        }
+        List<ComposerSuggestion> results;
+        try {
+          results = source.search(found.query);
+        } catch (_) {
+          results = const [];
+        }
+        if (results.isEmpty) continue;
+        query = found;
+        kind = source.id;
+        suggestions = results.take(_maxSuggestions).toList();
+        break;
+      }
     }
-    if (suggestions.isEmpty && _mentionSuggestions.isEmpty) {
-      _mentionQuery = query;
+    if (suggestions.isEmpty && _suggestions.isEmpty) {
+      _suggestionQuery = query;
+      _suggestionKind = kind;
       return;
     }
     setState(() {
-      _mentionQuery = query;
-      _mentionSuggestions = suggestions;
+      _suggestionQuery = query;
+      _suggestionKind = kind;
+      _suggestions = suggestions;
     });
   }
 
-  void _pickMention(MentionSuggestion suggestion) {
-    final query = _mentionQuery;
+  void _pickSuggestion(ComposerSuggestion suggestion) {
+    final query = _suggestionQuery;
     if (!_alive || query == null) return;
     final controller = widget.controller;
-    // Re-check that the typed @query is still where it was.
-    final current = mentionQueryAt(controller.value);
+    // Re-check that the typed trigger and query are still where they were.
+    final current = triggerQueryAt(
+      controller.value,
+      query.trigger,
+      startOfTextOnly: _suggestionKind == slashCommandSourceId,
+    );
     if (current == null || current.start != query.start) return;
-    controller.value = applyMention(controller.value, current, suggestion);
+    controller.value = applySuggestionText(
+      controller.value,
+      current,
+      suggestion.insertText,
+    );
     setState(() {
-      _mentionQuery = null;
-      _mentionSuggestions = const [];
+      _suggestionQuery = null;
+      _suggestions = const [];
     });
+    _focus.requestFocus();
   }
 
-  Widget _mentionList() => Card(
+  Widget _suggestionList() => Card(
     margin: const EdgeInsets.only(bottom: 8),
     clipBehavior: Clip.antiAlias,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 216),
       child: ListView(
+        key: const ValueKey('composer-suggestions'),
         shrinkWrap: true,
         padding: EdgeInsets.zero,
         children: [
-          for (final suggestion in _mentionSuggestions)
+          for (final suggestion in _suggestions)
             ListTile(
-              key: ValueKey('mention-${suggestion.id}'),
+              key: ValueKey(
+                _suggestionKind == 'mention'
+                    ? 'mention-${suggestion.id}'
+                    : 'suggestion-$_suggestionKind-${suggestion.id}',
+              ),
               dense: true,
               leading: suggestion.leading,
               title: Text(
@@ -218,7 +350,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-              onTap: () => _pickMention(suggestion),
+              onTap: () => _pickSuggestion(suggestion),
             ),
         ],
       ),
@@ -571,19 +703,38 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     }
   }
 
+  /// A reason the draft cannot be sent as typed (unknown `/command` …).
+  String? _draftError(String text, MediaSelection? media) =>
+      media != null || widget.editing ? null : slashCommandError(text);
+
   void _send() {
     if (!_alive || !_canSend) return;
-    final controller = widget.controller;
-    final text = controller.text;
+    final text = widget.controller.text;
     // stop() returns durable bytes, not a recorder-owned file. The send may
     // outlive this widget without retaining the microphone or preview player.
     final media = _media;
+    final problem = _draftError(text, media);
+    if (problem != null) {
+      _showError(problem);
+      return;
+    }
+    final onSend = widget.onSend;
+    _consumeDraft(() async {
+      await onSend(text, media);
+      return true;
+    }, media: media);
+  }
+
+  /// Runs [action] under the send lock. When it reports the draft consumed
+  /// and this composer still owns the send context, clears the sent text
+  /// revision (and [media]) and acknowledges, exactly as for a normal send.
+  void _consumeDraft(Future<bool> Function() action, {MediaSelection? media}) {
+    final controller = widget.controller;
     final textVersion = _textVersion;
     final mediaVersion = _mediaVersion;
     final sendContext = widget.sendContext;
     final contextOwner = sendContext?.call();
     final onAcknowledged = widget.onAcknowledged;
-    final onSend = widget.onSend;
     bool ownsContext() =>
         _alive &&
         identical(controller, widget.controller) &&
@@ -595,8 +746,8 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     });
     unawaited(() async {
       try {
-        await onSend(text, media);
-        if (!ownsContext()) return;
+        final consumed = await action();
+        if (!consumed || !ownsContext()) return;
         final textCleared = textVersion == _textVersion;
         if (textCleared) controller.clear();
         if (media != null && mediaVersion == _mediaVersion) _removeAttachment();
@@ -612,6 +763,137 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         if (_alive) setState(() {});
       }
     }());
+  }
+
+  List<ComposerSendOption> _sendOptionsFor(BuildContext context) {
+    final explicit = widget.sendOptions;
+    if (explicit != null) return explicit;
+    final ctx = widget.hookContext;
+    if (ctx == null) return const [];
+    try {
+      return composerSendOptionsFor(context, ctx);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Long-press on send: feature send options (for example "Send later").
+  /// A chosen option that consumes the draft clears it like a normal send.
+  Future<void> _showSendOptions() async {
+    if (!_alive || !_canSend || _media != null || _sendOptionsOpen) return;
+    final options = _sendOptionsFor(context);
+    if (options.isEmpty) return;
+    final problem = _draftError(widget.controller.text, null);
+    if (problem != null) {
+      _showError(problem);
+      return;
+    }
+    setState(() => _sendOptionsOpen = true);
+    ComposerSendOption? chosen;
+    try {
+      chosen = await showModalBottomSheet<ComposerSendOption>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(title: Text('Send options')),
+              for (final option in options)
+                ListTile(
+                  key: ValueKey('send-option-${option.id}'),
+                  leading: Icon(option.icon),
+                  title: Text(option.label),
+                  onTap: () => Navigator.pop(sheetContext, option),
+                ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      _sendOptionsOpen = false;
+      if (_alive) setState(() {});
+    }
+    final option = chosen;
+    if (option == null || !_alive || !_canSend || _media != null) return;
+    final draft = ComposerDraft(
+      text: widget.controller.text,
+      replyToId: widget.replyToId,
+      editing: widget.editing,
+    );
+    if (draft.text.trim().isEmpty || !mounted) return;
+    _consumeDraft(() => option.onSelected(context, draft));
+  }
+
+  void _toggleFormatting() {
+    if (!_alive) return;
+    setState(() {
+      _formatting = !_formatting;
+      if (_formatting) _formatState = formattingStateFor(_input.value);
+    });
+    _focus.requestFocus();
+  }
+
+  void _format(FormatAction action) {
+    if (!_alive) return;
+    if (action == FormatAction.link) {
+      unawaited(_editLink());
+      return;
+    }
+    final next = applyFormat(_input.value, action);
+    if (next != _input.value) _input.value = next;
+    _focus.requestFocus();
+  }
+
+  Future<void> _editLink() async {
+    if (!_alive || _linkDialogOpen) return;
+    _linkDialogOpen = true;
+    final before = _input.value;
+    try {
+      final result = await showComposerLinkDialog(
+        context,
+        linkTargetAt(before),
+      );
+      // Apply only to the draft the dialog was opened for (not one replaced
+      // by a send or draft restore meanwhile).
+      if (!_alive || result == null || _input.text != before.text) return;
+      final base = _input.value.copyWith(
+        selection: before.selection,
+        composing: TextRange.empty,
+      );
+      _input.value = result.remove
+          ? removeLink(base)
+          : applyLink(base, text: result.text, url: result.url!);
+    } finally {
+      _linkDialogOpen = false;
+      if (_alive) _focus.requestFocus();
+    }
+  }
+
+  Widget _sendButton(BuildContext context) {
+    final button = IconButton.filled(
+      tooltip: 'Send message',
+      onPressed: _canSend ? _send : null,
+      icon: _sending
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.arrow_upward_rounded),
+    );
+    if (_media != null || _sendOptionsFor(context).isEmpty) return button;
+    // The tooltip would otherwise claim the long press.
+    return GestureDetector(
+      key: const ValueKey('composer-send-long-press'),
+      onLongPress: _canSend ? _showSendOptions : null,
+      child: TooltipTheme(
+        data: TooltipTheme.of(
+          context,
+        ).copyWith(triggerMode: TooltipTriggerMode.manual),
+        child: button,
+      ),
+    );
   }
 
   VoiceRecorder _voiceRecorder() {
@@ -838,8 +1120,13 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     _pickEpoch++;
     _voiceEpoch++;
     _durationTimer?.cancel();
+    widget.controller.removeListener(_syncFromCaller);
     widget.controller.removeListener(_draftChanged);
-    widget.controller.removeListener(_updateMentions);
+    widget.controller.removeListener(_updateSuggestions);
+    _input
+      ..removeListener(_syncToCaller)
+      ..dispose();
+    _focus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     final voice = _voiceWork;
     final recorder = _recorder;
@@ -942,6 +1229,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final voiceActive = !_voiceIdle;
+    // Captions and voice clips are plain text: no markdown tools for them.
+    final formattingAvailable = _media == null && !voiceActive;
+    final formatting = _formatting && formattingAvailable;
+    _input.styling = _media == null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
@@ -975,8 +1266,8 @@ class _RichMessageComposerState extends State<RichMessageComposer>
               ),
             ),
           if (_media != null) _attachmentPreview(_media!),
-          if (_mentionSuggestions.isNotEmpty && _mentionQuery != null)
-            _mentionList(),
+          if (_suggestions.isNotEmpty && _suggestionQuery != null)
+            _suggestionList(),
           if (voiceActive)
             Row(
               children: [
@@ -1007,27 +1298,51 @@ class _RichMessageComposerState extends State<RichMessageComposer>
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              IconButton(
-                tooltip: 'Attach media',
-                onPressed:
-                    _pickOwned || _sourceSheetOpen || voiceActive || _background
-                    ? null
-                    : _showSources,
-                icon: _pickOwned
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.add_circle_outline),
-              ),
+              if (formatting)
+                // Element X replaces "add attachment" while formatting.
+                IconButton(
+                  key: const ValueKey('composer-close-formatting'),
+                  tooltip: 'Close text formatting',
+                  onPressed: _toggleFormatting,
+                  icon: const Icon(Icons.close_rounded),
+                )
+              else ...[
+                IconButton(
+                  tooltip: 'Attach media',
+                  onPressed:
+                      _pickOwned ||
+                          _sourceSheetOpen ||
+                          voiceActive ||
+                          _background
+                      ? null
+                      : _showSources,
+                  icon: _pickOwned
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_circle_outline),
+                ),
+                if (formattingAvailable)
+                  IconButton(
+                    key: const ValueKey('composer-text-formatting'),
+                    tooltip: 'Text formatting',
+                    onPressed: _background ? null : _toggleFormatting,
+                    icon: const Icon(Icons.text_format_rounded),
+                  ),
+              ],
               Expanded(
                 child: TextField(
-                  controller: widget.controller,
+                  controller: _input,
+                  focusNode: _focus,
                   minLines: 1,
-                  maxLines: 5,
+                  maxLines: formatting ? 8 : 5,
                   textCapitalization: TextCapitalization.sentences,
                   keyboardType: TextInputType.multiline,
+                  inputFormatters: formatting
+                      ? const [_ListContinuationFormatter()]
+                      : null,
                   contentInsertionConfiguration: ContentInsertionConfiguration(
                     allowedMimeTypes: const ['image/*'],
                     onContentInserted: _insertContent,
@@ -1063,21 +1378,33 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                   onPressed: _cancel,
                   icon: const Icon(Icons.close),
                 ),
-              IconButton.filled(
-                tooltip: 'Send message',
-                onPressed: _canSend ? _send : null,
-                icon: _sending
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.arrow_upward_rounded),
-              ),
+              _sendButton(context),
             ],
           ),
+          if (formatting)
+            TextFieldTapRegion(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: FormattingToolbar(
+                  state: _formatState,
+                  onAction: _format,
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
+}
+
+/// Continues markdown lists and quotes on Enter while the formatting
+/// toolbar is shown (an empty item ends the list), like Element X's editor.
+class _ListContinuationFormatter extends TextInputFormatter {
+  const _ListContinuationFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) => continueListOnNewline(oldValue, newValue) ?? newValue;
 }
