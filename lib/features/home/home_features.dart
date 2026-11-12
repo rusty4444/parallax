@@ -8,7 +8,7 @@ import 'matrix_home_features.dart';
 abstract interface class RoomListFeatures {
   /// Sets the fully-read marker and read receipt on the latest event and clears
   /// a manual unread flag. A private receipt is sent when [publicReceipt] is
-  /// false (Settings → Send read receipts off).
+  /// false (Settings → Privacy → Send read receipts off).
   Future<void> markAsRead(String roomId, {required bool publicReceipt});
 
   /// Adds or removes the `m.favourite` tag and confirms it on the server.

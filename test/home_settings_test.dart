@@ -6,7 +6,11 @@ import 'package:parallax/crypto_setup_policy.dart';
 import 'package:parallax/features/home/about_screen.dart';
 import 'package:parallax/features/home/home_features.dart';
 import 'package:parallax/features/home/sign_out.dart';
+import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_fakes.dart';
 
@@ -16,17 +20,30 @@ void main() {
   final follows = <bool>[];
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     backend = HomeFakeBackend();
     themes.clear();
     follows.clear();
   });
 
-  Future<void> pumpSettings(WidgetTester tester) async {
+  /// Pass [preferences] to provide the app's shared settings scope, as the
+  /// signed-in app does.
+  Future<void> pumpSettings(
+    WidgetTester tester, {
+    AppearancePreferences? preferences,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(800, 4200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         theme: themeFor(VisualTheme.parallax),
+        builder: preferences == null
+            ? null
+            : (context, child) => FeatureSettingsScope(
+                preferences: preferences,
+                draftStore: MessageDraftStore(),
+                child: child!,
+              ),
         home: SettingsScreen(
           backend: backend,
           palette: paletteFor(VisualTheme.parallax),
@@ -79,6 +96,7 @@ void main() {
       deviceDeleteSupported: true,
     );
     await pumpSettings(tester);
+    await open(tester, 'Account');
     expect(find.text('Manage account'), findsOneWidget);
     expect(find.text('Profile and password'), findsNothing);
     expect(
@@ -129,6 +147,7 @@ void main() {
   ) async {
     backend.requiredPassword = 'secret';
     await pumpSettings(tester);
+    await open(tester, 'Account');
     await open(tester, 'Devices');
     expect(find.text('Parallax Android'), findsOneWidget);
     expect(find.textContaining('Verified'), findsOneWidget);
@@ -151,6 +170,7 @@ void main() {
 
   testWidgets('blocked users can be unblocked', (tester) async {
     await pumpSettings(tester);
+    await open(tester, 'Privacy');
     await open(tester, 'Blocked users');
     expect(find.text('@spam:example.org'), findsOneWidget);
     await open(tester, 'Unblock');
@@ -205,6 +225,7 @@ void main() {
     tester,
   ) async {
     await pumpSettings(tester);
+    await open(tester, 'Account');
     await open(tester, 'Delete account');
     expect(find.text('irreversible', findRichText: true), findsNothing);
     expect(find.textContaining('irreversible', findRichText: true), findsOne);
@@ -224,6 +245,7 @@ void main() {
 
   testWidgets('theme choice includes Match system', (tester) async {
     await pumpSettings(tester);
+    await open(tester, 'Appearance');
     await open(tester, 'Match system');
     expect(follows, [true]);
     await open(tester, 'Daybreak');
@@ -232,9 +254,128 @@ void main() {
 
   testWidgets('about shows version and licences', (tester) async {
     await pumpSettings(tester);
-    await open(tester, 'About Parallax');
+    await open(tester, 'About & help');
     expect(find.text('Parallax $parallaxVersion ($parallaxBuild)'), findsOne);
     await open(tester, 'Open source licences');
     expect(find.byType(LicensePage), findsOneWidget);
+  });
+
+  testWidgets('settings is a menu: every setting is on a category page', (
+    tester,
+  ) async {
+    final preferences = AppearancePreferences();
+    addTearDown(preferences.dispose);
+    await pumpSettings(tester, preferences: preferences);
+    for (final title in [
+      'Account',
+      'Notifications',
+      'Appearance',
+      'Chats',
+      'Media',
+      'Privacy',
+      'Security',
+      'Advanced',
+      'About & help',
+    ]) {
+      expect(find.text(title), findsOneWidget, reason: title);
+    }
+    // Nothing is set directly on the menu.
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Switch ||
+            widget is SwitchListTile ||
+            widget is Slider ||
+            widget is Radio ||
+            widget is RadioListTile ||
+            widget is SegmentedButton ||
+            widget is Checkbox ||
+            widget is TextField,
+      ),
+      findsNothing,
+    );
+    expect(find.widgetWithText(OutlinedButton, 'Sign out'), findsOneWidget);
+  });
+
+  testWidgets('each category page opens with its settings', (tester) async {
+    final preferences = AppearancePreferences();
+    addTearDown(preferences.dispose);
+    await pumpSettings(tester, preferences: preferences);
+    Future<void> visit(String category, List<String> expected) async {
+      await open(tester, category);
+      for (final text in expected) {
+        expect(find.text(text), findsWidgets, reason: '$category: $text');
+      }
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsOneWidget, reason: category);
+    }
+
+    await visit('Account', [
+      'Profile and password',
+      'Devices',
+      'Delete account',
+    ]);
+    await visit('Notifications', [
+      'Enable notifications on this device',
+      'Show message content',
+      'Direct chats',
+    ]);
+    await visit('Appearance', [
+      'THEME',
+      'Match system',
+      'Text size',
+      'Chat row style',
+    ]);
+    await visit('Chats', [
+      'Double-tap reaction',
+      'Haptic feedback',
+      'Undo send',
+      'Show chat effects',
+    ]);
+    await visit('Media', [
+      'Show media in timeline',
+      'Optimise image upload quality',
+    ]);
+    await visit('Privacy', [
+      'Send read receipts',
+      'Send typing notifications',
+      'Hide avatars in room invites',
+      'Blocked users',
+    ]);
+    await visit('Security', [
+      'Identity connected on this device',
+      'Verify with another device',
+    ]);
+    await visit('Advanced', ['Open a Matrix link']);
+    await visit('About & help', ['Report a problem']);
+  });
+
+  testWidgets('a theme picked on Appearance repaints the menu summary', (
+    tester,
+  ) async {
+    await pumpSettings(tester);
+    expect(find.text('Theme: Parallax'), findsOneWidget);
+    await open(tester, 'Appearance');
+    await open(tester, 'Daybreak');
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(themes, [VisualTheme.daylight]);
+    expect(find.text('Theme: Daybreak'), findsOneWidget);
+  });
+
+  testWidgets('security row flags an identity that needs recovery', (
+    tester,
+  ) async {
+    backend.crypto = const CryptoStatus(
+      initialized: true,
+      connected: false,
+      keyBackupEnabled: true,
+      crossSigningEnabled: true,
+      setupAvailability: CryptoSetupAvailability.restore,
+    );
+    await pumpSettings(tester);
+    expect(find.text('Recovery required on this device'), findsOneWidget);
+    expect(find.byIcon(Icons.gpp_maybe_outlined), findsOneWidget);
   });
 }

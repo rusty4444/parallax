@@ -39,7 +39,7 @@ without `usage`) count as both emoji and sticker.
 - Composer: emoji button → pack tabs; attachment menu → **Sticker**.
 - Long-press a message → more reactions → pack tabs.
 - Room details → **Emoji & stickers** (create/edit packs, "Use in all rooms").
-- Settings → **Emoji & stickers** (personal pack, packs used everywhere).
+- Settings → Chats → **Emoji & stickers** (personal pack, packs used everywhere).
 
 Pack images are uploaded unencrypted (MSC2545 has no encrypted packs), so
 every member's client can show them; stickers sent into encrypted rooms are

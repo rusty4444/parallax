@@ -428,7 +428,7 @@ void main() {
   });
 
   group('link new device', () {
-    testWidgets('settings section appears only when linking is possible', (
+    testWidgets('settings row appears only when linking is possible', (
       tester,
     ) async {
       init();
@@ -438,8 +438,9 @@ void main() {
         _app(
           Builder(
             builder: (context) {
-              sections = qrLoginSettingsSections(context, ctx);
-              return ListView(children: sections);
+              sections = qrLoginSettingsRows(context, ctx);
+              // Rows sit inside a SettingsGroup card (a Material) in the app.
+              return Material(child: ListView(children: sections));
             },
           ),
         ),
@@ -449,8 +450,9 @@ void main() {
       await tester.pumpWidget(
         _app(
           Builder(
-            builder: (context) =>
-                ListView(children: qrLoginSettingsSections(context, ctx)),
+            builder: (context) => Material(
+              child: ListView(children: qrLoginSettingsRows(context, ctx)),
+            ),
           ),
         ),
       );

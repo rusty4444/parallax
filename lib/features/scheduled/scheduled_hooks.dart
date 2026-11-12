@@ -9,6 +9,7 @@ import '../../hooks/hook_types.dart';
 import 'scheduled_features.dart';
 import 'scheduled_list.dart';
 import 'send_later_sheet.dart';
+import 'undo_send_settings.dart';
 
 /// Long-press send option: "Send later…".
 List<ComposerSendOption> scheduledSendOptions(
@@ -40,5 +41,9 @@ List<Widget> scheduledRoomBanners(BuildContext context, RoomHookContext ctx) {
   ];
 }
 
-// Undo send's setting lives in Settings → Appearance, next to the other
-// message behaviour toggles (lib/appearance_settings_screen.dart).
+/// Settings → Chats → Sending: the undo send grace period. Shown whether or
+/// not the homeserver supports send later, because undo send is local.
+List<Widget> scheduledSettingsSections(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [UndoSendSettingsSection(palette: ctx.palette)];

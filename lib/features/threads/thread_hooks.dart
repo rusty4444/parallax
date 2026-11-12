@@ -146,7 +146,7 @@ List<Widget> threadRoomDetailsSections(
 // --- New extension points (wire in lib/hooks/registry.dart) ---------------
 
 /// Settings: "Search this device's history" toggle, privacy note and
-/// "Clear search index". Wire into `settingsSectionsFor`.
+/// "Clear search index". Shown on Settings → Privacy.
 List<Widget> messageSearchSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
@@ -154,11 +154,14 @@ List<Widget> messageSearchSettingsSections(
   final search = localMessageSearchOf(ctx.backend);
   if (search == null) return const [];
   return [
-    const SizedBox(height: 28),
-    DeviceSearchSettingsCard(
-      key: const ValueKey('device-search-settings'),
-      search: search,
-      palette: ctx.palette,
+    Padding(
+      // Same spacing as SettingsGroup on the settings pages.
+      padding: const EdgeInsets.only(bottom: 18),
+      child: DeviceSearchSettingsCard(
+        key: const ValueKey('device-search-settings'),
+        search: search,
+        palette: ctx.palette,
+      ),
     ),
   ];
 }

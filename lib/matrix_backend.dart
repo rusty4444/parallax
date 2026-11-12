@@ -28,6 +28,7 @@ import 'features/notifications/background_push.dart'
 import 'features/rich_timeline/message_composition.dart';
 import 'homeserver_security.dart';
 import 'key_query_validation.dart';
+import 'media_disk_cache.dart';
 import 'media_download.dart';
 import 'matrix_send_guard.dart';
 import 'message_text.dart';
@@ -61,7 +62,8 @@ class MatrixBackend extends ChatBackend
         RoomEventFeatures,
         MatrixSdkAccess,
         DelayedRoomEventSender,
-        UndoSendFeatures {
+        UndoSendFeatures,
+        MediaCacheAccess {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     bool Function()? sendTypingNotifications,
@@ -69,7 +71,9 @@ class MatrixBackend extends ChatBackend
     this.beforeLogout,
     Future<Duration> Function()? undoSendDelay,
     bool Function()? isAppVisible,
+    Future<MediaDiskCache> Function(String account)? openMediaCache,
   }) : _isAppVisible = isAppVisible ?? _appResumed,
+       _openMediaCache = openMediaCache ?? MediaDiskCache.open,
        _sendReadReceipts = sendReadReceipts ?? (() => true),
        _sendTypingNotifications = sendTypingNotifications ?? (() => true),
        _undoSendDelay =
@@ -83,6 +87,7 @@ class MatrixBackend extends ChatBackend
     Future<Duration> Function()? undoSendDelay,
     bool Function()? sendReadReceipts,
     bool Function()? isAppVisible,
+    Future<MediaDiskCache> Function(String account)? openMediaCache,
   }) {
     final backend = MatrixBackend(
       localStorage: localStorage,
@@ -90,6 +95,7 @@ class MatrixBackend extends ChatBackend
       undoSendDelay: undoSendDelay,
       sendReadReceipts: sendReadReceipts,
       isAppVisible: isAppVisible,
+      openMediaCache: openMediaCache,
     );
     backend._client = client;
     client.onSoftLogout = backend._refreshAuthentication;
@@ -101,6 +107,9 @@ class MatrixBackend extends ChatBackend
 
   final bool Function() _sendReadReceipts;
   final bool Function() _sendTypingNotifications;
+
+  /// Opens the thumbnail store for an account (a temporary folder in tests).
+  final Future<MediaDiskCache> Function(String account) _openMediaCache;
 
   /// How long a queued send waits for another send to finish.
   @visibleForTesting
@@ -216,6 +225,10 @@ class MatrixBackend extends ChatBackend
   int _imageCacheBytes = 0;
   final _avatarCache = <Uri, Uint8List>{};
   static const _maxCachedAvatars = 400;
+
+  /// Thumbnails and avatars on disk for the signed-in session.
+  Future<MediaDiskCache?>? _mediaCache;
+  String? _mediaCacheAccount;
   final _avatarInFlight = <Uri, Future<Uint8List?>>{};
   final _avatarWaiters = Queue<Completer<void>>();
   int _avatarActive = 0;
@@ -1604,9 +1617,15 @@ class MatrixBackend extends ChatBackend
         (event.infoMap['size'] as int) > maxImageBytes) {
       return null;
     }
+    final store = await thumbnailStore();
     final bytes = (await event.downloadAndDecryptAttachment(
       getThumbnail: true,
-      downloadCallback: (uri) => _downloadMedia(uri, maxImageBytes),
+      downloadCallback: (uri) => cachedMediaDownload(
+        store,
+        uri,
+        maxImageBytes,
+        (uri) => _downloadMedia(uri, maxImageBytes),
+      ),
     )).bytes;
     if (_activeRoomId != roomId ||
         _timeline != timeline ||
@@ -1680,8 +1699,27 @@ class MatrixBackend extends ChatBackend
     }
   }
 
+  void _rememberAvatar(Uri url, Uint8List bytes) {
+    _avatarCache[url] = bytes;
+    // 96 px thumbnails (a few KB each). One inbox screen shows 10–20+
+    // faces, so a small cache made scrolling back download and decode
+    // them again behind initial-letter placeholders.
+    if (_avatarCache.length > _maxCachedAvatars) {
+      _avatarCache.remove(_avatarCache.keys.first);
+    }
+  }
+
   Future<Uint8List?> _fetchAvatar(Uri url) async {
     final generation = _securityGeneration;
+    // Saved on disk (earlier this session, a previous launch or a thumbnail
+    // sync): no network slot needed.
+    final store = await thumbnailStore();
+    final saved = await store?.read(avatarCacheKey(url));
+    if (_disposed || generation != _securityGeneration) return null;
+    if (saved != null) {
+      _rememberAvatar(url, saved);
+      return saved;
+    }
     if (_avatarActive >= 4) {
       final waiter = Completer<void>();
       _avatarWaiters.add(waiter);
@@ -1717,13 +1755,8 @@ class MatrixBackend extends ChatBackend
         return null;
       }
       if (bytes.isEmpty) return null;
-      _avatarCache[url] = bytes;
-      // 96 px thumbnails (a few KB each). One inbox screen shows 10–20+
-      // faces, so a small cache made scrolling back download and decode
-      // them again behind initial-letter placeholders.
-      if (_avatarCache.length > _maxCachedAvatars) {
-        _avatarCache.remove(_avatarCache.keys.first);
-      }
+      _rememberAvatar(url, bytes);
+      unawaited(store?.write(avatarCacheKey(url), bytes));
       return bytes;
     } catch (_) {
       return null;
@@ -1851,7 +1884,7 @@ class MatrixBackend extends ChatBackend
 
   @override
   Future<void> setTyping(String roomId, bool typing) async {
-    // Privacy preference (Settings → Media & privacy). Stop notices are still
+    // Privacy preference (Settings → Privacy). Stop notices are still
     // allowed so turning the preference off cannot leave a stale indicator.
     if (typing && !_sendTypingNotifications()) return;
     final client = _requireClient();
@@ -2952,6 +2985,7 @@ class MatrixBackend extends ChatBackend
     _imageCache.clear();
     _imageCacheBytes = 0;
     _avatarCache.clear();
+    _dropMediaCache();
     _reactionInFlight.clear();
     _validatedRoster.clear();
     _firstSyncCompleted = false;
@@ -3036,6 +3070,51 @@ class MatrixBackend extends ChatBackend
           throw StateError('Encrypted-room recipients changed during send');
         }
       },
+    );
+  }
+
+  @override
+  Future<ThumbnailStore?> thumbnailStore() async {
+    final client = _client;
+    if (client == null || _disposed || _loggingOut || !client.isLogged()) {
+      return null;
+    }
+    final account = mediaCacheAccount(
+      client.homeserver,
+      client.userID,
+      client.deviceID,
+    );
+    var opening = _mediaCache;
+    if (opening == null || _mediaCacheAccount != account) {
+      _dropMediaCache();
+      _mediaCacheAccount = account;
+      opening = _mediaCache = _openMediaCache(account).then<MediaDiskCache?>(
+        (cache) => cache,
+        // No storage (host tests) or a disk error: work without it.
+        onError: (Object _) => null,
+      );
+    }
+    final cache = await opening;
+    return identical(opening, _mediaCache) ? cache : null;
+  }
+
+  /// Ends the session's thumbnail store and deletes its folder (sign-out,
+  /// remote session end or a different account).
+  void _dropMediaCache() {
+    final opening = _mediaCache;
+    _mediaCache = null;
+    _mediaCacheAccount = null;
+    if (opening == null) return;
+    unawaited(
+      opening
+          .then((cache) async {
+            if (cache == null) return;
+            cache.close();
+            if (await cache.directory.exists()) {
+              await cache.directory.delete(recursive: true);
+            }
+          })
+          .catchError((Object _) {}),
     );
   }
 

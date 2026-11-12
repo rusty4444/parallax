@@ -90,7 +90,6 @@ class _LinksAndSharingSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
         Eyebrow('Links and sharing', palette: p),
         const SizedBox(height: 10),
         Material(
@@ -122,6 +121,8 @@ class _LinksAndSharingSection extends StatelessWidget {
             ),
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

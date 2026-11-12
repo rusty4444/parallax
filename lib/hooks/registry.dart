@@ -112,25 +112,58 @@ List<Widget> roomDetailsSectionsFor(
   ...packsRoomDetailsSections(context, ctx),
 ];
 
-/// Extra rows inside the Settings Notifications group.
+// Settings is a menu of category pages (lib/settings_screen.dart). Each
+// function below supplies one page's feature rows or sections, so every
+// feature setting lands in a category rather than on the top-level list.
+
+/// Settings → Notifications: rows in the "This device" group.
 List<Widget> notificationSettingsRowsFor(
   BuildContext context,
   SettingsHookContext ctx,
 ) => [...notificationSettingsRows(context, ctx)];
 
-List<Widget> settingsSectionsFor(
+/// Settings → Account: rows in the "Devices" group.
+List<Widget> accountDeviceSettingsRowsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [...qrLoginSettingsRows(context, ctx)];
+
+/// Settings → Chats: sending, effects, emoji and saved messages.
+List<Widget> chatSettingsSectionsFor(
   BuildContext context,
   SettingsHookContext ctx,
 ) => [
-  ...securitySettingsSections(context, ctx),
-  ...callSettingsSections(context, ctx),
-  ...mediaSettingsSections(context, ctx),
-  ...platformSettingsSections(context, ctx),
-  ...messageSearchSettingsSections(context, ctx),
-  ...savedSettingsSections(context, ctx),
-  ...packsSettingsSections(context, ctx),
-  ...qrLoginSettingsSections(context, ctx),
+  ...scheduledSettingsSections(context, ctx),
   ...composerSettingsSections(context, ctx),
+  ...packsSettingsSections(context, ctx),
+  ...savedSettingsSections(context, ctx),
+];
+
+/// Settings → Media: upload quality.
+List<Widget> mediaSettingsSectionsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [...mediaSettingsSections(context, ctx)];
+
+/// Settings → Privacy: the on-device message search index.
+List<Widget> privacySettingsSectionsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [...messageSearchSettingsSections(context, ctx)];
+
+/// Settings → Security: key storage, recovery, room keys and reset.
+List<Widget> securitySettingsSectionsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [...securitySettingsSections(context, ctx)];
+
+/// Settings → Advanced: Element Call service and Matrix links.
+List<Widget> advancedSettingsSectionsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [
+  ...callSettingsSections(context, ctx),
+  ...platformSettingsSections(context, ctx),
 ];
 
 /// Wraps the signed-in app (inside the verification overlay). The app lock

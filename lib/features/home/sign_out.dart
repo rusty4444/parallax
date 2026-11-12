@@ -81,7 +81,7 @@ class _SignOutDialog extends StatelessWidget {
                 'Key backup is not turned on. If you sign out, you’ll need a '
                     'recovery key to confirm your digital identity and restore '
                     'your encrypted chats the next time you sign in. Set up '
-                    'recovery in Settings → Encryption first.',
+                    'recovery in Settings → Security first.',
               ),
               SignOutRisk.unknown => (
                 'Sign out?',

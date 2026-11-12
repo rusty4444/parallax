@@ -1,12 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parallax/app_theme.dart';
 import 'package:parallax/appearance_preferences.dart';
 import 'package:parallax/appearance_settings_screen.dart';
+import 'package:parallax/settings_pages.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'widget_test.dart' show FakeBackend;
+
+/// The app preferences are split across Settings → Appearance (reading and
+/// home screen), Chats (touch), Media (timeline media) and Privacy (activity
+/// and invites). These tests drive each page against the shared
+/// [AppearancePreferences] model.
 void main() {
   late SharedPreferences prefs;
   late AppearancePreferences preferences;
+  final palette = paletteFor(VisualTheme.parallax);
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -16,33 +25,86 @@ void main() {
 
   tearDown(() => preferences.dispose());
 
-  Future<void> showScreen(WidgetTester tester) async {
-    // Tall enough that the lazily built list holds every card.
+  Widget appearance(AppearancePreferences preferences) =>
+      AppearanceSettingsScreen(preferences: preferences);
+  Widget chats(AppearancePreferences preferences) => ChatsSettingsPage(
+    backend: FakeBackend(),
+    palette: palette,
+    preferences: preferences,
+  );
+  Widget media(AppearancePreferences preferences) => MediaSettingsPage(
+    backend: FakeBackend(),
+    palette: palette,
+    preferences: preferences,
+  );
+  Widget privacy(AppearancePreferences preferences) => PrivacySettingsPage(
+    backend: FakeBackend(),
+    palette: palette,
+    preferences: preferences,
+  );
+
+  /// Creates the model in the widget test's zone (not setUp's real zone).
+  Future<void> createPreferences() async {
+    preferences = AppearancePreferences(prefs: prefs);
+    await preferences.load();
+  }
+
+  /// Shows [page] for the current model on a surface tall enough that the
+  /// lazily built list holds every card.
+  Future<void> showPage(
+    WidgetTester tester,
+    Widget Function(AppearancePreferences preferences) page,
+  ) async {
     tester.view
       ..physicalSize = const Size(800, 2400)
       ..devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    // Create async queues in the widget test's zone, not setUp's real zone.
-    preferences = AppearancePreferences(prefs: prefs);
-    await preferences.load();
-    await tester.pumpWidget(
-      MaterialApp(home: AppearanceSettingsScreen(preferences: preferences)),
-    );
+    await tester.pumpWidget(MaterialApp(home: page(preferences)));
+    await tester.pumpAndSettle();
   }
 
-  testWidgets('renders each preference with its default value', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(800, 1800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await showScreen(tester);
+  Future<void> show(
+    WidgetTester tester,
+    Widget Function(AppearancePreferences preferences) page,
+  ) async {
+    await createPreferences();
+    await showPage(tester, page);
+  }
+
+  List<bool> switchValues(WidgetTester tester) => [
+    for (final tile in tester.widgetList<SwitchListTile>(
+      find.byType(SwitchListTile),
+    ))
+      tile.value,
+  ];
+
+  testWidgets('each page renders its preferences with default values', (
+    tester,
+  ) async {
+    await show(tester, appearance);
     expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Text size'), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
     expect(find.text('Compact layout'), findsOneWidget);
-    expect(find.text('Show media in timeline'), findsOneWidget);
-    expect(find.text('Send read receipts'), findsOneWidget);
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1);
     expect(tester.widget<Slider>(find.byType(Slider)).min, 0.85);
     expect(tester.widget<Slider>(find.byType(Slider)).max, 1.5);
+    // Compact, all home options.
+    expect(switchValues(tester), [false, false]);
+
+    await showPage(tester, chats);
+    expect(find.text('Double-tap reaction'), findsOneWidget);
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.byKey(const ValueKey('appearance.haptics')),
+          )
+          .value,
+      isTrue,
+    );
+
+    await showPage(tester, media);
+    expect(find.text('Show media in timeline'), findsOneWidget);
     expect(
       tester
           .widget<RadioGroup<MediaPreviewMode>>(
@@ -51,23 +113,15 @@ void main() {
           .groupValue,
       MediaPreviewMode.always,
     );
-    final switches = tester.widgetList<SwitchListTile>(
-      find.byType(SwitchListTile),
-    );
-    // Compact, all home options, haptics, hide invite avatars, read
-    // receipts, typing notifications.
-    expect(switches.map((tile) => tile.value), [
-      false,
-      false,
-      true,
-      false,
-      true,
-      true,
-    ]);
+
+    await showPage(tester, privacy);
+    expect(find.text('Send read receipts'), findsOneWidget);
+    // Read receipts, typing notifications, hide invite avatars.
+    expect(switchValues(tester), [true, true, false]);
   });
 
   testWidgets('media preview choice is saved and restored', (tester) async {
-    await showScreen(tester);
+    await show(tester, media);
     await tester.ensureVisible(find.text('Show in private rooms'));
     await tester.tap(find.text('Show in private rooms'));
     await tester.pumpAndSettle();
@@ -85,18 +139,25 @@ void main() {
   testWidgets('all switches update the model and persisted preferences', (
     tester,
   ) async {
-    await showScreen(tester);
-    for (final title in [
-      'Compact layout',
-      'Show all home options',
-      'Haptic feedback',
-      'Hide avatars in room invites',
-      'Send read receipts',
-      'Send typing notifications',
+    await createPreferences();
+    for (final (page, titles) in [
+      (appearance, ['Compact layout', 'Show all home options']),
+      (chats, ['Haptic feedback']),
+      (
+        privacy,
+        [
+          'Hide avatars in room invites',
+          'Send read receipts',
+          'Send typing notifications',
+        ],
+      ),
     ]) {
-      await tester.ensureVisible(find.text(title));
-      await tester.tap(find.text(title));
-      await tester.pumpAndSettle();
+      await showPage(tester, page);
+      for (final title in titles) {
+        await tester.ensureVisible(find.text(title));
+        await tester.tap(find.text(title));
+        await tester.pumpAndSettle();
+      }
     }
     expect(preferences.compact, isTrue);
     expect(preferences.expandedHome, isTrue);
@@ -118,7 +179,7 @@ void main() {
   testWidgets('home row style and message preview are saved and restored', (
     tester,
   ) async {
-    await showScreen(tester);
+    await show(tester, appearance);
     expect(preferences.homeRowStyle, HomeRowStyle.cards);
     expect(preferences.homePreview, HomePreview.long);
     await tester.ensureVisible(find.text('Compact'));
@@ -140,7 +201,7 @@ void main() {
   });
 
   testWidgets('the double-tap reaction can be changed', (tester) async {
-    await showScreen(tester);
+    await show(tester, chats);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('appearance.quick_reaction')),
@@ -167,7 +228,7 @@ void main() {
   });
 
   testWidgets('slider changes text size and saves it', (tester) async {
-    await showScreen(tester);
+    await show(tester, appearance);
     await tester.drag(find.byType(Slider), const Offset(150, 0));
     await tester.pumpAndSettle();
     expect(preferences.textScale, greaterThan(1));
@@ -179,7 +240,7 @@ void main() {
   });
 
   testWidgets('listens to external model changes', (tester) async {
-    await showScreen(tester);
+    await show(tester, appearance);
     await preferences.setTextScale(1.5);
     await preferences.setCompact(true);
     await tester.pumpAndSettle();
@@ -191,41 +252,70 @@ void main() {
     expect(compact.value, isTrue);
   });
 
-  testWidgets('disposing the screen does not dispose its shared model', (
+  testWidgets('disposing a page does not dispose its shared model', (
     tester,
   ) async {
-    await showScreen(tester);
+    await show(tester, appearance);
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     await preferences.setCompact(true);
     expect(preferences.compact, isTrue);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('remains scrollable on a narrow screen with large text', (
+  testWidgets('theme cards report the choice', (tester) async {
+    final themes = <VisualTheme>[];
+    final follows = <bool>[];
+    await show(
+      tester,
+      (preferences) => AppearanceSettingsScreen(
+        preferences: preferences,
+        onThemeChanged: themes.add,
+        onFollowSystemTheme: follows.add,
+      ),
+    );
+    expect(find.text('THEME'), findsOneWidget);
+    await tester.tap(find.text('Daybreak'));
+    await tester.pumpAndSettle();
+    expect(themes, [VisualTheme.daylight]);
+    await tester.tap(find.text('Match system'));
+    await tester.pumpAndSettle();
+    expect(follows, [true]);
+  });
+
+  testWidgets('without a theme callback only the preferences are shown', (
+    tester,
+  ) async {
+    await show(tester, appearance);
+    expect(find.text('THEME'), findsNothing);
+    expect(find.text('Match system'), findsNothing);
+  });
+
+  testWidgets('pages remain scrollable on a narrow screen with large text', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 560);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    preferences = AppearancePreferences(prefs: prefs);
-    await preferences.load();
-    await tester.pumpWidget(
-      MaterialApp(
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(1.8)),
-          child: child!,
+    await createPreferences();
+    for (final (page, last) in [
+      (appearance, 'Show all home options'),
+      (privacy, 'Send typing notifications'),
+    ]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(1.8)),
+            child: child!,
+          ),
+          home: page(preferences),
         ),
-        home: AppearanceSettingsScreen(preferences: preferences),
-      ),
-    );
-    await tester.scrollUntilVisible(
-      find.text('Send typing notifications'),
-      160,
-    );
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+      );
+      await tester.scrollUntilVisible(find.text(last), 160);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
   });
 }

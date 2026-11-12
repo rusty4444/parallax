@@ -260,7 +260,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
           'and Google FCM to deliver notifications.\n\n'
           'No message content passes through them: Parallax fetches and decrypts each '
           'notified message on this device to show the sender, text and media previews '
-          '(hide content under Settings → Notification content). '
+          '(hide content under Settings → Notifications). '
           'Your gateway must send data-only payloads and echo the registration ID. '
           'Never use a friend’s service without authorization.\n\n'
           'Continue only if you own or are authorized to use this gateway and Firebase project. '
@@ -643,7 +643,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
                         'notification settings without stopping it. Some phone '
                         'makers stop background apps anyway. Notifications show '
                         'content fetched and decrypted on this device; you can '
-                        'hide it under Settings → Notification content.'
+                        'hide it under Settings → Notifications.'
                   : unifiedPush
                   ? 'Parallax uses UnifiedPush automatically when a distributor '
                         'app such as ntfy is installed, and its built-in '

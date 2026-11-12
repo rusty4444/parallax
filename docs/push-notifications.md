@@ -15,8 +15,8 @@ Notifications are **on by default** after sign-in, with no opt-in
    distributor later switches over the next time Parallax comes to the
    foreground.
 
-Choosing *Built in* or *UnifiedPush* under Settings → Notifications on this device
-is remembered (`notifications.delivery`), as is turning notifications off
+Choosing *Built in* or *UnifiedPush* under Settings → Notifications → Enable
+notifications on this device is remembered (`notifications.delivery`), as is turning notifications off
 (`notifications.in_app_off`). Firebase stays manual and opt-in, and the
 automatic choice leaves it alone.
 
@@ -25,8 +25,8 @@ notifications), keeping its default server `ntfy.sh`. ntfy.sh answers the Matrix
 gateway discovery (`{"unifiedpush":{"gateway":"matrix"}}`) and relays the
 homeserver's push body unchanged; a captured relay is pinned in
 `test/platform_unified_push_test.dart`. ntfy then wakes the phone through
-Google's Firebase, so there's no ongoing notification. Settings → Notifications
-on this device offers a "Get ntfy" link when no distributor is installed.
+Google's Firebase, so there's no ongoing notification. Settings → Notifications →
+Enable notifications on this device offers a "Get ntfy" link when no distributor is installed.
 
 With a self-hosted ntfy server, the ntfy app keeps its own connection open (with
 its own ongoing notification) and the server must be reachable over HTTPS from
@@ -53,7 +53,8 @@ How it stays running (`android/app/src/main/kotlin/.../BackgroundConnection.kt`,
   the engine back headless, and `BackgroundConnectionBootReceiver` restarts it after
   a reboot or an app update.
 - Parallax asks once (while on screen) to be exempt from battery optimisation;
-  Settings → Notifications on this device shows the state and can ask again.
+  Settings → Notifications → Enable notifications on this device shows the
+  state and can ask again.
 - Turning notifications off is remembered on the device
   (`notifications.in_app_off`). There is no pusher, so nothing is registered on
   the homeserver.
@@ -63,7 +64,7 @@ more battery use than FCM, and some phone makers stop background apps regardless
 Delivery has not yet been checked on a physical phone.
 
 Your own Firebase project and gateway remain available under Settings →
-Notifications on this device → How notifications arrive, behind the consent
+Notifications → Enable notifications on this device → How notifications arrive, behind the consent
 boundary below. UnifiedPush no longer needs opt-in (see the top of this page);
 the consent rules below now apply to Firebase.
 
@@ -295,7 +296,7 @@ or UnifiedPush distributor only ever see event and room IDs.
   **Reply**. Notifications of a room are cleared when you open it in Parallax or it
   becomes read (for example on another device), and already-read events are not
   shown.
-- **Settings → Notification content:** “Show message content” (on by default; off
+- **Settings → Notifications → This device:** “Show message content” (on by default; off
   restores the generic “New message” alert and removes existing rich
   notifications) and “Show media previews in notifications” (on by default).
   Lock-screen visibility stays *private*: Android hides content on a secure lock

@@ -7,7 +7,7 @@ names — never message text.
 
 | File | Purpose |
 |---|---|
-| `saved_hooks.dart` | Message action **Save / Remove from saved**; Settings → Saved section |
+| `saved_hooks.dart` | Message action **Save / Remove from saved**; Settings → Chats → Saved section |
 | `saved_models.dart` | Account-data models, caps, folder membership rules |
 | `saved_features.dart` | `SavedFeatures` interface and `savedFeaturesOf` resolver |
 | `matrix_saved_features.dart` | Matrix implementation (account data, room creation, event loading) |
@@ -15,8 +15,8 @@ names — never message text.
 | `saved_messages_screen.dart` | Saved messages list (lazy loading, jump to message, swipe to remove, room filter) |
 | `folder_tabs.dart` | Inbox folder tabs, tab options, **Add to folder…** sheet |
 | `folder_editor_screen.dart` | New/Edit folder and the chat picker |
-| `folders_screen.dart` | Settings → Saved → Chat folders (reorder, edit, delete) |
-| `saved_settings_section.dart` | Settings → Saved |
+| `folders_screen.dart` | Settings → Chats → Saved → Chat folders (reorder, edit, delete) |
+| `saved_settings_section.dart` | Settings → Chats → Saved |
 
 ## Account data
 

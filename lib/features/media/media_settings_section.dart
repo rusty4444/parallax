@@ -6,8 +6,8 @@ import '../../app_theme.dart';
 import '../../widgets.dart';
 import 'media_preferences.dart';
 
-/// Element X media upload settings: "Optimise image upload quality" and the
-/// video quality note.
+/// Settings → Media → Uploads (Element X media upload settings): "Optimise
+/// image upload quality" and the video quality note.
 class MediaSettingsSection extends StatefulWidget {
   const MediaSettingsSection({
     super.key,
@@ -75,8 +75,7 @@ class _MediaSettingsSectionState extends State<MediaSettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
-        Eyebrow('Media', palette: p),
+        Eyebrow('Uploads', palette: p),
         const SizedBox(height: 10),
         // Material (not a decorated box) so list tiles keep their ink.
         Material(
@@ -114,6 +113,8 @@ class _MediaSettingsSectionState extends State<MediaSettingsSection> {
             ],
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

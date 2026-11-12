@@ -614,8 +614,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         : const [],
   );
 
-  /// Double tap: react with the chosen quick reaction (Settings →
-  /// Appearance → Double-tap reaction; ❤️ by default).
+  /// Double tap: react with the chosen quick reaction (Settings → Chats →
+  /// Double-tap reaction; ❤️ by default).
   Future<void> _heart(ChatEntry entry) async {
     await _react(entry, quickReactionOf(context));
   }

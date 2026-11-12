@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-/// App haptics, switched by Settings → Appearance → Haptic feedback.
+/// App haptics, switched by Settings → Chats → Haptic feedback.
 ///
 /// Android maps these to the view's haptic constants, so they also follow
 /// the phone's own "Touch feedback" setting. Material long presses on

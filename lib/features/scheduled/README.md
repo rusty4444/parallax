@@ -58,7 +58,7 @@ against a synthetic event ID, after which the real event fails to decrypt
 
 ## Undo send
 
-- **Setting:** Settings → Sending → Undo send: Off / 5 s / 10 s / 20 s
+- **Setting:** Settings → Chats → Sending → Undo send: Off / 5 s / 10 s / 20 s
   (default 5 s), in shared preferences (`UndoSendPreferences`).
 - **Outbox:** `MessageOutbox` holds newly queued main-timeline text and
   media (queued, with an in-memory deadline) before transmission. `undo`

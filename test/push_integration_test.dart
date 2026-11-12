@@ -390,8 +390,11 @@ void main() {
     await h.boot(tester, legacyBackend: _LegacyReadyBackend());
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Notifications on this device'));
-    await tester.tap(find.text('Notifications on this device'));
+    final notifications = find.byKey(const ValueKey('settings.notifications'));
+    await tester.ensureVisible(notifications);
+    await tester.tap(notifications);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enable notifications on this device'));
     await tester.pumpAndSettle();
     expect(find.byType(PushSettingsScreen), findsOneWidget);
     final screen = tester.widget<PushSettingsScreen>(

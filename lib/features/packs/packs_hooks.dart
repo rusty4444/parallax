@@ -6,7 +6,7 @@
 import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
-import '../../widgets.dart';
+import '../home/settings_widgets.dart';
 import 'emoticon_transform.dart';
 import 'pack_features.dart';
 import 'pack_management.dart';
@@ -106,7 +106,8 @@ List<Widget> packsRoomDetailsSections(
   ];
 }
 
-/// Settings › "Emoji & stickers": personal pack and packs in all rooms.
+/// Settings → Chats → "Emoji & stickers": personal pack and packs in all
+/// rooms.
 List<Widget> packsSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
@@ -115,22 +116,19 @@ List<Widget> packsSettingsSections(
   if (features == null) return const [];
   final p = ctx.palette;
   return [
-    Column(
+    ListenableBuilder(
       key: const ValueKey('packs-settings'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 28),
-        Eyebrow('Emoji & stickers', palette: p),
-        const SizedBox(height: 4),
-        ListenableBuilder(
-          listenable: features.packUpdates,
-          builder: (context, _) {
-            final personal = features.personalPack().images.length;
-            final global = features.globalPacks().length;
-            return ListTile(
+      listenable: features.packUpdates,
+      builder: (context, _) {
+        final personal = features.personalPack().images.length;
+        final global = features.globalPacks().length;
+        return SettingsGroup(
+          palette: p,
+          title: 'Emoji & stickers',
+          children: [
+            ListTile(
               key: const ValueKey('packs-settings-tile'),
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.emoji_emotions_outlined, color: p.secondary),
+              leading: const Icon(Icons.emoji_emotions_outlined),
               title: const Text('Custom emoji & stickers'),
               subtitle: Text(
                 [
@@ -150,10 +148,10 @@ List<Widget> packsSettingsSections(
                       PackSettingsScreen(features: features, palette: p),
                 ),
               ),
-            );
-          },
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     ),
   ];
 }

@@ -12,11 +12,27 @@
 - Device search reads each room's stored history once instead of on every launch, and writes in batches.
 - More profile pictures and animated stickers stay cached, and room backgrounds are decoded at screen size.
 
+### Thumbnails saved on the device
+
+- Chat and profile pictures and photo, sticker and video previews are now saved on the phone, so they show straight away after a restart and without a connection. Before, they were only kept in memory, and a picture that failed to load stayed as initials until the screen was rebuilt.
+- Settings → Media → **Sync thumbnails** goes through every chat and saves its pictures and previews, with a progress bar, a Stop button and a summary of what was saved. It reads each chat's history stored on the device (about the last 100 events), skips invitations, runs four downloads at a time and can be run again to pick up failures.
+- The same section shows how much space they use and can clear them. They're limited to 1 GB (oldest removed first), stay encrypted for encrypted chats, and are deleted when you sign out.
+
 ### Settings and home screen
 
-- The other-devices list under Encryption is collapsed until you open it.
-- Notification content (message text and media previews) is in the Notifications section, and the Message search heading sits above its card like the other sections.
-- Settings → Reading and media preferences → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
+- Settings is now a short menu. Every setting lives on one of these pages:
+  - **Account:** profile and password (or your provider's account page), devices, link a new device, delete account.
+  - **Notifications:** notifications on this device, message content and media previews, and the rules for direct chats, group chats, @room, invitations and calls.
+  - **Appearance:** theme, text size, compact layout and the home screen.
+  - **Chats:** double-tap reaction, haptic feedback, undo send, chat effects, custom emoji and stickers, note to self, saved messages and chat folders.
+  - **Media:** when chats show media, and upload quality.
+  - **Privacy:** screen lock, read receipts, typing notifications, invite avatars, blocked users and device search.
+  - **Security:** your encryption identity, verifying with another device, key storage, recovery, room keys and reset. The menu row says when this device needs recovery or setup.
+  - **Advanced:** the Element Call service and opening a Matrix link.
+  - **About & help:** version, licences and reporting a problem.
+- Sign out stays at the bottom of the main Settings screen.
+- The other-devices list under Security is collapsed until you open it.
+- Settings → Appearance → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
 
 ### Notifications without Google or a push service
 

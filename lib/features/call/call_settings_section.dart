@@ -8,7 +8,8 @@ import 'call_features.dart';
 import 'call_settings_store.dart';
 import 'call_widget_url.dart';
 
-/// Settings → Calls: Element Call URL override and MatrixRTC discovery.
+/// Settings → Advanced → Calls: Element Call URL override and MatrixRTC
+/// discovery.
 class CallSettingsSection extends StatefulWidget {
   const CallSettingsSection({
     super.key,
@@ -101,7 +102,6 @@ class _CallSettingsSectionState extends State<CallSettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
         Eyebrow('Calls', palette: p),
         const SizedBox(height: 10),
         Container(
@@ -213,6 +213,8 @@ class _CallSettingsSectionState extends State<CallSettingsSection> {
             ],
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

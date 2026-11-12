@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../appearance_preferences.dart';
 import '../feature_settings_scope.dart';
 
-/// The emoji a double tap reacts with (Settings → Appearance).
+/// The emoji a double tap reacts with (Settings → Chats).
 String quickReactionOf(BuildContext context) =>
     FeatureSettingsScope.maybeOf(context)?.preferences.quickReaction ??
     AppearancePreferences.defaultQuickReaction;

@@ -20,7 +20,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Identity-change warnings (reset, verified-user violation) | Partial | Only resets this device has observed are detected. Anything else falls back to the existing prompt before sending. |
 | Key storage on/off, recovery setup and change, reset identity | Built | Changing the recovery key needs the current key, because SDK 14.1.0 doesn't keep the master key on the device. Turning key storage off keeps recovery. |
 | Export/import room keys | Built | Settings → Security → Room keys. Pure-Dart codec in the Element file format; Element Web's test vectors decrypt. |
-| Sign in by scanning a QR code (MSC4108) | Built | `lib/features/qr_login/`. The secure channel matches vodozemac 0.11.2 test vectors. Full key import needs secret storage on the account. Parallax can also show a QR to link a new device (Settings → Devices); that side is off in Element X. |
+| Sign in by scanning a QR code (MSC4108) | Built | `lib/features/qr_login/`. The secure channel matches vodozemac 0.11.2 test vectors. Full key import needs secret storage on the account. Parallax can also show a QR to link a new device (Settings → Account → Devices); that side is off in Element X. |
 | App lock (PIN, biometrics) | Built | `lib/features/home/app_lock/`. Also covers incoming verification prompts. |
 | Multiple accounts | Off in Element X | |
 

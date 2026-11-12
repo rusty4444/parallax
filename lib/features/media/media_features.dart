@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:matrix/matrix.dart' as matrix;
 
 import '../../chat_backend.dart';
+import '../../media_disk_cache.dart';
 import '../../media_download.dart';
 import '../../room_events.dart';
 import '../../timeline_kinds.dart';
@@ -190,9 +191,16 @@ class MatrixMediaFeatures implements MediaFeatures {
       final declared = event.infoMap['size'];
       if (!imageLike || (declared is int && declared > maxBytes)) return null;
     }
+    // Previews (not originals) are kept on disk for later launches.
+    final store = backend is MediaCacheAccess
+        ? await (backend as MediaCacheAccess).thumbnailStore()
+        : null;
+    _requireCurrent(client);
+    final download = _downloader(client, maxBytes);
     final file = await event.downloadAndDecryptAttachment(
       getThumbnail: true,
-      downloadCallback: _downloader(client, maxBytes),
+      downloadCallback: (uri) =>
+          cachedMediaDownload(store, uri, maxBytes, download),
     );
     _requireCurrent(client);
     final bytes = file.bytes;

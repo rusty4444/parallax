@@ -6,7 +6,7 @@ import '../../app_theme.dart';
 import '../../widgets.dart';
 import 'undo_send.dart';
 
-/// Settings → Sending: the "Undo send" grace period.
+/// Settings → Chats → Sending: the "Undo send" grace period.
 class UndoSendSettingsSection extends StatefulWidget {
   const UndoSendSettingsSection({
     super.key,
@@ -79,7 +79,6 @@ class _UndoSendSettingsSectionState extends State<UndoSendSettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
         Eyebrow('Sending', palette: p),
         const SizedBox(height: 10),
         Material(
@@ -127,6 +126,8 @@ class _UndoSendSettingsSectionState extends State<UndoSendSettingsSection> {
             ),
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

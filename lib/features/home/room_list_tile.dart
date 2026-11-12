@@ -41,7 +41,7 @@ class RoomListTile extends StatelessWidget {
   final bool hideInviteAvatar;
   final bool busy;
 
-  /// Cards, flat list rows or compact rows (Settings > Appearance).
+  /// Cards, flat list rows or compact rows (Settings → Appearance).
   final HomeRowStyle style;
 
   /// Lines of last-message preview: none, one or two. Invitations always

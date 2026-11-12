@@ -5,24 +5,37 @@ import 'package:flutter/material.dart';
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
+import '../../push_notifications.dart';
 import '../../push_settings_screen.dart';
 import 'home_features.dart';
 import 'settings_widgets.dart';
 
-/// Global notification rules (Element X NotificationSettingsView): default
-/// mode for direct and group chats, @room mentions, invitations and calls.
-/// Delivery to this device is configured on the push settings screen.
+/// Settings → Notifications. "This device" links to delivery (the push
+/// settings screen) and holds [deviceRows] (notification content). Below it
+/// are the account's global rules (Element X NotificationSettingsView):
+/// default mode for direct and group chats, @room mentions, invitations and
+/// calls. Without [features] only the device settings are shown.
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({
     super.key,
     required this.backend,
     required this.palette,
-    required this.features,
+    this.features,
+    this.deviceRows = const [],
   });
 
   final ChatBackend backend;
   final AppPalette palette;
-  final AccountFeatures features;
+  final AccountFeatures? features;
+
+  /// Extra rows in the "This device" group, such as notification content.
+  final List<Widget> deviceRows;
+
+  /// Delivery summary for this device, also shown on the Settings menu.
+  static String deliverySummary(PushNotifications push) =>
+      push.configuration.isInApp
+      ? (push.enabled ? 'On · built in, no Google or push service' : 'Off')
+      : '${push.provider.label} · ${push.enabled ? 'on' : 'off'}';
 
   @override
   State<NotificationSettingsScreen> createState() =>
@@ -41,7 +54,11 @@ class _NotificationSettingsScreenState
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    if (widget.features == null) {
+      _loading = false;
+    } else {
+      unawaited(_load());
+    }
   }
 
   @override
@@ -55,13 +72,15 @@ class _NotificationSettingsScreenState
       mounted && _owner.isCurrent && generation == _generation;
 
   Future<void> _load() async {
+    final features = widget.features;
+    if (features == null) return;
     final generation = ++_generation;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final state = await widget.features.notificationDefaults();
+      final state = await features.notificationDefaults();
       if (_current(generation)) _state = state;
     } catch (_) {
       if (_current(generation)) {
@@ -134,9 +153,12 @@ class _NotificationSettingsScreenState
         ),
       ),
     );
-    if (choice == null || choice == current || !mounted) return;
+    final features = widget.features;
+    if (choice == null || choice == current || !mounted || features == null) {
+      return;
+    }
     await _write(
-      () => widget.features.setDefaultNotificationMode(
+      () => features.setDefaultNotificationMode(
         directChats: direct,
         allMessages: choice == NotificationDefaultMode.allMessages,
       ),
@@ -148,10 +170,34 @@ class _NotificationSettingsScreenState
     NotificationDefaultMode.mentionsAndKeywords => 'Mentions and keywords',
   };
 
+  Widget _deliveryRow(PushNotifications? push) {
+    Widget tile(String subtitle) => ListTile(
+      key: const ValueKey('notifications.device'),
+      leading: const Icon(Icons.notifications_active_outlined),
+      title: const Text('Enable notifications on this device'),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: push == null
+          ? null
+          : () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => PushSettingsScreen(notifications: push),
+              ),
+            ),
+    );
+    if (push == null) return tile('Push setup is unavailable right now');
+    return ListenableBuilder(
+      listenable: push,
+      builder: (context, _) =>
+          tile(NotificationSettingsScreen.deliverySummary(push)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
     final push = FeatureSettingsScope.maybeOf(context)?.notifications;
+    final features = widget.features;
     final state = _state;
     return SettingsPage(
       palette: p,
@@ -160,30 +206,12 @@ class _NotificationSettingsScreenState
       children: [
         SettingsGroup(
           palette: p,
-          footer:
-              'Parallax delivers notifications itself by staying connected '
-              'in the background. The rules below apply to all your devices.',
-          children: [
-            ListTile(
-              leading: const Icon(Icons.notifications_active_outlined),
-              title: const Text('Enable notifications on this device'),
-              subtitle: Text(
-                push == null
-                    ? 'Push setup is unavailable right now'
-                    : 'On or off, background activity and delivery',
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: push == null
-                  ? null
-                  : () => Navigator.of(context).push<void>(
-                      MaterialPageRoute<void>(
-                        builder: (_) => PushSettingsScreen(notifications: push),
-                      ),
-                    ),
-            ),
-          ],
+          title: 'This device',
+          children: [_deliveryRow(push), ...widget.deviceRows],
         ),
-        if (_loading && state == null)
+        if (features == null)
+          const SizedBox.shrink()
+        else if (_loading && state == null)
           const Padding(
             padding: EdgeInsets.all(24),
             child: Center(child: CircularProgressIndicator()),
@@ -219,6 +247,9 @@ class _NotificationSettingsScreenState
           SettingsGroup(
             palette: p,
             title: 'Notify me for',
+            footer:
+                'These rules are saved to your account, so they apply on all '
+                'your devices.',
             children: [
               ListTile(
                 leading: const Icon(Icons.person_outline_rounded),
@@ -247,7 +278,7 @@ class _NotificationSettingsScreenState
                 onChanged: _saving
                     ? null
                     : (value) => _write(
-                        () => widget.features.setNotificationToggle(
+                        () => features.setNotificationToggle(
                           NotificationToggle.roomMentions,
                           value,
                         ),
@@ -266,7 +297,7 @@ class _NotificationSettingsScreenState
                 onChanged: _saving
                     ? null
                     : (value) => _write(
-                        () => widget.features.setNotificationToggle(
+                        () => features.setNotificationToggle(
                           NotificationToggle.invitations,
                           value,
                         ),
@@ -279,7 +310,7 @@ class _NotificationSettingsScreenState
                 onChanged: _saving
                     ? null
                     : (value) => _write(
-                        () => widget.features.setNotificationToggle(
+                        () => features.setNotificationToggle(
                           NotificationToggle.calls,
                           value,
                         ),

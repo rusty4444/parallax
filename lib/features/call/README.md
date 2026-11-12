@@ -44,7 +44,7 @@ Reference: Element X Android v26.11.0 (`features/call`, matrix-rust-sdk
   delegation are not offered; Element Call falls back to `.well-known` foci
   and OpenID.
 - Element X bundles Element Call; Parallax loads the hosted build
-  (`https://call.element.io` by default, overridable in Settings → Calls or
-  by `.well-known` `io.element.call.url`).
+  (`https://call.element.io` by default, overridable in Settings → Advanced →
+  Calls or by `.well-known` `io.element.call.url`).
 - Live interoperability (two devices, LiveKit focus) has not been tested
   here.

@@ -11,8 +11,8 @@ import 'package:parallax/hooks/hook_types.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'widget_test.dart' show FakeBackend;
-import 'package:parallax/appearance_settings_screen.dart';
 import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/settings_pages.dart';
 
 const _roomId = '!room:matrix.example';
 final _palette = paletteFor(VisualTheme.parallax);
@@ -492,14 +492,18 @@ void main() {
       expect(() => prefs.setSeconds(7), throwsArgumentError);
     });
 
-    testWidgets('Settings → Appearance can turn undo send off', (tester) async {
+    testWidgets('Settings → Chats can turn undo send off', (tester) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(900, 3200);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
-          home: AppearanceSettingsScreen(preferences: AppearancePreferences()),
+          home: ChatsSettingsPage(
+            backend: FakeBackend(),
+            palette: paletteFor(VisualTheme.parallax),
+            preferences: AppearancePreferences(),
+          ),
         ),
       );
       await tester.pumpAndSettle();

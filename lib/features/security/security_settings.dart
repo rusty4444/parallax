@@ -17,8 +17,8 @@ import 'security_features.dart';
 import 'security_gate.dart';
 import 'security_ui.dart';
 
-/// Settings → Security: this device, key storage, recovery and reset
-/// (Element X securebackup root).
+/// Settings → Security → Key storage and recovery: this device, key storage,
+/// recovery, room keys and reset (Element X securebackup root).
 class SecuritySettingsSection extends StatefulWidget {
   const SecuritySettingsSection({
     super.key,
@@ -189,8 +189,7 @@ class _SecuritySettingsSectionState extends State<SecuritySettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
-        Eyebrow('Security', palette: p),
+        Eyebrow('Key storage and recovery', palette: p),
         const SizedBox(height: 10),
         SecurityCard(
           palette: p,
@@ -223,6 +222,8 @@ class _SecuritySettingsSectionState extends State<SecuritySettingsSection> {
             },
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

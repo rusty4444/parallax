@@ -18,7 +18,7 @@ Core screens only call the registry:
 | `lib/room_screen.dart` long-press sheet | `messageActionsFor` | forward, pin, copy link, view source, report, end poll |
 | `lib/rich_message_composer.dart` attach sheet | `composerAttachmentsFor` | poll, location |
 | `lib/room_details_screen.dart` | `roomDetailsSectionsFor` | pinned list, media gallery, poll history, threads |
-| `lib/settings_screen.dart` | `settingsSectionsFor` | call, media quality, UnifiedPush, security |
+| Settings category pages (`lib/settings_pages.dart`, `lib/security_settings_page.dart`, notification settings) | `accountDeviceSettingsRowsFor`, `notificationSettingsRowsFor`, `chatSettingsSectionsFor`, `mediaSettingsSectionsFor`, `privacySettingsSectionsFor`, `securitySettingsSectionsFor`, `advancedSettingsSectionsFor` | link new device, notification content, undo send, chat effects, emoji packs, saved, upload quality, device search, key storage, Element Call, Matrix links |
 | `lib/main.dart` signed-in shell | `wrapSignedInApp` | app lock, verification gate, call overlay, share/deep links |
 
 Each module's hook file is `lib/features/<module>/<module>_hooks.dart`. Keep

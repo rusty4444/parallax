@@ -907,6 +907,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Enter recovery key'),
       220,
@@ -947,6 +948,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     final toggle = find.byKey(const ValueKey('devices-toggle'));
     await tester.scrollUntilVisible(
       toggle,
@@ -995,6 +997,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Enter recovery key'),
       220,
@@ -1033,6 +1036,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Enter recovery key'),
       220,
@@ -1071,6 +1075,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Set up encryption'),
       220,
@@ -1149,6 +1154,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Existing identity needs careful recovery'),
       220,
@@ -1174,6 +1180,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Other devices are signed in'),
       220,
@@ -1199,6 +1206,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsCategory(tester, 'security');
     await tester.scrollUntilVisible(
       find.text('Repair with existing key'),
       220,
@@ -1858,4 +1866,17 @@ class FakeBackend extends ChatBackend {
 
   @override
   Future<void> restoreBackedUpKeys() async {}
+}
+
+/// Opens a Settings category page (`settings.<key>`) from the top-level menu.
+Future<void> openSettingsCategory(WidgetTester tester, String key) async {
+  final row = find.byKey(ValueKey('settings.$key'));
+  await tester.scrollUntilVisible(
+    row,
+    200,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(row);
+  await tester.pumpAndSettle();
 }

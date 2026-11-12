@@ -125,7 +125,6 @@ class _ChatEffectsSettingsSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
         Eyebrow('Chat effects', palette: p),
         const SizedBox(height: 10),
         Material(
@@ -148,6 +147,8 @@ class _ChatEffectsSettingsSectionState
             ),
           ),
         ),
+        // Same spacing as SettingsGroup on the settings pages.
+        const SizedBox(height: 18),
       ],
     );
   }

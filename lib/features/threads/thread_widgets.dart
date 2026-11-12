@@ -20,7 +20,8 @@ AppPalette paletteFromTheme(BuildContext context, [AppPalette? explicit]) {
   return paletteFor(defaultVisualTheme);
 }
 
-/// Whether read receipts may be public (Settings → Send read receipts).
+/// Whether read receipts may be public (Settings → Privacy → Send read
+/// receipts).
 bool publicReceiptsAllowed(BuildContext context) =>
     FeatureSettingsScope.maybeOf(context)?.preferences.sendReadReceipts ?? true;
 

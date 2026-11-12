@@ -15,6 +15,8 @@ import 'media_bubbles.dart';
 import 'media_features.dart';
 import 'media_gallery_screen.dart';
 import 'media_settings_section.dart';
+import 'thumbnail_sync.dart';
+import 'thumbnail_sync_section.dart';
 
 /// Body for media kinds (image captions, video, audio, voice, sticker, file).
 /// Return null to use the core rendering.
@@ -125,7 +127,17 @@ List<Widget> mediaRoomDetailsSections(
   ];
 }
 
+/// Settings → Media: upload quality, then offline thumbnails when the
+/// backend keeps a thumbnail store.
 List<Widget> mediaSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
-) => [MediaSettingsSection(palette: ctx.palette)];
+) => [
+  MediaSettingsSection(palette: ctx.palette),
+  if (thumbnailSyncOf(ctx.backend) case final sync?)
+    ThumbnailSyncSection(
+      key: const ValueKey('thumbnail-sync'),
+      sync: sync,
+      palette: ctx.palette,
+    ),
+];

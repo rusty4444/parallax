@@ -9,7 +9,7 @@ import 'note_to_self.dart';
 import 'saved_features.dart';
 import 'saved_messages_screen.dart';
 
-/// Settings → Saved: Note to self, Saved messages and Chat folders.
+/// Settings → Chats → Saved: Note to self, Saved messages and Chat folders.
 class SavedSettingsSection extends StatefulWidget {
   const SavedSettingsSection({
     super.key,
@@ -71,7 +71,6 @@ class _SavedSettingsSectionState extends State<SavedSettingsSection> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 28),
             Eyebrow('Saved', palette: p),
             const SizedBox(height: 10),
             SettingsGroup(

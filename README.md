@@ -37,7 +37,7 @@ Known gaps:
 
 Don't move your main account to Parallax, or rely on it for important encrypted conversations, until the acceptance tests in the parity ledger have passed.
 
-The SDK database relies on Android's app sandbox and device encryption, with app backup disabled; there's no SQLCipher layer on top. The on-device search index is stored the same way, is deleted when you sign out, and can be turned off in Settings. See [security and privacy](docs/security-and-privacy.md).
+The SDK database relies on Android's app sandbox and device encryption, with app backup disabled; there's no SQLCipher layer on top. The on-device search index is stored the same way, is deleted when you sign out, and can be turned off in Settings. Saved thumbnails stay encrypted for encrypted chats and are deleted when you sign out. See [security and privacy](docs/security-and-privacy.md).
 
 ## Code layout
 
