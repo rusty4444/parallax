@@ -511,12 +511,21 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('asks for permission, then the duration, then starts', (
+    Future<void> chooseDuration(WidgetTester tester, String label) async {
+      await tester.tap(find.text(label));
+      await tester.pump();
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Share live location'),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('offers the duration, then asks for permission, then starts', (
       tester,
     ) async {
       final backend = _Backend();
       await openAttachment(tester, backend);
-      expect(backend.fakePositions.requests, 1);
+      expect(backend.fakePositions.requests, 0, reason: 'not before choosing');
       expect(
         find.text('Choose how long to share your live location.'),
         findsOneWidget,
@@ -527,12 +536,8 @@ void main() {
         find.textContaining('visible to members after the session ends'),
         findsOneWidget,
       );
-      await tester.tap(find.text('1 hour'));
-      await tester.pump();
-      await tester.tap(
-        find.widgetWithText(FilledButton, 'Share live location'),
-      );
-      await tester.pumpAndSettle();
+      await chooseDuration(tester, '1 hour');
+      expect(backend.fakePositions.requests, 1);
       expect(backend.starts.single.duration, const Duration(hours: 1));
       expect(backend.starts.single.roomId, _roomId);
     });
@@ -541,6 +546,7 @@ void main() {
       final backend = _Backend();
       backend.fakePositions.access = LocationAccess.deniedForever;
       await openAttachment(tester, backend);
+      await chooseDuration(tester, '15 minutes');
       expect(
         find.textContaining('does not have permission to access your location'),
         findsOneWidget,
@@ -555,6 +561,7 @@ void main() {
       final backend = _Backend();
       backend.fakePositions.access = LocationAccess.serviceDisabled;
       await openAttachment(tester, backend);
+      await chooseDuration(tester, '8 hours');
       expect(find.textContaining('Please enable your GPS'), findsOneWidget);
       expect(backend.starts, isEmpty);
     });
@@ -572,6 +579,17 @@ void main() {
         findsOneWidget,
       );
       expect(backend.fakePositions.requests, 0);
+      expect(find.text('15 minutes'), findsNothing);
+    });
+
+    testWidgets('dismissing the duration sheet starts nothing', (tester) async {
+      final backend = _Backend();
+      await openAttachment(tester, backend);
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
+      expect(find.text('15 minutes'), findsNothing);
+      expect(backend.fakePositions.requests, 0);
+      expect(backend.starts, isEmpty);
     });
 
     testWidgets('no attachment in invited rooms', (tester) async {
@@ -643,6 +661,12 @@ void main() {
       backend.notifyListeners();
       await tester.pump();
       expect(backend.resumes, 2);
+    });
+
+    test('liveLocationBeforeLogout ends every share', () async {
+      final backend = _Backend();
+      await liveLocationBeforeLogout(backend);
+      expect(backend.stopAlls, 1);
     });
   });
 }

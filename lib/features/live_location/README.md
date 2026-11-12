@@ -21,8 +21,9 @@ Element X.
 
 ## Where users find it
 
-* Composer attachments → **Share live location** → location permission (asked
-  only now) → 15 minutes / 1 hour / 8 hours (with Element X’s disclaimer).
+* Composer attachments → **Share live location** → 15 minutes / 1 hour /
+  8 hours (with Element X’s disclaimer) → location permission (asked only
+  now; explained with a settings link if denied or location is off).
 * Room banner: “You’re sharing your live location” with **Stop**, or
   “N people are sharing live location”; tap for the live map.
 * Timeline: each share is a map preview of the sharer’s latest position with
@@ -104,7 +105,12 @@ allows without `ACCESS_BACKGROUND_LOCATION`, so that permission is not
 requested. geolocator’s notification has no action buttons, so there is no
 Stop action in it; tapping it opens Parallax, where the banner has Stop.
 Without notification permission (Android 13+) the service still runs but
-the notification is hidden.
+the notification is hidden. The service keeps the existing Flutter engine
+alive but does not start a new one: if the user swipes Parallax away (or
+Android kills it), sharing pauses until Parallax is opened again, when it
+resumes. If the position stream fails while Parallax is in the background it
+is retried every 30 s; Android may refuse to restart the foreground service
+from the background until Parallax is opened.
 
 ## Resume and sign-out
 

@@ -19,9 +19,10 @@ const liveLocationBackgroundNote =
 const liveLocationNoPermission =
     'You do not have permissions to share your live location in this room';
 
-/// "Share live location": checks room permission, asks for location access
-/// (prompting only now, because the user tapped), offers 15 minutes / 1 hour
-/// / 8 hours and starts sharing. Returns whether sharing started.
+/// "Share live location": checks the room's power levels, offers 15 minutes
+/// / 1 hour / 8 hours, then asks for location access (prompting only now,
+/// because the user tapped) and starts sharing. Returns whether sharing
+/// started.
 Future<bool> startLiveLocationFlow(
   BuildContext context, {
   required LiveLocationFeatures features,
@@ -35,14 +36,14 @@ Future<bool> startLiveLocationFlow(
     );
     return false;
   }
+  final duration = await showLiveLocationDurationSheet(context, palette);
+  if (duration == null || !context.mounted) return false;
   final access = await features.positions.request();
   if (!context.mounted) return false;
   if (access != LocationAccess.granted) {
     await explainLocationAccess(context, access, features.positions);
     return false;
   }
-  final duration = await showLiveLocationDurationSheet(context, palette);
-  if (duration == null || !context.mounted) return false;
   try {
     await features.startSharing(roomId, duration.duration);
   } catch (_) {
