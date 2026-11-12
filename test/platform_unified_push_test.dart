@@ -755,12 +755,17 @@ void main() {
         local.configuration.distributor,
         'org.unifiedpush.distributor.nextpush',
       );
+      final enableSwitch = find.byKey(const ValueKey('push.enable'));
+      // Scroll it back into the lazily built list, then fully below the app
+      // bar (a partially visible tile would be tapped through the app bar).
       await tester.scrollUntilVisible(
-        find.byType(SwitchListTile),
+        enableSwitch,
         -80,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.byType(SwitchListTile));
+      await tester.ensureVisible(enableSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(enableSwitch);
       await tester.pump(const Duration(milliseconds: 350));
       expect(find.text('Enable UnifiedPush notifications?'), findsOneWidget);
       expect(registered, isEmpty);

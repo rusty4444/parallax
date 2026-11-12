@@ -412,6 +412,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
           padding: const EdgeInsets.all(20),
           children: [
             SwitchListTile(
+              key: const ValueKey('push.enable'),
               contentPadding: EdgeInsets.zero,
               title: const Text('Enable push notifications'),
               subtitle: const Text(

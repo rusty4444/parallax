@@ -314,7 +314,11 @@ bool _previewableMime(String mime) => const {
 
 /// A strictly validated `mxc://server/media` URI, or null.
 Uri? validMxc(String value) {
-  if (value.length > 512) return null;
+  // Check the raw text: Uri.parse would normalise `..` segments away.
+  if (value.length > 512 ||
+      !RegExp(r'^mxc://[^/?#@\s]+/[A-Za-z0-9_-]{1,255}$').hasMatch(value)) {
+    return null;
+  }
   final uri = Uri.tryParse(value);
   if (uri == null ||
       uri.scheme != 'mxc' ||
