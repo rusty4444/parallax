@@ -4,9 +4,12 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart' show MatrixIdExtension;
+import '../../chat_backend.dart' show RoomNotificationMode;
+
+export '../../chat_backend.dart' show RoomNotificationMode;
 
 /// Per-room notification mode, as in Element X.
-enum RoomNotificationMode { allMessages, mentionsAndKeywords, mute }
+// Shared with the home module's room projection (lib/chat_backend.dart).
 
 extension RoomNotificationModeLabel on RoomNotificationMode {
   String get label => switch (this) {
