@@ -1,9 +1,33 @@
 # Android notifications
 
-## Built-in delivery (default)
+Notifications are **on by default** after sign-in, with no opt-in
+(`startDefaultNotifications` in `lib/features/platform/background_connection.dart`):
 
-Notifications are **on by default** after sign-in, with no opt-in and no
-external service: no Firebase project, push gateway or UnifiedPush distributor.
+1. **UnifiedPush** when a distributor app such as ntfy is installed. Parallax
+   registers with it automatically and finds the Matrix gateway on the
+   distributor's server (ntfy has one), falling back to the UnifiedPush project's
+   public gateway `matrix.gateway.unifiedpush.org` when the server has none, as
+   Element X does. Your homeserver sends only room and event IDs; Parallax
+   fetches and decrypts each message on the device.
+2. Otherwise, or if UnifiedPush can't start (no endpoint, several distributors
+   and none chosen, no gateway), the **built-in connection** below. A failed
+   UnifiedPush start isn't retried until the next launch; installing a
+   distributor later switches over the next time Parallax comes to the
+   foreground.
+
+Choosing *Built in* or *UnifiedPush* under Settings → Notifications on this device
+is remembered (`notifications.delivery`), as is turning notifications off
+(`notifications.in_app_off`). Firebase stays manual and opt-in, and the
+automatic choice leaves it alone.
+
+With a self-hosted ntfy server, the ntfy app keeps its own connection open (with
+its own ongoing notification) and the server must be reachable over HTTPS from
+your homeserver. With the Play Store ntfy app and `ntfy.sh`, ntfy wakes through
+Google's Firebase instead.
+
+## Built-in delivery
+
+No Firebase project, push gateway or UnifiedPush distributor.
 Parallax keeps its own Matrix sync running and turns events that the account's
 push rules mark as notifying (`Client.onNotification`: not the initial sync, not
 your own messages) into the same rich notifications described below. Live-location
@@ -30,14 +54,14 @@ Trade-offs: a permanent low-priority notification (the channel can be hidden),
 more battery use than FCM, and some phone makers stop background apps regardless.
 Delivery has not yet been checked on a physical phone.
 
-The optional push services below (your own Firebase project and gateway, or
-UnifiedPush) remain available under Settings → Notifications on this device →
-How notifications arrive. Choosing one turns the built-in delivery off; the app
-starts with the built-in delivery again on its next launch.
+Your own Firebase project and gateway remain available under Settings →
+Notifications on this device → How notifications arrive, behind the consent
+boundary below. UnifiedPush no longer needs opt-in (see the top of this page);
+the consent rules below now apply to Firebase.
 
-## Push services: status and consent boundary
+## Firebase: status and consent boundary
 
-Push through a push service is **disabled by default**. No service credentials, Firebase project, gateway,
+Push through your own Firebase project is **disabled by default**. No service credentials, Firebase project, gateway,
 friend's service, or working push backend are bundled. The production Android
 adapter exists, but **live delivery is unverified**. Tests use injected drivers and
 pusher callbacks; they do not prove FCM, gateway or homeserver interoperability.

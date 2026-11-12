@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:parallax/features/platform/unified_push.dart';
@@ -250,9 +251,19 @@ void main() {
     });
 
     test(
-      'a server without a Matrix gateway explains why and registers nothing',
+      'a server without a Matrix gateway uses the UnifiedPush public gateway',
       () async {
         gatewayResponse = (_) => http.Response('Not found', 404);
+        await enableUnifiedPush();
+        expect(push.active, isTrue);
+        expect(registered.single.pusher.data.url, defaultUnifiedPushGateway);
+      },
+    );
+
+    test(
+      'a broken gateway answer explains why and registers nothing',
+      () async {
+        gatewayResponse = (_) => http.Response('Server error', 500);
         await enableUnifiedPush();
         expect(push.active, isFalse);
         expect(push.status, PushStatus.error);
@@ -585,14 +596,13 @@ void main() {
             'https://user:pw@ntfy.example.org/up',
             (_) async => http.Response(_discovered, 200),
           ),
-          'not a Matrix gateway': (
+          'HTTP 500': (
             'https://ntfy.example.org/up',
-            (_) async =>
-                http.Response('{"unifiedpush":{"gateway":"other"}}', 200),
+            (_) async => http.Response('', 500),
           ),
-          'HTTP 404': (
+          'malformed JSON': (
             'https://ntfy.example.org/up',
-            (_) async => http.Response('', 404),
+            (_) async => http.Response('not json', 200),
           ),
           'redirect': (
             'https://ntfy.example.org/up',
@@ -608,6 +618,22 @@ void main() {
             (_) async => throw http.ClientException('offline'),
           ),
         };
+    final fallbacks = <String, Future<http.Response> Function(http.Request)>{
+      'another gateway type': (_) async =>
+          http.Response('{"unifiedpush":{"gateway":"other"}}', 200),
+      'HTTP 404': (_) async => http.Response('', 404),
+      'HTTP 401': (_) async => http.Response('', 401),
+      'HTTP 405': (_) async => http.Response('', 405),
+    };
+    for (final MapEntry(key: name, value: handler) in fallbacks.entries) {
+      test('falls back to the public gateway for $name', () async {
+        expect(
+          await discover('https://ntfy.example.org/up', handler),
+          defaultUnifiedPushGateway,
+        );
+      });
+    }
+
     for (final MapEntry(key: name, value: (endpoint, handler))
         in failures.entries) {
       test('rejects $name', () async {
@@ -711,6 +737,7 @@ void main() {
   });
 
   group('settings', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
     // Everything here runs in the widget test's fake-async zone: the shared
     // owner from setUp lives in the real zone, and chaining its queue from UI
     // taps would strand real-zone microtasks.
@@ -725,62 +752,58 @@ void main() {
       configuration: const PushConfiguration(),
     );
 
-    testWidgets('switches to UnifiedPush, picks a distributor and enables', (
-      tester,
-    ) async {
-      api.installed = [
-        'io.heckel.ntfy',
-        'org.unifiedpush.distributor.nextpush',
-      ];
-      final local = fakeZonePush();
-      await local.setSession(session('@alice:example.org'));
-      await tester.pumpWidget(
-        MaterialApp(home: PushSettingsScreen(notifications: local)),
-      );
-      expect(find.text('Your gateway and Firebase configuration'), findsOne);
-      await tester.tap(find.text('UnifiedPush'));
-      await tester.pumpAndSettle();
-      expect(local.provider, PushProvider.unifiedPush);
-      expect(
-        find.text('Your gateway and Firebase configuration'),
-        findsNothing,
-      );
-      await tester.scrollUntilVisible(
-        find.text('NextPush'),
-        80,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(find.text('ntfy'), findsOneWidget);
-      await tester.tap(find.text('NextPush'));
-      await tester.pumpAndSettle();
-      expect(
-        local.configuration.distributor,
-        'org.unifiedpush.distributor.nextpush',
-      );
-      final enableSwitch = find.byKey(const ValueKey('push.enable'));
-      // Scroll it back into the lazily built list, then fully below the app
-      // bar (a partially visible tile would be tapped through the app bar).
-      await tester.scrollUntilVisible(
-        enableSwitch,
-        -80,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.ensureVisible(enableSwitch);
-      await tester.pumpAndSettle();
-      await tester.tap(enableSwitch);
-      await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('Enable UnifiedPush notifications?'), findsOneWidget);
-      expect(registered, isEmpty);
-      await tester.tap(find.text('I agree — enable'));
-      await tester.pumpAndSettle();
-      expect(local.active, isTrue);
-      expect(api.saved, 'org.unifiedpush.distributor.nextpush');
-      expect(registered.single.pusher.appId, unifiedPushAppId);
-      expect(find.text('Registered — delivery unverified'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-      await pumpUntilDone(tester, local.shutdown());
-      expect(removed, hasLength(1));
-    });
+    testWidgets(
+      'switches to UnifiedPush and enables when a distributor is picked',
+      (tester) async {
+        api.installed = [
+          'io.heckel.ntfy',
+          'org.unifiedpush.distributor.nextpush',
+        ];
+        final local = fakeZonePush();
+        await local.setSession(session('@alice:example.org'));
+        await tester.pumpWidget(
+          MaterialApp(home: PushSettingsScreen(notifications: local)),
+        );
+        expect(find.text('Your gateway and Firebase configuration'), findsOne);
+        await tester.tap(find.text('UnifiedPush'));
+        // Two distributors and none chosen yet: it tries, then asks for one.
+        await tester.pump();
+        await pumpUntilDone(tester, local.settle());
+        await tester.pumpAndSettle();
+        expect(local.provider, PushProvider.unifiedPush);
+        expect(local.active, isFalse);
+        expect(
+          find.text('Your gateway and Firebase configuration'),
+          findsNothing,
+        );
+        await tester.scrollUntilVisible(
+          find.text('NextPush'),
+          80,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.text('ntfy'), findsOneWidget);
+        await tester.ensureVisible(find.text('NextPush'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('NextPush'));
+        await tester.pump();
+        await pumpUntilDone(tester, local.settle());
+        await tester.pumpAndSettle();
+        expect(
+          local.configuration.distributor,
+          'org.unifiedpush.distributor.nextpush',
+        );
+        // No opt-in: picking the distributor registers straight away.
+        await pumpUntilDone(tester, local.settle());
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(local.active, isTrue);
+        expect(api.saved, 'org.unifiedpush.distributor.nextpush');
+        expect(registered.single.pusher.appId, unifiedPushAppId);
+        await tester.pumpWidget(const SizedBox());
+        await pumpUntilDone(tester, local.shutdown());
+        expect(removed, hasLength(1));
+      },
+    );
 
     testWidgets('no distributor shows how to get one and registers nothing', (
       tester,

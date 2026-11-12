@@ -972,7 +972,7 @@ class PushNotifications extends ChangeNotifier {
     await _removeRegistrations();
     if (!_current(generation) || revision != _tokenRevision) return;
     var configuration = _configuration;
-    if (driver is PushGatewayResolver) {
+    if (driver is PushGatewayResolver && !configuration.isInApp) {
       // UnifiedPush: the gateway belongs to the distributor's endpoint.
       configuration = await (driver as PushGatewayResolver).resolveGateway(
         token,

@@ -76,12 +76,26 @@ class MethodChannelBackgroundConnection
       _bool('requestIgnoreBatteryOptimizations');
 }
 
-/// Device-local choices for the built-in delivery.
+/// How this device receives notifications by default.
+enum NotificationDelivery {
+  /// UnifiedPush when a distributor app (such as ntfy) is installed,
+  /// otherwise the built-in connection. Used until the user picks one.
+  automatic,
+
+  /// Always the built-in connection.
+  builtIn,
+
+  /// UnifiedPush; the built-in connection only if it cannot start.
+  unifiedPush,
+}
+
+/// Device-local choices for notifications (no opt-in: on by default).
 class InAppNotificationPreferences {
   const InAppNotificationPreferences._();
 
   static const _offKey = 'notifications.in_app_off';
   static const _batteryAskedKey = 'notifications.battery_asked';
+  static const _deliveryKey = 'notifications.delivery';
 
   static Future<SharedPreferences?> _prefs() async {
     try {
@@ -104,11 +118,80 @@ class InAppNotificationPreferences {
     }
   }
 
+  static Future<NotificationDelivery> delivery() async {
+    final saved = (await _prefs())?.getString(_deliveryKey);
+    return NotificationDelivery.values.firstWhere(
+      (value) => value.name == saved,
+      orElse: () => NotificationDelivery.automatic,
+    );
+  }
+
+  static Future<void> setDelivery(NotificationDelivery delivery) async {
+    final prefs = await _prefs();
+    if (delivery == NotificationDelivery.automatic) {
+      await prefs?.remove(_deliveryKey);
+    } else {
+      await prefs?.setString(_deliveryKey, delivery.name);
+    }
+  }
+
   static Future<bool> batteryAsked() async =>
       (await _prefs())?.getBool(_batteryAskedKey) ?? false;
 
   static Future<void> markBatteryAsked() async =>
       (await _prefs())?.setBool(_batteryAskedKey, true);
+}
+
+/// Starts notifications for the signed-in account with no opt-in, unless the
+/// user turned them off on this device: UnifiedPush when a distributor app is
+/// installed (and [unifiedPushFailed] is false) or chosen, otherwise the
+/// built-in connection. Firebase (built in or set up by hand) is left alone. Returns true when UnifiedPush was tried and failed, so callers
+/// can avoid retrying it on every resume.
+Future<bool> startDefaultNotifications(
+  PushNotifications notifications, {
+  required bool Function() isCurrent,
+  bool unifiedPushFailed = false,
+}) async {
+  if (!isCurrent() || !notifications.hasSession || notifications.busy) {
+    return false;
+  }
+  // Firebase is only present when built in or set up by hand: leave it, and
+  // its consent flow, to the user.
+  if (notifications.configuration.provider == PushProvider.firebase) {
+    return false;
+  }
+  if (await InAppNotificationPreferences.turnedOff()) return false;
+  final delivery = await InAppNotificationPreferences.delivery();
+  var wantUnifiedPush = false;
+  if (delivery != NotificationDelivery.builtIn && !unifiedPushFailed) {
+    final installed = await notifications.unifiedPushDistributors();
+    wantUnifiedPush = installed.isNotEmpty;
+  }
+  if (!isCurrent()) return false;
+  final current = notifications.configuration.provider;
+  if (notifications.enabled &&
+      current ==
+          (wantUnifiedPush ? PushProvider.unifiedPush : PushProvider.inApp)) {
+    return false;
+  }
+  var failed = false;
+  if (wantUnifiedPush) {
+    if (!notifications.configuration.isUnifiedPush) {
+      await notifications.configure(const PushConfiguration.unifiedPush());
+    }
+    if (!isCurrent()) return false;
+    await notifications.enable(consent: true);
+    if (notifications.active || !isCurrent()) return false;
+    // No usable distributor, endpoint or gateway: keep notifications working.
+    failed = true;
+  }
+  if (!notifications.configuration.isInApp) {
+    await notifications.configure(const PushConfiguration.inApp());
+  }
+  if (!isCurrent()) return failed;
+  if (!notifications.enabled) await notifications.enable(consent: true);
+  if (notifications.active && isCurrent()) await askBatteryExemptionOnce();
+  return failed;
 }
 
 /// Asks once, while Parallax is on screen, to be exempt from battery

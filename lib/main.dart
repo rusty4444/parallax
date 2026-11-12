@@ -78,6 +78,11 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   int _themeRevision = 0;
   bool _closing = false;
   bool _pushReady = false;
+  bool _notificationsStarting = false;
+
+  /// UnifiedPush could not start in this process: stay on the built-in
+  /// connection until the next launch instead of retrying on every resume.
+  bool _unifiedPushFailed = false;
   bool _pushBindingObserved = false;
   String? _pushSessionKey;
   PushSession? _pushSession;
@@ -321,25 +326,31 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     _scheduleRebuild();
   }
 
-  /// Built-in notifications are on by default, with no opt-in: start them for
-  /// the signed-in account unless the user turned them off on this device.
-  /// Retried when Parallax comes to the foreground (for example after the
-  /// notification permission was granted in Android settings).
+  /// Notifications are on by default, with no opt-in: UnifiedPush when a
+  /// distributor app such as ntfy is installed, otherwise the built-in
+  /// connection. Retried when Parallax comes to the foreground (for example
+  /// after the notification permission was granted, or ntfy was installed).
   Future<void> _startNotifications() async {
-    final notifications = _notifications;
-    bool ready() =>
-        mounted &&
-        !_closing &&
-        _pushReady &&
-        _pushSession != null &&
-        notifications.configuration.isInApp &&
-        !notifications.enabled;
-    if (!ready()) return;
-    if (await InAppNotificationPreferences.turnedOff()) return;
-    if (!ready()) return;
-    await notifications.enable(consent: true);
-    if (!mounted || _closing || !notifications.active) return;
-    await askBatteryExemptionOnce();
+    if (_notificationsStarting) return;
+    _notificationsStarting = true;
+    final session = _pushSession;
+    try {
+      final failed = await startDefaultNotifications(
+        _notifications,
+        unifiedPushFailed: _unifiedPushFailed,
+        isCurrent: () =>
+            mounted &&
+            !_closing &&
+            _pushReady &&
+            session != null &&
+            identical(_pushSession, session),
+      );
+      if (failed) _unifiedPushFailed = true;
+    } catch (_) {
+      // Settings shows the status; the next resume tries again.
+    } finally {
+      _notificationsStarting = false;
+    }
   }
 
   Future<void> _stopBackgroundConnection() async {

@@ -157,36 +157,64 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
     });
     await _run(() async {
       final notifications = widget.notifications;
+      // Remembered: the app starts with this choice next time.
+      if (provider != PushProvider.firebase) {
+        await InAppNotificationPreferences.setDelivery(
+          provider == PushProvider.inApp
+              ? NotificationDelivery.builtIn
+              : NotificationDelivery.unifiedPush,
+        );
+      }
       await notifications.configure(switch (provider) {
         PushProvider.inApp => const PushConfiguration.inApp(),
         PushProvider.unifiedPush => _unifiedPushConfiguration(),
         PushProvider.firebase => _firebaseConfiguration(),
       });
-      // The built-in delivery needs no consent: back on unless turned off.
-      if (provider == PushProvider.inApp &&
-          !await InAppNotificationPreferences.turnedOff()) {
-        await notifications.enable(consent: true);
-      }
+      await _startWithoutConsent();
     });
   }
 
   Future<void> _selectDistributor(String distributor) async {
     setState(() => _distributor = distributor);
-    await _run(
-      () => widget.notifications.configure(_unifiedPushConfiguration()),
-    );
+    await _run(() async {
+      await widget.notifications.configure(_unifiedPushConfiguration());
+      await _startWithoutConsent();
+    });
+  }
+
+  /// The built-in connection and UnifiedPush need no consent: they turn on
+  /// unless notifications were turned off on this device. UnifiedPush waits
+  /// for an installed distributor.
+  Future<void> _startWithoutConsent() async {
+    final notifications = widget.notifications;
+    if (_provider == PushProvider.firebase ||
+        !notifications.hasSession ||
+        notifications.enabled ||
+        await InAppNotificationPreferences.turnedOff()) {
+      return;
+    }
+    if (_provider == PushProvider.unifiedPush &&
+        (await notifications.unifiedPushDistributors()).isEmpty) {
+      return;
+    }
+    await notifications.enable(consent: true);
   }
 
   Future<void> _toggle(bool enabled) => _run(() async {
     final notifications = widget.notifications;
-    if (_provider == PushProvider.inApp) {
+    if (_provider != PushProvider.firebase) {
       await InAppNotificationPreferences.setTurnedOff(!enabled);
       if (!enabled) {
         await notifications.disable();
         return;
       }
-      if (!notifications.configuration.isInApp) {
+      if (_provider == PushProvider.inApp &&
+          !notifications.configuration.isInApp) {
         await notifications.configure(const PushConfiguration.inApp());
+      }
+      if (_provider == PushProvider.unifiedPush &&
+          !_matchesUnifiedPush(notifications.configuration)) {
+        await notifications.configure(_unifiedPushConfiguration());
       }
       if (!notifications.hasSession) {
         if (mounted) {
@@ -205,21 +233,14 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
       await notifications.disable();
       return;
     }
-    final unifiedPush = _provider == PushProvider.unifiedPush;
-    if (unifiedPush && !_matchesUnifiedPush(notifications.configuration)) {
-      // Apply an edited but unsaved distributor/gateway before consent.
-      await notifications.configure(_unifiedPushConfiguration());
-      if (!mounted) return;
-    }
+    // Your own Firebase project and gateway: explicit consent first.
     // Missing configuration/account cannot cause even a permission prompt.
     if (notifications.configurationIssues.isNotEmpty ||
         !notifications.hasSession) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text(
-            unifiedPush
-                ? 'Fix the UnifiedPush settings and sign in before enabling push.'
-                : 'Save your complete HTTPS gateway/Firebase configuration and sign in before enabling push.',
+            'Save your complete HTTPS gateway/Firebase configuration and sign in before enabling push.',
           ),
         ),
       );
@@ -230,34 +251,18 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
-        title: Text(
-          unifiedPush
-              ? 'Enable UnifiedPush notifications?'
-              : 'Enable push with your own services?',
-        ),
-        content: Text(
-          unifiedPush
-              ? 'Your Matrix homeserver will send event and room identifiers, '
-                    'plus this device’s push endpoint, to the Matrix gateway of '
-                    'your UnifiedPush distributor (for example your ntfy server). '
-                    'The distributor app then delivers them to Parallax.\n\n'
-                    'No message content passes through them: Parallax fetches '
-                    'and decrypts each notified message on this device to show '
-                    'the sender, text and media previews. You can hide content '
-                    'under Settings → Notification content. Use a distributor '
-                    'and gateway you trust.\n\n'
-                    'Android will also ask for notification permission. Live '
-                    'delivery is unverified.'
-              : 'Your Matrix homeserver will send event/room identifiers and a device push token '
-                    'to your configured gateway. That gateway uses your matching Firebase project '
-                    'and Google FCM to deliver notifications.\n\n'
-                    'No message content passes through them: Parallax fetches and decrypts each '
-                    'notified message on this device to show the sender, text and media previews '
-                    '(hide content under Settings → Notification content). '
-                    'Your gateway must send data-only payloads and echo the registration ID. '
-                    'Never use a friend’s service without authorization.\n\n'
-                    'Continue only if you own or are authorized to use this gateway and Firebase project. '
-                    'Android will also ask for notification permission. Live delivery is unverified.',
+        title: const Text('Enable push with your own services?'),
+        content: const Text(
+          'Your Matrix homeserver will send event/room identifiers and a device push token '
+          'to your configured gateway. That gateway uses your matching Firebase project '
+          'and Google FCM to deliver notifications.\n\n'
+          'No message content passes through them: Parallax fetches and decrypts each '
+          'notified message on this device to show the sender, text and media previews '
+          '(hide content under Settings → Notification content). '
+          'Your gateway must send data-only payloads and echo the registration ID. '
+          'Never use a friend’s service without authorization.\n\n'
+          'Continue only if you own or are authorized to use this gateway and Firebase project. '
+          'Android will also ask for notification permission. Live delivery is unverified.',
         ),
         actions: [
           TextButton(
@@ -282,8 +287,10 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
   Future<void> _save() =>
       _run(() => widget.notifications.configure(_firebaseConfiguration()));
 
-  Future<void> _saveUnifiedPush() =>
-      _run(() => widget.notifications.configure(_unifiedPushConfiguration()));
+  Future<void> _saveUnifiedPush() => _run(() async {
+    await widget.notifications.configure(_unifiedPushConfiguration());
+    await _startWithoutConsent();
+  });
 
   Widget _field(
     String label,
@@ -473,8 +480,9 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
     const SizedBox(height: 8),
     const Text(
       'UnifiedPush delivers notifications through a distributor app you '
-      'choose, such as ntfy, instead of Google. Parallax registers with it, '
-      'then checks its server for a Matrix gateway, as Element X does.',
+      'choose, such as ntfy, instead of Google. Parallax registers with it '
+      'automatically, then checks its server for a Matrix gateway, as '
+      'Element X does.',
     ),
     const SizedBox(height: 8),
     _distributorList(editable),
@@ -489,7 +497,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
     ),
     FilledButton.tonal(
       onPressed: editable ? _saveUnifiedPush : null,
-      child: const Text('Save UnifiedPush settings (keep push off)'),
+      child: const Text('Save UnifiedPush settings'),
     ),
   ];
 
@@ -511,13 +519,13 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
               key: const ValueKey('push.enable'),
               contentPadding: EdgeInsets.zero,
               title: Text(
-                inApp
+                inApp || unifiedPush
                     ? 'Notifications on this device'
                     : 'Enable push notifications',
               ),
               subtitle: Text(
-                inApp
-                    ? 'On by default. Turn off to stop notifications and the background connection on this device.'
+                inApp || unifiedPush
+                    ? 'On by default. Turn off to stop notifications on this device.'
                     : 'Off by default. Requires your own configured services and consent.',
               ),
               value: notifications.enabled,
@@ -533,7 +541,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        inApp
+                        inApp || unifiedPush
                             ? (notifications.active
                                   ? 'Notifications are on'
                                   : 'Notifications are off')
@@ -609,13 +617,13 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
                         'content fetched and decrypted on this device; you can '
                         'hide it under Settings → Notification content.'
                   : unifiedPush
-                  ? 'Android only. Permission is not proof of delivery. A live test with '
-                        'your distributor, its Matrix gateway and your Matrix account is still '
-                        'required. Foreground restarts and account changes require enabling '
-                        'again. Notifications show content fetched on this device, falling '
-                        'back to a generic alert when it can’t be decrypted in time; taps, '
-                        '“Reply” and “Mark as read” are checked against this registration and '
-                        'stale ones are discarded.'
+                  ? 'Parallax uses UnifiedPush automatically when a distributor '
+                        'app such as ntfy is installed, and its built-in '
+                        'connection otherwise or if UnifiedPush can’t start. Your '
+                        'homeserver sends only room and event IDs through your '
+                        'distributor’s server and its Matrix gateway (or the '
+                        'UnifiedPush project’s public gateway when it has none); '
+                        'Parallax fetches and decrypts each message on this device.'
                   : 'Android only. Permission is not proof of delivery. A live test with your own '
                         'Firebase project, gateway and Matrix account is still required. Configuration is kept for '
                         'this app session; foreground restarts and account changes require enabling again. '

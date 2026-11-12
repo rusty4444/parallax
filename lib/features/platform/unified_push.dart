@@ -30,6 +30,16 @@ const maxUnifiedPushMessageBytes = 64 * 1024;
 /// Path of the Matrix push gateway API on a distributor server.
 const matrixGatewayPath = '/_matrix/push/v1/notify';
 
+/// The UnifiedPush project's public Matrix gateway, used (as in Element X)
+/// when the distributor's server has no Matrix gateway of its own.
+final defaultUnifiedPushGateway = Uri.parse(
+  'https://matrix.gateway.unifiedpush.org/_matrix/push/v1/notify',
+);
+
+/// Answers that mean "no Matrix gateway here" rather than an error (Element X
+/// UnifiedPushGatewayResolver).
+const _noMatrixGatewayStatuses = {401, 403, 404, 405, 406};
+
 /// Where users can find a distributor (same page Element X links to).
 final unifiedPushDistributorsUrl = Uri.parse(
   'https://unifiedpush.org/users/distributors/',
@@ -213,8 +223,10 @@ Map<String, dynamic>? parseUnifiedPushMessage(
 }
 
 /// Discovers the Matrix gateway for a distributor endpoint, as Element X
-/// does: GET `<origin>/_matrix/push/v1/notify` and require
-/// `{"unifiedpush": {"gateway": "matrix"}}`. HTTPS only; no redirects.
+/// does: GET `<origin>/_matrix/push/v1/notify` and use it when it answers
+/// `{"unifiedpush": {"gateway": "matrix"}}`. When the server clearly has no
+/// Matrix gateway (a 200 without one, or 401/403/404/405/406), falls back to
+/// [defaultUnifiedPushGateway]. HTTPS only; no redirects.
 Future<Uri> discoverUnifiedPushGateway(
   String endpoint, {
   required http.Client client,
@@ -272,6 +284,9 @@ Future<Uri> discoverUnifiedPushGateway(
   } catch (_) {
     throw unavailable;
   }
+  if (_noMatrixGatewayStatuses.contains(response.statusCode)) {
+    return defaultUnifiedPushGateway;
+  }
   if (response.statusCode != 200) throw unavailable;
   try {
     final json = jsonDecode(utf8.decode(bytes));
@@ -281,9 +296,9 @@ Future<Uri> discoverUnifiedPushGateway(
       return gateway;
     }
   } on FormatException {
-    // Fall through.
+    throw unavailable;
   }
-  throw unavailable;
+  return defaultUnifiedPushGateway;
 }
 
 /// Android UnifiedPush adapter. Inert until [initialize]; never touches the
