@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' as matrix;
 import 'package:parallax/bridge_bots.dart';
 import 'package:parallax/matrix_room_names.dart';
+import 'package:parallax/people_names.dart';
 
 class _Database extends Fake implements matrix.DatabaseApi {}
 
@@ -20,6 +21,21 @@ const _alex = '@meta_1001:samprim.net';
 const _sam = '@meta_1002:samprim.net';
 
 void main() {
+  group('joinPeopleNames (Element X room names)', () {
+    test('lists people without "Group with"', () {
+      expect(joinPeopleNames(['Alex']), 'Alex');
+      expect(joinPeopleNames(['Alex', 'Sam']), 'Alex and Sam');
+      expect(joinPeopleNames(['Alex', 'Sam', 'Kim']), 'Alex, Sam and Kim');
+      expect(
+        joinPeopleNames(['Alex', 'Sam'], others: 1),
+        'Alex, Sam and 1 other',
+      );
+      expect(joinPeopleNames(['Alex'], others: 3), 'Alex and 3 others');
+      expect(joinPeopleNames([' ', ''], others: 2), '2 people');
+      expect(joinPeopleNames(const []), 'Empty chat');
+    });
+  });
+
   group('looksLikeBridgeBot', () {
     test('recognises bridge bot usernames and display names', () {
       expect(looksLikeBridgeBot(_bot), isTrue);
@@ -67,6 +83,7 @@ void main() {
       String? roomName,
       String? bridgeBot,
       String? direct,
+      int? joined,
     }) {
       if (direct != null) {
         client.accountData['m.direct'] = matrix.BasicEvent(
@@ -81,7 +98,7 @@ void main() {
         client: client,
         summary: matrix.RoomSummary.fromJson({
           'm.heroes': heroes ?? members.keys.toList(),
-          'm.joined_member_count': members.length + 1,
+          'm.joined_member_count': joined ?? members.length + 1,
         }),
       );
       var n = 0;
@@ -117,22 +134,32 @@ void main() {
       final r = room({_bot: 'Meta bridge bot', _alex: 'Alex', _sam: 'Sam'});
       // The SDK's own name is what showed up in the room list.
       expect(r.getLocalizedDisplayname(), contains('Meta bridge bot'));
-      expect(r.parallaxName, 'Group with Alex, Sam');
+      expect(r.parallaxName, 'Alex and Sam');
       // The avatar cluster shows the two people, not the Meta logo.
       expect(r.peopleHeroes, [_alex, _sam]);
+    });
+
+    test('larger groups name two people and count the others', () {
+      final r = room({
+        _bot: 'Meta bridge bot',
+        _alex: 'Alex',
+        _sam: 'Sam',
+      }, joined: 7);
+      // Me, the bot, Alex and Sam are 4 of 7: 3 others.
+      expect(r.parallaxName, 'Alex, Sam and 3 others');
     });
 
     test('a bot named by m.bridge is left out whatever it is called', () {
       const custom = '@relay:samprim.net';
       final r = room({custom: 'Relay', _alex: 'Alex'}, bridgeBot: custom);
       expect(r.bridgeBotIds, {custom});
-      expect(r.parallaxName, 'Group with Alex');
+      expect(r.parallaxName, 'Alex');
       expect(r.peopleHeroes, [_alex]);
     });
 
     test('a room with only the bridge bot keeps its name and picture', () {
       final r = room({_bot: 'Meta bridge bot'});
-      expect(r.parallaxName, r.getLocalizedDisplayname());
+      expect(r.parallaxName, 'Meta bridge bot');
       expect(r.peopleHeroes, [_bot]);
     });
 

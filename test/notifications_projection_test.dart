@@ -158,6 +158,32 @@ void main() {
     },
   );
 
+  test(
+    'a stale stored name is replaced by the server\'s current one',
+    () async {
+      final client = _Client((request) async {
+        if (request.url.path.contains('/state/m.room.member/')) {
+          return http.Response(
+            '{"membership":"join","displayname":"Alice Smith"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('{"errcode":"M_NOT_FOUND"}', 404);
+      });
+      // _groupRoom holds the old name, "Alice" (as the database would).
+      final room = _groupRoom(client);
+      final resolved = await projectPushEvent(
+        event: _message(room, {'msgtype': 'm.text', 'body': 'Hi'}),
+        room: room,
+        myUserId: _me,
+        isDirect: false,
+        highlight: false,
+      );
+      expect(resolved.line.senderName, 'Alice Smith');
+    },
+  );
+
   test('emotes use the display name', () async {
     final room = _groupRoom(client);
     final resolved = await projectPushEvent(

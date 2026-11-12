@@ -68,6 +68,8 @@ class RoomListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The people named in this row are checked with the server once.
+    if (!room.invited) backend.roomShown(room.id);
     final p = palette;
     final unread = room.unread > 0 || room.manuallyUnread || failedSend;
     final mentioned = room.highlightCount > 0;

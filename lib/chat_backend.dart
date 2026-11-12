@@ -471,6 +471,10 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<DownloadedAttachment> loadAttachment(String roomId, String eventId);
   Future<Uint8List?> loadAvatar(Uri url);
 
+  /// A room row was shown: the backend may check the names of the people it
+  /// shows (once per session). Must not notify synchronously.
+  void roomShown(String roomId) {}
+
   /// An already downloaded avatar, so rows can show it on their first frame
   /// instead of flashing the initial while [loadAvatar] completes.
   Uint8List? cachedAvatar(Uri url) => null;

@@ -168,11 +168,15 @@ class MatrixBackend extends ChatBackend
   final _memberRequests = <String>{};
   final _memberQueue = Queue<(matrix.Room, String)>();
   final _memberPending = <String>{};
+
+  /// Rooms whose shown people were checked with the server this session.
+  final _freshRooms = <String>{};
+  final _freshQueue = Queue<(matrix.Room, String)>();
+  var _freshActive = 0;
   var _memberActive = 0;
 
   /// Senders of the open room whose membership wasn't cached, fetched once.
   final _requestedSenders = <String>{};
-  final _senderProfiles = <String, ({String? name, Uri? avatar})>{};
   List<ChatEntry> _messages = const [];
   final _imageCache = <String, Uint8List>{};
   int _imageCacheBytes = 0;
@@ -1052,7 +1056,6 @@ class MatrixBackend extends ChatBackend
     _loadingHistory = false;
     _messages = const [];
     _requestedSenders.clear();
-    _senderProfiles.clear();
     notifyListeners();
 
     matrix.Timeline? created;
@@ -1129,7 +1132,6 @@ class MatrixBackend extends ChatBackend
     _loadingHistory = false;
     _messages = const [];
     _requestedSenders.clear();
-    _senderProfiles.clear();
     notifyListeners();
     bool current() =>
         generation == _roomGeneration &&
@@ -2809,10 +2811,11 @@ class MatrixBackend extends ChatBackend
     _roomIndex.clear();
     _messageRefreshTimer?.cancel();
     _requestedSenders.clear();
-    _senderProfiles.clear();
     _memberRequests.clear();
     _memberQueue.clear();
     _memberPending.clear();
+    _freshRooms.clear();
+    _freshQueue.clear();
     _messages = const [];
     _sending = false;
     _loadingHistory = false;
@@ -3287,6 +3290,48 @@ class MatrixBackend extends ChatBackend
     }
   }
 
+  /// The room list showed [roomId]: check the names of the people its row
+  /// shows (heroes and the last sender) with the server, once per session.
+  /// Stored copies can predate renames that arrived outside live syncs.
+  @override
+  void roomShown(String roomId) {
+    final client = _client;
+    if (_disposed || client == null || !_freshRooms.add(roomId)) return;
+    final room = _roomIndex[roomId];
+    if (room == null || room.membership != matrix.Membership.join) return;
+    final sender = room.lastEvent?.senderId;
+    for (final id in {
+      ...room.peopleHeroes.take(4),
+      if (sender != null && sender != client.userID) sender,
+    }) {
+      _freshQueue.add((room, id));
+    }
+    _pumpFresh();
+  }
+
+  void _pumpFresh() {
+    final generation = _securityGeneration;
+    while (_freshActive < 3 && _freshQueue.isNotEmpty && !_disposed) {
+      final (room, id) = _freshQueue.removeFirst();
+      _freshActive++;
+      unawaited(
+        room
+            .refreshMemberFromServer(id)
+            .then((changed) {
+              if (changed && !_disposed && generation == _securityGeneration) {
+                _scheduleRoomUpdate(roomIds: {room.id});
+              }
+            })
+            .whenComplete(() {
+              _freshActive--;
+              if (!_disposed && generation == _securityGeneration) {
+                _pumpFresh();
+              }
+            }),
+      );
+    }
+  }
+
   /// Feeds a sync to the room list as the sync stream would.
   @visibleForTesting
   void debugRoomsSynced(matrix.SyncUpdate update) => _roomsSynced(update);
@@ -3401,9 +3446,12 @@ class MatrixBackend extends ChatBackend
     });
   }
 
-  /// Loads names and avatars for visible senders the SDK hasn't loaded
-  /// (lazy-loaded members), once per sender per opened room, in the
-  /// background; their messages show the picture on the next refresh.
+  /// Names and avatars of the senders on screen, checked once per sender
+  /// each time a room opens: loaded if missing (lazy loading), then compared
+  /// with the server's current member state. The database keeps a stale
+  /// copy when a rename arrived while history was being filled in (bridges
+  /// renaming contacts from phone numbers to names), which Element avoids
+  /// by asking the server.
   void _requestMissingSenders(
     matrix.Timeline timeline,
     Iterable<matrix.Event> events,
@@ -3411,39 +3459,35 @@ class MatrixBackend extends ChatBackend
     final client = _client;
     final room = timeline.room;
     if (client == null) return;
-    final missing = <String>[];
+    final senders = <String>[];
     for (final event in events) {
       final id = event.senderId;
       if (id == client.userID ||
           !id.isValidMatrixIdStrict() ||
-          room.getState(matrix.EventTypes.RoomMember, id) != null ||
           !_requestedSenders.add(id)) {
         continue;
       }
-      missing.add(id);
-      if (missing.length >= 20) break;
+      senders.add(id);
+      if (senders.length >= 20) break;
     }
-    if (missing.isEmpty) return;
+    if (senders.isEmpty) return;
     final generation = _roomGeneration;
     unawaited(() async {
-      var found = false;
-      for (final id in missing) {
-        try {
-          final user = await room.requestUser(id, ignoreErrors: true);
-          if (_disposed || generation != _roomGeneration) return;
-          if (user != null) {
-            _senderProfiles[id] = (
-              name: user.displayName,
-              avatar: user.avatarUrl,
-            );
-            found = true;
-          }
-        } catch (_) {
-          // Best effort: the initial stays.
+      var changed = false;
+      for (final id in senders) {
+        final missing = room.getState(matrix.EventTypes.RoomMember, id) == null;
+        if (missing) {
+          await room.loadMissingMembers([
+            id,
+          ], timeout: const Duration(seconds: 10));
+          changed = true;
         }
+        if (await room.refreshMemberFromServer(id)) changed = true;
+        if (_disposed || generation != _roomGeneration) return;
       }
-      if (found && identical(timeline, _timeline)) {
+      if (changed && identical(timeline, _timeline)) {
         _scheduleMessageRefresh(timeline);
+        _scheduleRoomUpdate(roomIds: {room.id});
       }
     }());
   }
@@ -3512,12 +3556,8 @@ class MatrixBackend extends ChatBackend
       matrix.EventTypes.RoomMember,
       event.senderId,
     );
-    // Senders without cached membership use the profile fetched once when the
-    // room opened (see _requestMissingSenders).
-    final profile = member == null ? _senderProfiles[event.senderId] : null;
-    final memberName = member?.content['displayname'] ?? profile?.name;
-    final memberAvatar =
-        member?.content['avatar_url'] ?? profile?.avatar?.toString();
+    final memberName = member?.content['displayname'];
+    final memberAvatar = member?.content['avatar_url'];
     final content = event.redacted
         ? const <String, Object?>{}
         : Map<String, Object?>.unmodifiable(display.content);

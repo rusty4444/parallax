@@ -26,14 +26,30 @@ class _Database extends Fake implements matrix.DatabaseApi {
   }
 }
 
+/// The server's current member names, as GET .../state/m.room.member/{user}.
+final serverNames = <String, String>{};
+
 class _Client extends matrix.Client {
   _Client()
     : super(
         'projection-test',
         database: _Database(),
-        httpClient: MockClient(
-          (_) async => http.Response('{"errcode":"M_NOT_FOUND"}', 404),
-        ),
+        httpClient: MockClient((request) async {
+          final path = Uri.decodeComponent(request.url.path);
+          final marker = '/state/m.room.member/';
+          final at = path.indexOf(marker);
+          final name = at < 0
+              ? null
+              : serverNames[path.substring(at + marker.length)];
+          if (name != null) {
+            return http.Response(
+              '{"membership":"join","displayname":"$name"}',
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('{"errcode":"M_NOT_FOUND"}', 404);
+        }),
       ) {
     homeserver = Uri.parse('https://matrix.example');
     accessToken = 'token';
@@ -209,6 +225,22 @@ void main() {
     expect(seen, isNot(contains(ghost)));
     final projected = backend.rooms.firstWhere((r) => r.id == '!d:example.org');
     expect(projected.preview, 'Love our little bmfer');
+  });
+
+  test('a shown room checks its people with the server once', () async {
+    // Friend was renamed while the app wasn't syncing: the stored copy
+    // (in memory) still says "Friend".
+    serverNames['@friend:example.org'] = 'Friend Renamed';
+    addTearDown(serverNames.clear);
+    final before = backend.debugRoomProjections;
+    backend.roomShown('!a:example.org');
+    backend.roomShown('!a:example.org');
+    await settle();
+    await settle();
+    final a = backend.rooms.firstWhere((r) => r.id == '!a:example.org');
+    expect(a.previewSender, 'Friend Renamed');
+    // Only that room was projected again.
+    expect(backend.debugRoomProjections, before + 1);
   });
 
   test('favourites are read from the room index', () {

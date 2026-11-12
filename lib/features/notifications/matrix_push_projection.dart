@@ -60,10 +60,15 @@ Future<ResolvedPushEvent> projectPushEvent({
   }
   // Show people's names, not Matrix IDs: the sender (and a DM partner, who
   // names the conversation) may not be loaded for a room not opened yet.
-  await room.loadMissingMembers([
-    event.senderId,
-    if (isDirect) ...room.peopleHeroes.take(1),
-  ]);
+  final people = [event.senderId, if (isDirect) ...room.peopleHeroes.take(1)];
+  await room.loadMissingMembers(people);
+  // The stored copy can predate a rename (bridges renaming contacts from
+  // phone numbers to names): use the server's current names.
+  try {
+    await Future.wait([
+      for (final id in people.toSet()) room.refreshMemberFromServer(id),
+    ]).timeout(const Duration(seconds: 3));
+  } catch (_) {}
   final sender = event.senderFromMemoryOrFallback;
   final senderName =
       sanitiseNotificationName(sender.calcDisplayname()) ??

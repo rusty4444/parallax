@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:matrix/matrix.dart';
 
 import 'bridge_bots.dart';
+import 'people_names.dart';
 
 /// State event types whose `bridgebot` names a room's bridge bot (MSC2346
 /// and the pre-standard type mautrix bridges also send).
@@ -39,8 +42,9 @@ extension ParallaxRoomNames on Room {
     ], (id) => isBridgeBot(id, bots));
   }
 
-  /// [getLocalizedDisplayname], but a name built from members leaves out
-  /// bridge bots ("Group with Alex, Sam", not "Group with Meta bridge bot…").
+  /// [getLocalizedDisplayname] without bridge bots and without "Group
+  /// with": a room with no name or address is named after its people the
+  /// way Element X does ("Alex", "Alex and Sam", "Alex, Sam and 3 others").
   /// Names and addresses set on the room are used unchanged.
   String get parallaxName {
     if (name.isNotEmpty) return name;
@@ -49,15 +53,24 @@ extension ParallaxRoomNames on Room {
     final heroes = peopleHeroes;
     if (heroes.isEmpty) return getLocalizedDisplayname();
     const i18n = MatrixDefaultLocalizations();
-    final result = heroes
-        .map(
-          (hero) => unsafeGetUserFromMemoryOrFallback(
-            hero,
-          ).calcDisplayname(i18n: i18n),
-        )
-        .join(', ');
+    final names = [
+      for (final hero in heroes)
+        unsafeGetUserFromMemoryOrFallback(hero).calcDisplayname(i18n: i18n),
+    ];
+    final members =
+        (summary.mJoinedMemberCount ?? 0) + (summary.mInvitedMemberCount ?? 0);
+    // Everyone except me and the people already named. Bots the server
+    // listed as heroes don't count as "others".
+    final listed = {...?summary.mHeroes}..remove(client.userID);
+    final others = members > 0
+        ? math.max<int>(
+            0,
+            members - 1 - math.max<int>(listed.length, heroes.length),
+          )
+        : 0;
+    final result = joinPeopleNames(names, others: others);
     if (isAbandonedDMRoom) return i18n.wasDirectChatDisplayName(result);
-    return isDirectChat ? result : i18n.groupWith(result);
+    return result;
   }
 
   /// Loads names and avatars for [userIds] this room holds no member state
@@ -65,9 +78,15 @@ extension ParallaxRoomNames on Room {
   /// started often lack them. Each is looked up in the database, then the
   /// room's state on the server, then the user's profile (SDK
   /// [requestUser], which keeps what it finds). Gives up after [timeout].
+  ///
+  /// With [fromServer], each is then checked against the server's current
+  /// member state: the database keeps a stale copy when a rename arrived
+  /// while history was being filled in rather than in a live sync (bridges
+  /// renaming contacts from phone numbers to names, for example).
   Future<void> loadMissingMembers(
     Iterable<String> userIds, {
     Duration timeout = const Duration(seconds: 4),
+    bool fromServer = false,
   }) async {
     final missing = <String>{
       for (final id in userIds)
@@ -78,10 +97,67 @@ extension ParallaxRoomNames on Room {
     if (missing.isEmpty) return;
     try {
       await Future.wait([
-        for (final id in missing) _loadMember(id),
+        for (final id in missing)
+          _loadMember(id).then((_) async {
+            if (fromServer) await refreshMemberFromServer(id);
+          }),
       ]).timeout(timeout);
     } catch (_) {
       // Slow or unreachable: the caller uses what it has.
+    }
+  }
+
+  /// Replaces [userId]'s member state with the server's current one when
+  /// it differs, in memory and (where the database can be written) on
+  /// disk. Returns whether anything changed; never throws.
+  Future<bool> refreshMemberFromServer(String userId) async {
+    if (!userId.isValidMatrixIdStrict()) return false;
+    // Join any lookup already running (the SDK starts them for missing
+    // members): it re-reads the database and would otherwise overwrite the
+    // server's answer with the stale copy when it finishes later.
+    try {
+      await requestUser(userId, ignoreErrors: true);
+    } catch (_) {}
+    try {
+      final content = await client.getRoomStateWithKey(
+        id,
+        EventTypes.RoomMember,
+        userId,
+      );
+      final membership = content.tryGet<String>('membership', TryGet.silent);
+      if (membership == null) return false;
+      final name = content.tryGet<String>('displayname', TryGet.silent);
+      final avatar = content.tryGet<String>('avatar_url', TryGet.silent);
+      final current = getState(EventTypes.RoomMember, userId)?.content;
+      if (current != null &&
+          current['displayname'] == name &&
+          current['avatar_url'] == avatar &&
+          current['membership'] == membership) {
+        return false;
+      }
+      final user = User(
+        userId,
+        room: this,
+        displayName: name,
+        avatarUrl: avatar,
+        membership: membership,
+      );
+      setState(user);
+      try {
+        await client.database.transaction(
+          () => client.database.storeEventUpdate(
+            id,
+            user,
+            EventUpdateType.state,
+            client,
+          ),
+        );
+      } catch (_) {
+        // Read-only (notification isolate): memory is enough there.
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
