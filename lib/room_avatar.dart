@@ -6,6 +6,7 @@ import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'network_logo.dart';
+import 'room_logos.dart';
 import 'room_pictures.dart';
 import 'widgets.dart';
 
@@ -21,6 +22,7 @@ class RoomAvatar extends StatelessWidget {
     required this.palette,
     this.size = 52,
     this.pictures,
+    this.logoOverrides,
   });
 
   final ChatRoom room;
@@ -31,14 +33,20 @@ class RoomAvatar extends StatelessWidget {
   /// Pictures set on this phone; defaults to [RoomPictures.shared].
   final RoomPictures? pictures;
 
+  /// Per-room logo choices; defaults to [RoomLogos.shared].
+  final RoomLogos? logoOverrides;
+
+  RoomLogos get _logoStore => logoOverrides ?? RoomLogos.shared;
+
   @override
   Widget build(BuildContext context) {
     final pictures = this.pictures ?? RoomPictures.shared;
     final logos =
         FeatureSettingsScope.maybeOf(context)?.preferences.networkLogos ??
         false;
+    final overrides = _logoStore;
     return ListenableBuilder(
-      listenable: pictures,
+      listenable: Listenable.merge([pictures, overrides]),
       builder: (context, _) {
         final local = pictures.pictureFor(room.id);
         if (local != null) {
@@ -52,7 +60,9 @@ class RoomAvatar extends StatelessWidget {
   /// The logo for the chat's app when [logos] is on and there is one, else
   /// the first letter of its name.
   Widget _letter(bool logos) {
-    final network = room.network;
+    // An explicit per-room choice wins over detection; "no logo" is stored
+    // as otherBridge, which has no logo and so shows the letter.
+    final network = _logoStore.overrideFor(room.id) ?? room.network;
     if (logos && network != null && network.hasLogo) {
       return NetworkLogo(
         network: network,

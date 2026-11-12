@@ -12,6 +12,12 @@
 - Device search reads each room's stored history once instead of on every launch, and writes in batches.
 - More profile pictures and animated stickers stay cached, and room backgrounds are decoded at screen size.
 
+### Chat pictures and app logos
+
+- Long-press a chat → **Chat picture…** sets a picture only this phone shows for that chat. It's cropped to a 256 px square in the background and saved on the phone, so it appears at once and costs no network.
+- Settings → Appearance → **App logos instead of letters** shows the app's logo (WhatsApp, Google Messages, Messenger, Instagram, Discord, LinkedIn, X, Xbox, Matrix) for chats with no picture. Detection uses bridge state, bridge bot names, bridged contact usernames, the room's canonical alias and its last sender; when there's no evidence the chat keeps its letter rather than a guessed Matrix logo.
+- Long-press a chat → **Chat picture… → App logo…** overrides what was detected for that room, including "No logo". Both choices are saved on the phone.
+
 ### Link previews
 
 - Links in messages show a small card with the page's title, description and image, under the message. Your homeserver fetches the preview, so your phone doesn't contact the site; tapping the card opens the link.

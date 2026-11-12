@@ -264,7 +264,7 @@ class _InboxScreenState extends State<InboxScreen> {
       return;
     }
     if (choice == RoomMenuAction.chatPicture) {
-      await showRoomPictureSheet(context, room: room);
+      await showRoomPictureSheet(context, room: room, palette: widget.palette);
       return;
     }
     if (choice == RoomMenuAction.copyLink) {

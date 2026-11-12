@@ -12,6 +12,7 @@ import 'package:parallax/feature_settings_scope.dart';
 import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/network_logo.dart';
 import 'package:parallax/room_avatar.dart';
+import 'package:parallax/room_logos.dart';
 import 'package:parallax/room_pictures.dart';
 import 'package:parallax/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -107,10 +108,62 @@ void main() {
     });
 
     test('ordinary Matrix users and bare prefixes are Matrix', () {
-      expect(of([]), ChatNetwork.matrix);
       expect(of(['@alice:matrix.org']), ChatNetwork.matrix);
       expect(of(['@whatsapp_:example.org']), ChatNetwork.matrix);
       expect(chatNetworkForUser('not-a-user'), isNull);
+    });
+
+    test('no evidence at all is unknown, so no logo is guessed', () {
+      expect(of([]), ChatNetwork.unknown);
+      expect(ChatNetwork.unknown.hasLogo, isFalse);
+      expect(ChatNetwork.matrix.hasLogo, isTrue);
+    });
+
+    test('portal aliases and member ghosts identify the network', () {
+      expect(
+        chatNetworkOf(
+          bridgeStates: const [],
+          userIds: const [],
+          aliases: ['#whatsapp_12345:example.org'],
+        ),
+        ChatNetwork.whatsapp,
+      );
+      expect(
+        chatNetworkOf(
+          bridgeStates: const [],
+          userIds: const [],
+          aliases: ['#meta_100:example.org'],
+        ),
+        ChatNetwork.messenger,
+      );
+      expect(
+        chatNetworkOf(
+          bridgeStates: const [],
+          userIds: const [],
+          memberIds: ['@alice:example.org', '@ig_99:example.org'],
+        ),
+        ChatNetwork.instagram,
+      );
+      expect(
+        chatNetworkOf(
+          bridgeStates: const [],
+          userIds: const [],
+          aliases: ['#general:matrix.org'],
+        ),
+        ChatNetwork.matrix,
+      );
+      expect(chatNetworkForAlias('not-an-alias'), isNull);
+    });
+
+    test('a bridge bot among the members identifies the network', () {
+      expect(
+        chatNetworkOf(
+          bridgeStates: const [],
+          userIds: const [],
+          memberIds: ['@alice:example.org', '@whatsappbot:example.org'],
+        ),
+        ChatNetwork.whatsapp,
+      );
     });
   });
 
@@ -232,6 +285,23 @@ void main() {
     });
   });
 
+  test('room logo choices are saved on the phone', () async {
+    final dir = await Directory.systemTemp.createTemp('room_logos');
+    addTearDown(() => dir.delete(recursive: true));
+    final logos = RoomLogos(directory: dir);
+    await logos.set('!a:example.org', ChatNetwork.xbox);
+    expect(logos.overrideFor('!a:example.org'), ChatNetwork.xbox);
+    expect(logos.overrideFor('!b:example.org'), isNull);
+    logos.dispose();
+
+    final restored = RoomLogos(directory: dir);
+    addTearDown(restored.dispose);
+    await restored.ensureLoaded();
+    expect(restored.overrideFor('!a:example.org'), ChatNetwork.xbox);
+    await restored.set('!a:example.org', null);
+    expect(restored.overrideFor('!a:example.org'), isNull);
+  });
+
   test('app logos preference is off by default and persists', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
@@ -253,6 +323,7 @@ void main() {
       required ChatRoom room,
       required bool logos,
       required RoomPictures pictures,
+      RoomLogos? logoOverrides,
     }) async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
@@ -271,6 +342,7 @@ void main() {
                 backend: PlainBackend(),
                 palette: palette,
                 pictures: pictures,
+                logoOverrides: logoOverrides,
               ),
             ),
           ),
@@ -325,6 +397,40 @@ void main() {
       await pictures.remove(room.id);
       await tester.pump();
       expect(find.byType(NetworkLogo), findsOneWidget);
+    });
+
+    testWidgets('a per-room logo choice wins over detection', (tester) async {
+      final logos = RoomLogos(inMemory: true);
+      addTearDown(logos.dispose);
+      await logos.set('!family:example.org', ChatNetwork.whatsapp);
+      final pictures = _pictures(_MemoryStorage());
+      addTearDown(pictures.dispose);
+
+      await pump(
+        tester,
+        room: _room(network: ChatNetwork.matrix),
+        logos: true,
+        pictures: pictures,
+        logoOverrides: logos,
+      );
+      expect(
+        tester.widget<NetworkLogo>(find.byType(NetworkLogo)).network,
+        ChatNetwork.whatsapp,
+      );
+
+      // "No logo" forces the letter even with the setting on.
+      await logos.set('!family:example.org', ChatNetwork.otherBridge);
+      await tester.pump();
+      expect(find.byType(InitialAvatar), findsOneWidget);
+      expect(find.byType(NetworkLogo), findsNothing);
+
+      // Back to automatic.
+      await logos.set('!family:example.org', null);
+      await tester.pump();
+      expect(
+        tester.widget<NetworkLogo>(find.byType(NetworkLogo)).network,
+        ChatNetwork.matrix,
+      );
     });
   });
 }

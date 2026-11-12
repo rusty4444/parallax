@@ -4,6 +4,8 @@
 library;
 
 enum ChatNetwork {
+  /// No evidence either way: show the letter, don't guess.
+  unknown('Unknown'),
   matrix('Matrix'),
   whatsapp('WhatsApp'),
   googleMessages('Google Messages'),
@@ -21,7 +23,7 @@ enum ChatNetwork {
   final String label;
 
   /// Whether a logo is drawn for this network.
-  bool get hasLogo => this != otherBridge;
+  bool get hasLogo => this != otherBridge && this != unknown;
 }
 
 /// `protocol.id` values bridges put in their `m.bridge` state (mautrix
@@ -51,6 +53,9 @@ const _protocols = <String, ChatNetwork>{
 /// tells them apart where it is loaded.
 const _puppetPrefixes = <String, ChatNetwork>{
   'whatsapp_': ChatNetwork.whatsapp,
+  'wa_': ChatNetwork.whatsapp,
+  'ig_': ChatNetwork.instagram,
+  'fb_': ChatNetwork.messenger,
   'gmessages_': ChatNetwork.googleMessages,
   'meta_': ChatNetwork.messenger,
   'facebook_': ChatNetwork.messenger,
@@ -101,9 +106,24 @@ ChatNetwork? chatNetworkForProtocol(String id) =>
 ChatNetwork? chatNetworkForUser(String userId) {
   if (!userId.startsWith('@')) return null;
   final colon = userId.indexOf(':');
-  final localpart =
-      (colon < 0 ? userId.substring(1) : userId.substring(1, colon))
-          .toLowerCase();
+  return _networkForLocalpart(
+    (colon < 0 ? userId.substring(1) : userId.substring(1, colon))
+        .toLowerCase(),
+  );
+}
+
+/// The network a portal's alias names (`#whatsapp_…:server`), if any. Bridge
+/// aliases follow the same naming as the ghosts, and alias state is loaded
+/// even in rooms whose members aren't.
+ChatNetwork? chatNetworkForAlias(String alias) {
+  if (!alias.startsWith('#')) return null;
+  final colon = alias.indexOf(':');
+  return _networkForLocalpart(
+    (colon < 0 ? alias.substring(1) : alias.substring(1, colon)).toLowerCase(),
+  );
+}
+
+ChatNetwork? _networkForLocalpart(String localpart) {
   final bot = _bots[localpart];
   if (bot != null) return bot;
   for (final MapEntry(key: prefix, value: network) in _puppetPrefixes.entries) {
@@ -114,13 +134,23 @@ ChatNetwork? chatNetworkForUser(String userId) {
   return null;
 }
 
-/// A room's network from its bridge state ([bridgeStates]: the content of
-/// each `m.bridge`/`uk.half-shot.bridge` event) and the people it is named
-/// after ([userIds]: heroes and the DM partner). With neither, it is a
-/// native Matrix room.
+/// A room's network, from strongest to weakest evidence:
+/// 1. [bridgeStates]: the content of its `m.bridge`/`uk.half-shot.bridge`
+///    events (`protocol.id`, `bridgebot`);
+/// 2. [userIds]: the people it is named after and its last sender (bridged
+///    contacts and bots carry their network in the username);
+/// 3. [aliases]: its canonical alias (portal aliases name the network);
+/// 4. [memberIds]: room members, when loaded — a portal's ghosts give it
+///    away even when nothing above is available.
+///
+/// Returns [ChatNetwork.matrix] only when there was some evidence and none
+/// of it pointed at a bridge, and [ChatNetwork.unknown] when there was
+/// nothing to go on (so the UI shows a letter rather than a wrong logo).
 ChatNetwork chatNetworkOf({
   required Iterable<Map<String, Object?>> bridgeStates,
   required Iterable<String> userIds,
+  Iterable<String> aliases = const [],
+  Iterable<String> memberIds = const [],
 }) {
   var bridged = false;
   for (final content in bridgeStates) {
@@ -137,12 +167,31 @@ ChatNetwork chatNetworkOf({
       if (network != null) return network;
     }
   }
+  var evidence = false;
   ChatNetwork? other;
-  for (final userId in userIds) {
-    final network = chatNetworkForUser(userId);
-    if (network == null) continue;
-    if (network != ChatNetwork.otherBridge) return network;
-    other = network;
+
+  ChatNetwork? scan(
+    Iterable<String> values,
+    ChatNetwork? Function(String) lookup,
+  ) {
+    for (final value in values) {
+      if (value.isEmpty) continue;
+      evidence = true;
+      final network = lookup(value);
+      if (network == null) continue;
+      if (network != ChatNetwork.otherBridge) return network;
+      other = network;
+    }
+    return null;
   }
-  return other ?? (bridged ? ChatNetwork.otherBridge : ChatNetwork.matrix);
+
+  return scan(userIds, chatNetworkForUser) ??
+      scan(aliases, chatNetworkForAlias) ??
+      scan(memberIds, chatNetworkForUser) ??
+      other ??
+      (bridged
+          ? ChatNetwork.otherBridge
+          : evidence
+          ? ChatNetwork.matrix
+          : ChatNetwork.unknown);
 }

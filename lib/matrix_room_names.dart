@@ -229,7 +229,15 @@ extension ParallaxRoomNames on Room {
             in states[type]?.values ?? const <StrippedStateEvent>[])
           event.content,
     ],
-    userIds: [...?summary.mHeroes, ?directChatPartner],
+    // Heroes and the DM partner first; the last sender is often the only
+    // bridged ghost we know in a room whose members aren't loaded.
+    userIds: [...?summary.mHeroes, ?directChatPartner, ?lastEvent?.senderId],
+    aliases: [canonicalAlias],
+    // Bounded: portals are full of ghosts, so a sample finds one. Big
+    // native rooms shouldn't pay for a full member scan on every sync.
+    memberIds: (states[EventTypes.RoomMember]?.keys ?? const <String>[]).take(
+      200,
+    ),
   );
 
   /// [avatar], except a DM whose partner is a bridge bot shows its people
