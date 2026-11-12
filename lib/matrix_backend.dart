@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +17,8 @@ import 'package:vodozemac/vodozemac.dart' as vod;
 
 import 'chat_backend.dart';
 import 'crypto_setup_policy.dart';
+import 'features/scheduled/delayed_events.dart';
+import 'features/scheduled/undo_send.dart';
 import 'crypto_signature_validation.dart';
 import 'encrypted_media.dart';
 import 'features/rich_timeline/message_composition.dart';
@@ -51,24 +54,31 @@ class MatrixBackend extends ChatBackend
         MessagingFeatures,
         RecoverableRoomJoining,
         RoomEventFeatures,
-        MatrixSdkAccess {
+        MatrixSdkAccess,
+        DelayedRoomEventSender,
+        UndoSendFeatures {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     bool Function()? sendTypingNotifications,
     this.localStorage,
     this.beforeLogout,
+    Future<Duration> Function()? undoSendDelay,
   }) : _sendReadReceipts = sendReadReceipts ?? (() => true),
-       _sendTypingNotifications = sendTypingNotifications ?? (() => true);
+       _sendTypingNotifications = sendTypingNotifications ?? (() => true),
+       _undoSendDelay =
+           undoSendDelay ?? UndoSendPreferences.shared.resolveDelay;
 
   @visibleForTesting
   factory MatrixBackend.withClient(
     matrix.Client client, {
     SecureValueStore? localStorage,
     Future<void> Function()? beforeLogout,
+    Future<Duration> Function()? undoSendDelay,
   }) {
     final backend = MatrixBackend(
       localStorage: localStorage,
       beforeLogout: beforeLogout,
+      undoSendDelay: undoSendDelay,
     );
     backend._client = client;
     client.onSoftLogout = backend._refreshAuthentication;
@@ -82,6 +92,12 @@ class MatrixBackend extends ChatBackend
   final bool Function() _sendTypingNotifications;
   final Future<void> Function()? beforeLogout;
   final SecureValueStore? localStorage;
+  // Undo send (lib/features/scheduled): grace period for new sends, the
+  // background listener that releases held sends, and the queued-transmit
+  // lane that lets several held sends fall due together.
+  final Future<Duration> Function() _undoSendDelay;
+  AppLifecycleListener? _heldSendLifecycle;
+  Future<void> _queuedTransmitTail = Future<void>.value();
   String? _outboxAccount;
   Future<void>? _outboxRestoring;
   late final MessageOutbox _outbox = MessageOutbox(
@@ -451,6 +467,11 @@ class MatrixBackend extends ChatBackend
     if (text.trim().isEmpty) return;
     final owner = _outboxIdentity ?? '';
     final generation = _securityGeneration;
+    // Undo send holds new main-timeline messages. Edits and thread replies
+    // (no undo surface in the thread screen) go straight out.
+    final hold = editEventId == null && threadRootId == null
+        ? await _undoSendHold()
+        : Duration.zero;
     await _restoreOutbox();
     _requireQueueOwner(owner, generation);
     await _outbox.enqueueText(
@@ -460,7 +481,9 @@ class MatrixBackend extends ChatBackend
       replyToId: replyToId,
       editEventId: editEventId,
       threadRootId: threadRootId,
+      hold: hold,
     );
+    if (hold > Duration.zero) _watchHeldSends();
   }
 
   @override
@@ -473,6 +496,7 @@ class MatrixBackend extends ChatBackend
   }) async {
     final owner = _outboxIdentity ?? '';
     final generation = _securityGeneration;
+    final hold = threadRootId == null ? await _undoSendHold() : Duration.zero;
     await _restoreOutbox();
     _requireQueueOwner(owner, generation);
     await _outbox.enqueueMedia(
@@ -482,6 +506,41 @@ class MatrixBackend extends ChatBackend
       caption: caption,
       replyToId: replyToId,
       threadRootId: threadRootId,
+      hold: hold,
+    );
+    if (hold > Duration.zero) _watchHeldSends();
+  }
+
+  Future<Duration> _undoSendHold() async {
+    try {
+      final delay = await _undoSendDelay();
+      if (delay.isNegative) return Duration.zero;
+      return delay > MessageOutbox.maxHold ? MessageOutbox.maxHold : delay;
+    } catch (_) {
+      return Duration.zero;
+    }
+  }
+
+  /// Held sends go out as soon as the app is backgrounded: the OS may freeze
+  /// or kill a background process before the grace period ends.
+  void _watchHeldSends() {
+    if (_disposed) return;
+    _heldSendLifecycle ??= watchAppBackground(_outbox.releaseHeld);
+  }
+
+  @override
+  DateTime? undoDeadline(String pendingId) => _outbox.heldUntil(pendingId);
+
+  @override
+  Future<UndoneSend?> undoSend(String pendingId) async {
+    final record = await _outbox.undo(pendingId);
+    if (record == null) return null;
+    final media = record.media;
+    return UndoneSend(
+      text: media == null ? record.body : record.caption ?? '',
+      replyToId: record.replyToId,
+      threadRootId: record.threadRootId,
+      attachmentName: media?.name,
     );
   }
 
@@ -504,6 +563,27 @@ class MatrixBackend extends ChatBackend
   }
 
   Future<void> _transmitQueued(
+    OutboxRecord record,
+    SendCancellation cancellation,
+    void Function(double) onProgress,
+  ) async {
+    // Held sends can fall due together (deadline or app pause): queue their
+    // transmissions behind each other instead of failing later ones as busy.
+    final previous = _queuedTransmitTail;
+    final turn = Completer<void>();
+    _queuedTransmitTail = Future.wait<void>([
+      previous,
+      turn.future,
+    ]).then((_) {});
+    try {
+      await Future.any<void>([previous, cancellation.whenCancelled]);
+      await _transmitQueuedNow(record, cancellation, onProgress);
+    } finally {
+      turn.complete();
+    }
+  }
+
+  Future<void> _transmitQueuedNow(
     OutboxRecord record,
     SendCancellation cancellation,
     void Function(double) onProgress,
@@ -3242,6 +3322,63 @@ class MatrixBackend extends ChatBackend
     });
   }
 
+  /// Send later (MSC4140, lib/features/scheduled): the same guards as
+  /// [sendRoomEvent] — session ownership, recipient trust approval,
+  /// fail-closed encryption and the final HTTP guard — but the event is
+  /// encrypted now and handed to the homeserver with a delay. Returns the
+  /// server's `delay_id`. Members who join after scheduling don't receive the
+  /// room key, so they can't read it.
+  @override
+  Future<String> sendRoomEventDelayed(
+    String roomId,
+    String type,
+    Map<String, Object?> content,
+    Duration delay,
+  ) async {
+    if (type.isEmpty || type == matrix.EventTypes.Encrypted) {
+      throw ArgumentError.value(type, 'type', 'Invalid event type');
+    }
+    if (delay <= Duration.zero || delay > maxScheduleDelay) {
+      throw ArgumentError.value(delay, 'delay', 'Invalid schedule delay');
+    }
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    final owner = _sendOwnership(client, room, _securityGeneration);
+    return MatrixSendGuard.owned(owner, () async {
+      await _ensureTrusted(room);
+      _checkSendOwner(owner);
+      _requireEncryptedTransport(room);
+      return _protectSend(room, () {
+        final crypto = client.encryption;
+        return putDelayedRoomEvent(
+          client,
+          roomId: room.id,
+          type: type,
+          content: content,
+          delay: delay,
+          encrypted: room.encrypted,
+          encrypt: crypto == null
+              ? null
+              : (payload) async {
+                  _checkSendOwner(owner);
+                  _requireEncryptedTransport(room);
+                  final sealed = await crypto.encryptGroupMessagePayload(
+                    room.id,
+                    payload,
+                    type: type,
+                  );
+                  _checkSendOwner(owner);
+                  _requireEncryptedTransport(room);
+                  return sealed;
+                },
+        );
+      }, ownerCurrent: owner);
+    });
+  }
+
   @override
   Future<void> setRoomState(
     String roomId,
@@ -3306,6 +3443,8 @@ class MatrixBackend extends ChatBackend
     _sessionClearedSubscription?.cancel();
     _verificationSubscription?.cancel();
     _timeline?.cancelSubscriptions();
+    _heldSendLifecycle?.dispose();
+    _heldSendLifecycle = null;
     final client = _client;
     final startupOwnsClient = _initializing;
     _sendGuard?.close();

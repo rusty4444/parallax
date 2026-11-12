@@ -6,16 +6,47 @@
 import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
+import 'scheduled_features.dart';
+import 'scheduled_list.dart';
+import 'send_later_sheet.dart';
+import 'undo_send.dart';
+import 'undo_send_settings.dart';
 
+/// Long-press send option: "Send later…".
 List<ComposerSendOption> scheduledSendOptions(
   BuildContext context,
   RoomHookContext ctx,
-) => const [];
+) {
+  if (scheduledFeaturesOf(ctx.backend) == null) return const [];
+  return [
+    ComposerSendOption(
+      id: 'scheduled.send_later',
+      icon: Icons.schedule_send_outlined,
+      label: 'Send later…',
+      onSelected: (context, draft) => sendDraftLater(context, ctx, draft),
+    ),
+  ];
+}
 
-List<Widget> scheduledRoomBanners(BuildContext context, RoomHookContext ctx) =>
-    const [];
+/// "1 scheduled message" banner under the room header.
+List<Widget> scheduledRoomBanners(BuildContext context, RoomHookContext ctx) {
+  if (scheduledFeaturesOf(ctx.backend) == null) return const [];
+  return [
+    ScheduledMessagesBanner(
+      key: ValueKey('scheduled.banner.${ctx.roomId}'),
+      backend: ctx.backend,
+      palette: ctx.palette,
+      roomId: ctx.roomId,
+      encrypted: ctx.encrypted,
+    ),
+  ];
+}
 
+/// Settings → Sending → Undo send.
 List<Widget> scheduledSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
-) => const [];
+) {
+  if (undoSendFeaturesOf(ctx.backend) == null) return const [];
+  return [UndoSendSettingsSection(palette: ctx.palette)];
+}

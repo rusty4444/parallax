@@ -72,6 +72,14 @@ class OutboxRecord {
 /// issued storage writes cannot be revoked, so replacements read behind a
 /// process-wide durable write fence. This is a single-isolate service, not an
 /// inter-process database lock.
+///
+/// Undo send: an enqueue may ask for a `hold`. The accepted record then stays
+/// [DeliveryState.queued] until its in-memory deadline ([heldUntil]); [undo]
+/// withdraws it durably before any transport starts, and [releaseHeld] starts
+/// every held record immediately (the app calls it when backgrounded). Holds
+/// are process-local: after a restart a held record is restored like any other
+/// interrupted send (failed, explicit retry, same transaction ID), never
+/// replayed automatically. Retries never wait for a hold.
 class MessageOutbox {
   MessageOutbox({
     SecureValueStore? storage,
@@ -84,8 +92,15 @@ class MessageOutbox {
     transmit,
     VoidCallback? onChanged,
     @visibleForTesting int storedByteLimit = maxStoredBytes,
+    @visibleForTesting
+    Timer Function(Duration, void Function()) holdTimer = _defaultHoldTimer,
+    @visibleForTesting DateTime Function() clock = DateTime.now,
   }) : _storage = storage ?? const PlatformSecureValueStore(),
        _storedByteLimit = storedByteLimit,
+       // ignore: prefer_initializing_formals
+       _holdTimer = holdTimer,
+       // ignore: prefer_initializing_formals
+       _clock = clock,
        // Public callback names intentionally differ from private fields.
        // ignore: prefer_initializing_formals
        _currentAccount = currentAccount,
@@ -99,6 +114,9 @@ class MessageOutbox {
   }
 
   static const maxPayloadBytes = 20 * 1024 * 1024;
+
+  /// Longest undo-send grace period an enqueue may request.
+  static const maxHold = Duration(seconds: 30);
   static const maxStoredBytes = 64 * 1024 * 1024;
   static const maxRecords = 100;
   static const _maxMetadataBytes = 64 * 1024;
@@ -121,6 +139,8 @@ class MessageOutbox {
   )
   _transmit;
   final VoidCallback? _onChanged;
+  final Timer Function(Duration, void Function()) _holdTimer;
+  final DateTime Function() _clock;
   final _commands = _SerialQueue();
   final _retiring = <_Session, Future<void>>{};
   _Session? _session;
@@ -132,6 +152,16 @@ class MessageOutbox {
     final session = _session;
     if (session == null || !_owns(session)) return const [];
     return List<OutboxRecord>.unmodifiable(session.records.values);
+  }
+
+  static Timer _defaultHoldTimer(Duration delay, void Function() callback) =>
+      Timer(delay, callback);
+
+  /// When [id] is held for undo send, the time its transmission starts.
+  DateTime? heldUntil(String id) {
+    final session = _session;
+    if (session == null || !_owns(session)) return null;
+    return session.holds[id]?.until;
   }
 
   Future<void> restore(String accountKey) async {
@@ -146,9 +176,11 @@ class MessageOutbox {
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    Duration hold = Duration.zero,
   }) async {
     if (text.trim().isEmpty) throw ArgumentError('Message must not be empty');
     return _enqueue(
+      hold: hold,
       OutboxRecord(
         id: _newId(),
         accountKey: accountKey,
@@ -170,6 +202,7 @@ class MessageOutbox {
     String? caption,
     String? replyToId,
     String? threadRootId,
+    Duration hold = Duration.zero,
   }) async {
     // Check before copying or base64 encoding an untrusted picker payload.
     if (media.bytes.isEmpty || media.bytes.length > maxPayloadBytes) {
@@ -182,6 +215,7 @@ class MessageOutbox {
       durationMs: media.durationMs,
     );
     return _enqueue(
+      hold: hold,
       OutboxRecord(
         id: _newId(),
         accountKey: accountKey,
@@ -197,7 +231,13 @@ class MessageOutbox {
     );
   }
 
-  Future<String> _enqueue(OutboxRecord record) async {
+  Future<String> _enqueue(
+    OutboxRecord record, {
+    Duration hold = Duration.zero,
+  }) async {
+    if (hold.isNegative || hold > maxHold) {
+      throw ArgumentError.value(hold, 'hold', 'Invalid undo-send hold');
+    }
     try {
       _validateRecord(record, record.accountKey);
     } on FormatException catch (error) {
@@ -211,8 +251,93 @@ class MessageOutbox {
         (next) => next[record.id] = record,
         reserveLifecycleSpace: true,
       );
-      _start(session, record.id);
+      if (hold > Duration.zero) {
+        _hold(session, record.id, hold);
+      } else {
+        _start(session, record.id);
+      }
       return record.id;
+    });
+  }
+
+  void _hold(_Session session, String id, Duration hold) {
+    if (!_owns(session) ||
+        session.jobs.containsKey(id) ||
+        session.stops.containsKey(id) ||
+        !session.records.containsKey(id)) {
+      return;
+    }
+    session.holds.remove(id)?.timer.cancel();
+    late final _Hold entry;
+    entry = _Hold(
+      _clock().add(hold),
+      _holdTimer(hold, () {
+        if (identical(session.holds[id], entry)) _release(session, id);
+      }),
+    );
+    session.holds[id] = entry;
+    _notify(session);
+  }
+
+  void _release(_Session session, String id) {
+    final hold = session.holds.remove(id);
+    if (hold == null) return;
+    hold.timer.cancel();
+    _start(session, id);
+    _notify(session);
+  }
+
+  /// Starts every held send now, for example when the app is backgrounded
+  /// (the OS may freeze or kill the process before a grace period ends).
+  void releaseHeld() {
+    final session = _session;
+    if (session == null || !_owns(session)) return;
+    for (final id in session.holds.keys.toList()) {
+      _release(session, id);
+    }
+  }
+
+  /// Undo send: withdraws [id] while it is still held and returns the record
+  /// (so its text can go back to the composer). Returns null when it is no
+  /// longer held, for example because its transmission already started.
+  Future<OutboxRecord?> undo(String id) {
+    final session = _session;
+    if (session == null || !_owns(session)) {
+      return Future<OutboxRecord?>.value();
+    }
+    final hold = session.holds.remove(id);
+    if (hold == null) return Future<OutboxRecord?>.value();
+    hold.timer.cancel();
+    // Fence starts (retry/release) until the withdrawal is durable.
+    session.stops.update(id, (count) => count + 1, ifAbsent: () => 1);
+    return _commands.run(() async {
+      try {
+        _check(session);
+        final record = session.records[id];
+        if (record == null) return null;
+        try {
+          await _update(session, (next) => next.remove(id));
+        } catch (_) {
+          // Not durably withdrawn: never transmit it silently afterwards.
+          final current = session.records[id];
+          if (_owns(session) && current != null) {
+            session.records[id] = current._status(
+              DeliveryState.failed,
+              error: 'Undo couldn’t be saved. Retry or discard.',
+            );
+            _notify(session);
+          }
+          rethrow;
+        }
+        return record;
+      } finally {
+        final remaining = session.stops[id]! - 1;
+        if (remaining == 0) {
+          session.stops.remove(id);
+        } else {
+          session.stops[id] = remaining;
+        }
+      }
     });
   }
 
@@ -224,6 +349,11 @@ class MessageOutbox {
     await _commands.run(() async {
       _check(session);
       await _load(session);
+      if (session.holds.containsKey(id)) {
+        // Retries skip the undo-send grace period.
+        _release(session, id);
+        return;
+      }
       final oldJob = session.jobs[id];
       if (oldJob != null) {
         if (!oldJob.stopped) return;
@@ -252,6 +382,7 @@ class MessageOutbox {
     // Fence starts as well as an existing transport: retry may currently be
     // suspended in its durable acceptance write and not have a job yet.
     session.stops.update(id, (count) => count + 1, ifAbsent: () => 1);
+    session.holds.remove(id)?.timer.cancel();
     session.jobs[id]?.stop();
     return _commands.run(() async {
       try {
@@ -338,6 +469,10 @@ class MessageOutbox {
     final existing = _retiring[session];
     if (existing != null) return existing;
     session.closed = true;
+    for (final hold in session.holds.values) {
+      hold.timer.cancel();
+    }
+    session.holds.clear();
     for (final job in session.jobs.values) {
       job.stop();
     }
@@ -429,7 +564,8 @@ class MessageOutbox {
   void _start(_Session session, String id) {
     if (!_owns(session) ||
         session.jobs.containsKey(id) ||
-        session.stops.containsKey(id)) {
+        session.stops.containsKey(id) ||
+        session.holds.containsKey(id)) {
       return;
     }
     final job = _SendJob();
@@ -725,8 +861,15 @@ class _Session {
   Map<String, OutboxRecord> records = {};
   final jobs = <String, _SendJob>{};
   final stops = <String, int>{};
+  final holds = <String, _Hold>{};
   bool loaded = false;
   bool closed = false;
+}
+
+class _Hold {
+  _Hold(this.until, this.timer);
+  final DateTime until;
+  final Timer timer;
 }
 
 class _SendJob {

@@ -9,6 +9,7 @@ import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'features/reactions/reaction_hooks.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
+import 'features/scheduled/undo_send.dart';
 import 'hooks/registry.dart';
 import 'media_viewer.dart';
 import 'message_draft_store.dart';
@@ -857,11 +858,84 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
+  /// Undo send: withdraws a held send and puts its text back in the composer.
+  Future<void> _undoPending(PendingSend pending) async {
+    final undo = undoSendFeaturesOf(widget.backend);
+    if (!mounted ||
+        !_owner.isCurrent ||
+        undo == null ||
+        !_pendingActions.add(pending.id)) {
+      return;
+    }
+    setState(() {});
+    void say(String text) => ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(text)));
+    try {
+      final restored = await undo.undoSend(pending.id);
+      if (!mounted || !_owner.isCurrent) return;
+      if (restored == null) {
+        say('Too late to undo. This message is already sending.');
+      } else {
+        _restoreUndone(restored, say);
+      }
+    } catch (_) {
+      if (mounted && _owner.isCurrent) say('Couldn’t undo this message.');
+    } finally {
+      if (mounted && _owner.isCurrent) {
+        setState(() => _pendingActions.remove(pending.id));
+      }
+    }
+  }
+
+  void _restoreUndone(UndoneSend restored, void Function(String) say) {
+    final text = restored.text.trim();
+    if (restored.attachmentName != null) {
+      say(
+        text.isEmpty
+            ? 'Attachment removed. Attach it again to send it.'
+            : 'Attachment removed. Its caption is back in the composer.',
+      );
+    }
+    if (text.isEmpty) return;
+    setState(() {
+      if (_editing != null) {
+        // Leave the edit buffer alone; restore into the ordinary draft.
+        _normalDraft = _normalDraft.trim().isEmpty
+            ? text
+            : '$text\n$_normalDraft';
+        _normalRevision++;
+        _draftOwner?.revise();
+        _draftDirty = true;
+        _scheduleDraft();
+        return;
+      }
+      // Like typing: the draft listener records and persists the text.
+      final current = _draft.text;
+      final merged = current.trim().isEmpty ? text : '$text\n$current';
+      _draft.value = TextEditingValue(
+        text: merged,
+        selection: TextSelection.collapsed(offset: merged.length),
+      );
+      final replyId = restored.replyToId;
+      if (replyId != null && _replyingTo == null) {
+        final target = widget.backend.messages
+            .where((entry) => entry.id == replyId && !entry.redacted)
+            .firstOrNull;
+        if (target != null) {
+          _advanceComposerContext();
+          _replyingTo = target;
+        }
+      }
+    });
+  }
+
   Widget _pendingPanel(AppPalette palette) {
     final pending = _features!.pendingSends
         .where((item) => item.roomId == widget.roomId)
         .toList();
     if (pending.isEmpty) return const SizedBox.shrink();
+    final undo = undoSendFeaturesOf(widget.backend);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 160),
       child: ListView.builder(
@@ -873,6 +947,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
           final active =
               item.state == DeliveryState.queued ||
               item.state == DeliveryState.sending;
+          // Undo send: still inside its grace period.
+          final heldUntil = item.state == DeliveryState.queued
+              ? undo?.undoDeadline(item.id)
+              : null;
+          final statusStyle = TextStyle(color: palette.muted, fontSize: 12);
           return Padding(
             key: ValueKey('pending-${item.id}'),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -890,12 +969,34 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                 Row(
                   children: [
                     Expanded(
-                      child: Text(switch (item.state) {
-                        DeliveryState.queued => 'Queued',
-                        DeliveryState.sending => 'Sending…',
-                        DeliveryState.failed => 'Not sent. Retry or discard.',
-                        DeliveryState.sent => 'Sent',
-                      }, style: TextStyle(color: palette.muted, fontSize: 12)),
+                      child: heldUntil != null
+                          // Undo send: "Sending in 4 s · Undo".
+                          ? Row(
+                              children: [
+                                Flexible(
+                                  child: HeldSendCountdown(
+                                    deadline: heldUntil,
+                                    builder: (context, seconds) => Text(
+                                      'Sending in $seconds s ·',
+                                      style: statusStyle,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: busy || _sending
+                                      ? null
+                                      : () => _undoPending(item),
+                                  child: const Text('Undo'),
+                                ),
+                              ],
+                            )
+                          : Text(switch (item.state) {
+                              DeliveryState.queued => 'Queued',
+                              DeliveryState.sending => 'Sending…',
+                              DeliveryState.failed =>
+                                'Not sent. Retry or discard.',
+                              DeliveryState.sent => 'Sent',
+                            }, style: statusStyle),
                     ),
                     if (item.state == DeliveryState.failed)
                       TextButton(
@@ -904,15 +1005,16 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                             : () => _pendingAction(item, 'retry'),
                         child: const Text('Retry'),
                       ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => _pendingAction(
-                              item,
-                              active ? 'cancel' : 'discard',
-                            ),
-                      child: Text(active ? 'Cancel' : 'Discard'),
-                    ),
+                    if (heldUntil == null)
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => _pendingAction(
+                                item,
+                                active ? 'cancel' : 'discard',
+                              ),
+                        child: Text(active ? 'Cancel' : 'Discard'),
+                      ),
                   ],
                 ),
               ],
