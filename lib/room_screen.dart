@@ -25,6 +25,7 @@ import 'room_draft_owner.dart';
 import 'timeline/timeline_view.dart';
 import 'widgets.dart';
 import 'features/composer/edit_markdown.dart';
+import 'haptics.dart';
 
 class RoomScreen extends StatelessWidget {
   const RoomScreen({
@@ -566,6 +567,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       );
       return;
     }
+    Haptics.selection();
     try {
       await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
     } catch (_) {
@@ -610,6 +612,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
   Future<void> _showActions(ChatEntry entry) async {
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
+    Haptics.longPress();
     final hookActions = messageActionsFor(context, _entryContext(entry));
     final choice = await showModalBottomSheet<String>(
       isScrollControlled: true,
@@ -1368,7 +1371,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           !_owner.isCurrent,
                       onChanged: _onDraftChanged,
                       onSend: _sendContent,
-                      onCancel: _cancelComposerContext,
+                      // The ✕ only appears while there is a reply or edit
+                      // to cancel; the banner above has its own too.
+                      onCancel: _replyingTo != null || _editing != null
+                          ? _cancelComposerContext
+                          : null,
                     ),
                   ] else
                     Container(

@@ -7,6 +7,7 @@ import 'package:parallax/chat_backend.dart';
 import 'package:parallax/feature_settings_scope.dart';
 import 'package:parallax/features/home/home_features.dart';
 import 'package:parallax/features/home/room_list_filters.dart';
+import 'package:parallax/haptics.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/space_browser_screen.dart';
@@ -14,6 +15,7 @@ import 'package:parallax/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_fakes.dart';
+import 'home_options.dart';
 
 ChatRoom _room(
   String id, {
@@ -183,6 +185,7 @@ void main() {
   group('inbox', () {
     late HomeFakeBackend backend;
     late List<String> clipboard;
+    late List<String?> haptics;
 
     setUp(() {
       backend = HomeFakeBackend()
@@ -210,6 +213,7 @@ void main() {
           '!space:x.org': {'!team:x.org'},
         };
       clipboard = [];
+      haptics = [];
     });
 
     Future<void> pump(
@@ -223,6 +227,9 @@ void main() {
         (call) async {
           if (call.method == 'Clipboard.setData') {
             clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          if (call.method == 'HapticFeedback.vibrate') {
+            haptics.add(call.arguments as String?);
           }
           return null;
         },
@@ -262,6 +269,7 @@ void main() {
       expect(find.byTooltip('Mentioned'), findsOneWidget);
       expect(find.byTooltip('Notifications muted'), findsOneWidget);
       expect(find.text('Hidden space'), findsNothing);
+      await openHomeOptions(tester);
       expect(find.text('4 ROOMS'), findsOneWidget);
       // Low priority sorts last.
       expect(
@@ -272,6 +280,7 @@ void main() {
 
     testWidgets('Space switcher filters to Space children', (tester) async {
       await pump(tester);
+      await openHomeOptions(tester);
       await tester.tap(find.text('Work'));
       await tester.pumpAndSettle();
       expect(find.text('Team'), findsOneWidget);
@@ -283,6 +292,7 @@ void main() {
 
     testWidgets('Space can be left from its options', (tester) async {
       await pump(tester);
+      await openHomeOptions(tester);
       await tester.tap(find.text('Work'));
       await tester.pumpAndSettle();
       await tester.longPress(find.text('Work'));
@@ -347,6 +357,7 @@ void main() {
       tester,
     ) async {
       await pump(tester);
+      await openHomeOptions(tester);
       await tester.tap(find.text('Favourites'));
       await tester.pumpAndSettle();
       expect(find.text('You don’t have favourite chats yet'), findsOneWidget);
@@ -357,6 +368,106 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Alex'), findsOneWidget);
       expect(find.text('Team'), findsNothing);
+    });
+
+    testWidgets('home shows only the top bar and rooms until options open', (
+      tester,
+    ) async {
+      await pump(tester);
+      expect(find.text('Team'), findsOneWidget);
+      expect(find.text('Alex'), findsOneWidget);
+      for (final hidden in [
+        'Find a conversation',
+        'Favourites',
+        'Work',
+        '4 ROOMS',
+        'Messages',
+      ]) {
+        expect(find.text(hidden), findsNothing, reason: hidden);
+      }
+      expect(find.byType(TextField), findsNothing);
+
+      await openHomeOptions(tester);
+      expect(find.text('Find a conversation'), findsOneWidget);
+      expect(find.text('Favourites'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+      expect(find.text('4 ROOMS'), findsOneWidget);
+      // Options sit between the top bar and the list.
+      expect(
+        tester.getTopLeft(find.text('Favourites')).dy,
+        lessThan(tester.getTopLeft(find.text('Team')).dy),
+      );
+
+      await tester.tap(find.byTooltip('Hide options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Favourites'), findsNothing);
+      expect(find.byTooltip('Show options'), findsOneWidget);
+    });
+
+    testWidgets('a collapsed menu says what narrows the list and can clear', (
+      tester,
+    ) async {
+      await pump(tester);
+      await openHomeOptions(tester);
+      await tester.enterText(find.byType(TextField), 'ale');
+      await tester.tap(find.text('People'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Hide options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Showing “ale” · People'), findsOneWidget);
+      expect(find.text('Alex'), findsOneWidget);
+      expect(find.text('Team'), findsNothing);
+
+      await tester.tap(find.text('Clear'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Showing'), findsNothing);
+      expect(find.text('Team'), findsOneWidget);
+      // The search text is cleared too, not just the hidden query.
+      await openHomeOptions(tester);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+    });
+
+    testWidgets('Show all home options keeps everything on screen', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = AppearancePreferences();
+      addTearDown(prefs.dispose);
+      await prefs.setExpandedHome(true);
+      await pump(tester, prefs: prefs);
+      expect(find.byTooltip('Show options'), findsNothing);
+      expect(find.text('Messages'), findsOneWidget);
+      expect(find.text('Find a conversation'), findsOneWidget);
+      expect(find.text('Favourites'), findsOneWidget);
+      expect(find.text('4 ROOMS'), findsOneWidget);
+
+      // Turning it off live folds them back into the menu.
+      await prefs.setExpandedHome(false);
+      await tester.pumpAndSettle();
+      expect(find.text('Favourites'), findsNothing);
+      expect(find.byTooltip('Show options'), findsOneWidget);
+    });
+
+    testWidgets('menu, filters and Spaces give haptic feedback', (
+      tester,
+    ) async {
+      addTearDown(() => Haptics.enabled = true);
+      await pump(tester);
+      await openHomeOptions(tester);
+      expect(haptics, ['HapticFeedbackType.lightImpact']);
+      await tester.tap(find.text('People'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Work'));
+      await tester.pumpAndSettle();
+      expect(haptics, hasLength(3));
+
+      Haptics.enabled = false;
+      await tester.tap(find.text('People'));
+      await tester.pumpAndSettle();
+      expect(haptics, hasLength(3));
     });
 
     testWidgets('a joined Space can be left from its browser', (tester) async {

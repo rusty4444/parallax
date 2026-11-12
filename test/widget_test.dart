@@ -21,6 +21,7 @@ import 'package:parallax/room_details.dart';
 import 'package:parallax/room_avatar.dart';
 import 'package:parallax/settings_screen.dart';
 import 'package:parallax/security_overlay.dart';
+import 'home_options.dart';
 
 void main() {
   testWidgets('login validates homeserver and sends credentials', (
@@ -80,6 +81,7 @@ void main() {
       ),
     );
     expect(find.text('Quiet'), findsOneWidget);
+    await openHomeOptions(tester);
     await tester.tap(find.text('Unread'));
     await tester.pump();
     expect(find.text('General'), findsOneWidget);
@@ -180,6 +182,8 @@ void main() {
           ),
         ),
       );
+      // The room count/sync pill is in the options menu.
+      await openHomeOptions(tester);
       expect(find.text('SYNCING'), findsOneWidget);
       expect(find.text('No rooms found'), findsNothing);
 
@@ -260,6 +264,7 @@ void main() {
         ),
       ),
     );
+    await openHomeOptions(tester);
     await tester.ensureVisible(find.text('Invites'));
     await tester.tap(find.text('Invites'));
     await tester.pumpAndSettle();

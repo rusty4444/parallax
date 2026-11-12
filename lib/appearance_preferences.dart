@@ -32,6 +32,8 @@ class AppearancePreferences extends ChangeNotifier {
   static const _sendTypingKey = 'parallax.appearance.v1.send_typing';
   static const _hideInviteAvatarsKey =
       'parallax.appearance.v1.hide_invite_avatars';
+  static const _expandedHomeKey = 'parallax.appearance.v1.expanded_home';
+  static const _hapticsKey = 'parallax.appearance.v1.haptics';
 
   SharedPreferences? _prefs;
   Future<void> _tail = Future<void>.value();
@@ -42,6 +44,8 @@ class AppearancePreferences extends ChangeNotifier {
   bool _sendReadReceipts = true;
   bool _sendTypingNotifications = true;
   bool _hideInviteAvatars = false;
+  bool _expandedHome = false;
+  bool _haptics = true;
 
   double get textScale => _textScale;
   bool get compact => _compact;
@@ -56,6 +60,13 @@ class AppearancePreferences extends ChangeNotifier {
 
   /// Element X "Hide avatars in room invite requests".
   bool get hideInviteAvatars => _hideInviteAvatars;
+
+  /// Home screen shows search, filters, Spaces and folders permanently
+  /// instead of in the collapsible options menu (off by default).
+  bool get expandedHome => _expandedHome;
+
+  /// Vibrate on long presses, sends and selections (on by default).
+  bool get haptics => _haptics;
 
   /// Whether media previews load automatically in a room.
   bool autoLoadMediaIn({required bool publicRoom}) =>
@@ -84,19 +95,25 @@ class AppearancePreferences extends ChangeNotifier {
     final sendReadReceipts = _boolOr(prefs.get(_sendReadReceiptsKey), true);
     final sendTyping = _boolOr(prefs.get(_sendTypingKey), true);
     final hideInviteAvatars = _boolOr(prefs.get(_hideInviteAvatarsKey), false);
+    final expandedHome = _boolOr(prefs.get(_expandedHomeKey), false);
+    final haptics = _boolOr(prefs.get(_hapticsKey), true);
     final changed =
         scale != _textScale ||
         compact != _compact ||
         mode != _mediaPreviewMode ||
         sendReadReceipts != _sendReadReceipts ||
         sendTyping != _sendTypingNotifications ||
-        hideInviteAvatars != _hideInviteAvatars;
+        hideInviteAvatars != _hideInviteAvatars ||
+        expandedHome != _expandedHome ||
+        haptics != _haptics;
     _textScale = scale;
     _compact = compact;
     _mediaPreviewMode = mode;
     _sendReadReceipts = sendReadReceipts;
     _sendTypingNotifications = sendTyping;
     _hideInviteAvatars = hideInviteAvatars;
+    _expandedHome = expandedHome;
+    _haptics = haptics;
     if (changed) _notifyIfActive();
   });
 
@@ -159,6 +176,22 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setBool(_hideInviteAvatarsKey, value));
     if (_hideInviteAvatars == value) return;
     _hideInviteAvatars = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setExpandedHome(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_expandedHomeKey, value));
+    if (_expandedHome == value) return;
+    _expandedHome = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setHaptics(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_hapticsKey, value));
+    if (_haptics == value) return;
+    _haptics = value;
     _notifyIfActive();
   });
 

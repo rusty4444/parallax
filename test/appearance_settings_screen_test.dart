@@ -17,6 +17,11 @@ void main() {
   tearDown(() => preferences.dispose());
 
   Future<void> showScreen(WidgetTester tester) async {
+    // Tall enough that the lazily built list holds every card.
+    tester.view
+      ..physicalSize = const Size(800, 2400)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     // Create async queues in the widget test's zone, not setUp's real zone.
     preferences = AppearancePreferences(prefs: prefs);
     await preferences.load();
@@ -49,8 +54,16 @@ void main() {
     final switches = tester.widgetList<SwitchListTile>(
       find.byType(SwitchListTile),
     );
-    // Compact, hide invite avatars, read receipts, typing notifications.
-    expect(switches.map((tile) => tile.value), [false, false, true, true]);
+    // Compact, all home options, haptics, hide invite avatars, read
+    // receipts, typing notifications.
+    expect(switches.map((tile) => tile.value), [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+    ]);
   });
 
   testWidgets('media preview choice is saved and restored', (tester) async {
@@ -75,6 +88,8 @@ void main() {
     await showScreen(tester);
     for (final title in [
       'Compact layout',
+      'Show all home options',
+      'Haptic feedback',
       'Hide avatars in room invites',
       'Send read receipts',
       'Send typing notifications',
@@ -84,6 +99,8 @@ void main() {
       await tester.pumpAndSettle();
     }
     expect(preferences.compact, isTrue);
+    expect(preferences.expandedHome, isTrue);
+    expect(preferences.haptics, isFalse);
     expect(preferences.hideInviteAvatars, isTrue);
     expect(preferences.sendReadReceipts, isFalse);
     expect(preferences.sendTypingNotifications, isFalse);
@@ -91,6 +108,8 @@ void main() {
     addTearDown(restored.dispose);
     await restored.load();
     expect(restored.compact, isTrue);
+    expect(restored.expandedHome, isTrue);
+    expect(restored.haptics, isFalse);
     expect(restored.hideInviteAvatars, isTrue);
     expect(restored.sendReadReceipts, isFalse);
     expect(restored.sendTypingNotifications, isFalse);

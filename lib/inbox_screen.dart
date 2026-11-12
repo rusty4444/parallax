@@ -26,6 +26,7 @@ import 'room_screen.dart';
 import 'room_sync_panel.dart';
 import 'settings_screen.dart';
 import 'widgets.dart';
+import 'haptics.dart';
 
 class InboxScreen extends StatefulWidget {
   const InboxScreen({
@@ -87,6 +88,7 @@ class _InboxScreenState extends State<InboxScreen> {
     _createdRoomWait?.cancel();
     _creation.detach(_creationChanged);
     _owner.release();
+    _search.dispose();
     super.dispose();
   }
 
@@ -106,6 +108,10 @@ class _InboxScreenState extends State<InboxScreen> {
   String? _spaceId;
   String? _folderId;
   bool _openingNote = false;
+
+  /// Home options menu (search, filters, Spaces, folders) is open.
+  bool _optionsOpen = false;
+  final _search = TextEditingController();
   String? _pendingRoomAction;
   bool _creatingRoom = false;
   String? get _createdRoomId => _creation.roomId;
@@ -691,11 +697,32 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
+  /// What narrows the room list, for the collapsed options summary.
+  List<String> _narrowing(HomeSpace? space, ChatFolder? folder) => [
+    if (_query.trim().isNotEmpty) '“${_query.trim()}”',
+    if (space != null) space.name,
+    if (folder != null) folder.name,
+    for (final filter in RoomListFilter.values)
+      if (_filters.contains(filter)) filter.label,
+  ];
+
+  void _clearNarrowing() {
+    Haptics.selection();
+    _search.clear();
+    setState(() {
+      _query = '';
+      _filters = const {};
+      _spaceId = null;
+      _folderId = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
     final settings = FeatureSettingsScope.maybeOf(context)?.preferences;
     final compact = settings?.compact ?? false;
+    final expandedHome = settings?.expandedHome ?? false;
     final hideInviteAvatars = settings?.hideInviteAvatars ?? false;
     return AnimatedBuilder(
       animation: _changes,
@@ -770,6 +797,176 @@ class _InboxScreenState extends State<InboxScreen> {
                     'long-press the folder tab to edit it.',
               )
             : roomListEmptyState(_filters, spaceSelected: spaceId != null);
+        final space = spaces.where((s) => s.id == spaceId).firstOrNull;
+        final narrowing = _narrowing(space, folder);
+        final creationStatus = <Widget>[
+          if (_creation.failure != null && _owner.isCurrent)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Room not created'),
+              subtitle: Text(_creation.failure!.message),
+            ),
+          if (_creation.active && _createdRoomId == null && _owner.isCurrent)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                _creation.uncertain
+                    ? 'Room creation not confirmed'
+                    : 'Waiting for room acknowledgement…',
+              ),
+              subtitle: const Text(
+                'The request may already have created a room. '
+                'Check the inbox; no second request will be sent. '
+                'A late acknowledgement will be retained.',
+              ),
+            ),
+          if (_createdRoomId != null && _owner.isCurrent)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                _waitingForCreatedRoom
+                    ? 'Waiting for room sync…'
+                    : 'Room created',
+              ),
+              subtitle: SelectableText(_createdRoomId!),
+              trailing: TextButton(
+                onPressed: _waitingForCreatedRoom ? null : _openCreatedRoom,
+                child: const Text('Open created room'),
+              ),
+            ),
+        ];
+        final savedButton = saved == null
+            ? null
+            : IconButton(
+                tooltip: 'Saved messages',
+                onPressed: _openSaved,
+                icon: Icon(Icons.bookmarks_outlined, color: p.secondary),
+              );
+        final roomCountPill = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: p.secondary.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: Text(
+            roomCountLabel,
+            style: TextStyle(
+              color: p.secondary,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+              fontSize: 10,
+            ),
+          ),
+        );
+        final quickLinks = <Widget>[
+          if (_features != null) ...[
+            TextButton.icon(
+              onPressed: _findPeople,
+              icon: const Icon(Icons.person_search_outlined),
+              label: const Text('Find people'),
+            ),
+            TextButton.icon(
+              onPressed: _browseSpaces,
+              icon: const Icon(Icons.hub_outlined),
+              label: const Text('Spaces'),
+            ),
+          ],
+        ];
+        // Search, quick links, Space switcher, folders and filters: always
+        // shown with "Show all home options", otherwise in the options menu.
+        final options = <Widget>[
+          TextField(
+            controller: _search,
+            onChanged: (value) => setState(() => _query = value),
+            decoration: InputDecoration(
+              hintText: 'Find a conversation',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: IconButton(
+                tooltip: 'Search messages',
+                onPressed: _searchMessages,
+                icon: const Icon(Icons.manage_search_rounded),
+              ),
+            ),
+          ),
+          if (expandedHome) ...[
+            if (quickLinks.isNotEmpty) Wrap(spacing: 12, children: quickLinks),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  Expanded(child: Wrap(spacing: 4, children: quickLinks)),
+                  ?savedButton,
+                  const SizedBox(width: 4),
+                  roomCountPill,
+                ],
+              ),
+            ),
+          if (spaces.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SpaceSwitcher(
+              spaces: spaces,
+              selected: spaceId,
+              backend: widget.backend,
+              palette: p,
+              onSelected: (id) {
+                Haptics.selection();
+                setState(() => _spaceId = id);
+              },
+              onOptions: _showSpaceOptions,
+            ),
+          ],
+          if (folderList.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            FolderTabs(
+              folders: folderList,
+              selectedId: folder?.id,
+              unreadCounts: unreadByFolder,
+              palette: p,
+              onSelected: (id) {
+                Haptics.selection();
+                setState(() => _folderId = id);
+              },
+              onOptions: _showFolderOptions,
+              onNewFolder: _newFolder,
+            ),
+          ],
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                if (_filters.isNotEmpty) ...[
+                  IconButton.filledTonal(
+                    tooltip: 'Clear filters',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _filters = const {}),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                // Element X keeps selected filters first.
+                for (final filter in [
+                  ...RoomListFilter.values.where(_filters.contains),
+                  ...RoomListFilter.values.where((f) => !_filters.contains(f)),
+                ]) ...[
+                  _FilterChip(
+                    label: filter.label,
+                    selected: _filters.contains(filter),
+                    palette: p,
+                    onTap: () {
+                      Haptics.selection();
+                      setState(
+                        () => _filters = toggleRoomListFilter(_filters, filter),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 9),
+                ],
+              ],
+            ),
+          ),
+        ];
         return Scaffold(
           body: GlowBackdrop(
             palette: p,
@@ -820,6 +1017,22 @@ class _InboxScreenState extends State<InboxScreen> {
                               : _createRoom,
                           icon: const Icon(Icons.add_home_work_outlined),
                         ),
+                        if (!expandedHome)
+                          IconButton(
+                            key: const ValueKey('home.options'),
+                            tooltip: _optionsOpen
+                                ? 'Hide options'
+                                : 'Show options',
+                            onPressed: () {
+                              Haptics.selection();
+                              setState(() => _optionsOpen = !_optionsOpen);
+                            },
+                            icon: AnimatedRotation(
+                              turns: _optionsOpen ? 0.5 : 0,
+                              duration: const Duration(milliseconds: 220),
+                              child: const Icon(Icons.expand_more_rounded),
+                            ),
+                          ),
                         IconButton(
                           tooltip: 'Settings',
                           iconSize: 25,
@@ -829,190 +1042,102 @@ class _InboxScreenState extends State<InboxScreen> {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(24, compact ? 12 : 30, 24, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Eyebrow('The good stuff', palette: p),
-                        if (_creation.failure != null && _owner.isCurrent)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Room not created'),
-                            subtitle: Text(_creation.failure!.message),
-                          ),
-                        if (_creation.active &&
-                            _createdRoomId == null &&
-                            _owner.isCurrent)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              _creation.uncertain
-                                  ? 'Room creation not confirmed'
-                                  : 'Waiting for room acknowledgement…',
-                            ),
-                            subtitle: const Text(
-                              'The request may already have created a room. '
-                              'Check the inbox; no second request will be sent. '
-                              'A late acknowledgement will be retained.',
-                            ),
-                          ),
-                        if (_createdRoomId != null && _owner.isCurrent)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              _waitingForCreatedRoom
-                                  ? 'Waiting for room sync…'
-                                  : 'Room created',
-                            ),
-                            subtitle: SelectableText(_createdRoomId!),
-                            trailing: TextButton(
-                              onPressed: _waitingForCreatedRoom
-                                  ? null
-                                  : _openCreatedRoom,
-                              child: const Text('Open created room'),
-                            ),
-                          ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Messages',
-                                style: TextStyle(
-                                  fontSize: 37,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -1.7,
-                                  color: p.foreground,
-                                ),
-                              ),
-                            ),
-                            if (saved != null)
-                              IconButton(
-                                tooltip: 'Saved messages',
-                                onPressed: _openSaved,
-                                icon: Icon(
-                                  Icons.bookmarks_outlined,
-                                  color: p.secondary,
-                                ),
-                              ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 11,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: p.secondary.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(40),
-                              ),
-                              child: Text(
-                                roomCountLabel,
-                                style: TextStyle(
-                                  color: p.secondary,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.8,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 19),
-                        TextField(
-                          onChanged: (value) => setState(() => _query = value),
-                          decoration: InputDecoration(
-                            hintText: 'Find a conversation',
-                            prefixIcon: const Icon(Icons.search_rounded),
-                            suffixIcon: IconButton(
-                              tooltip: 'Search messages',
-                              onPressed: _searchMessages,
-                              icon: const Icon(Icons.manage_search_rounded),
-                            ),
-                          ),
-                        ),
-                        if (_features != null)
-                          Wrap(
-                            spacing: 12,
+                  if (expandedHome)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        24,
+                        compact ? 12 : 30,
+                        24,
+                        0,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Eyebrow('The good stuff', palette: p),
+                          ...creationStatus,
+                          const SizedBox(height: 3),
+                          Row(
                             children: [
-                              TextButton.icon(
-                                onPressed: _findPeople,
-                                icon: const Icon(Icons.person_search_outlined),
-                                label: const Text('Find people'),
-                              ),
-                              TextButton.icon(
-                                onPressed: _browseSpaces,
-                                icon: const Icon(Icons.hub_outlined),
-                                label: const Text('Spaces'),
-                              ),
-                            ],
-                          ),
-                        if (spaces.isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          SpaceSwitcher(
-                            spaces: spaces,
-                            selected: spaceId,
-                            backend: widget.backend,
-                            palette: p,
-                            onSelected: (id) => setState(() => _spaceId = id),
-                            onOptions: _showSpaceOptions,
-                          ),
-                        ],
-                        if (folderList.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          FolderTabs(
-                            folders: folderList,
-                            selectedId: folder?.id,
-                            unreadCounts: unreadByFolder,
-                            palette: p,
-                            onSelected: (id) => setState(() => _folderId = id),
-                            onOptions: _showFolderOptions,
-                            onNewFolder: _newFolder,
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              if (_filters.isNotEmpty) ...[
-                                IconButton.filledTonal(
-                                  tooltip: 'Clear filters',
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () =>
-                                      setState(() => _filters = const {}),
-                                  icon: const Icon(Icons.close_rounded),
-                                ),
-                                const SizedBox(width: 6),
-                              ],
-                              // Element X keeps selected filters first.
-                              for (final filter in [
-                                ...RoomListFilter.values.where(
-                                  _filters.contains,
-                                ),
-                                ...RoomListFilter.values.where(
-                                  (f) => !_filters.contains(f),
-                                ),
-                              ]) ...[
-                                _FilterChip(
-                                  label: filter.label,
-                                  selected: _filters.contains(filter),
-                                  palette: p,
-                                  onTap: () => setState(
-                                    () => _filters = toggleRoomListFilter(
-                                      _filters,
-                                      filter,
-                                    ),
+                              Expanded(
+                                child: Text(
+                                  'Messages',
+                                  style: TextStyle(
+                                    fontSize: 37,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -1.7,
+                                    color: p.foreground,
                                   ),
                                 ),
-                                const SizedBox(width: 9),
-                              ],
+                              ),
+                              ?savedButton,
+                              roomCountPill,
                             ],
                           ),
-                        ),
-                        const SizedBox(height: 14),
-                      ],
+                          const SizedBox(height: 19),
+                          ...options,
+                          const SizedBox(height: 14),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    if (creationStatus.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                        child: Column(children: creationStatus),
+                      ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: _optionsOpen
+                          ? Padding(
+                              key: const ValueKey('home.options_panel'),
+                              padding: EdgeInsets.fromLTRB(
+                                24,
+                                compact ? 8 : 14,
+                                24,
+                                12,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: options,
+                              ),
+                            )
+                          : narrowing.isNotEmpty
+                          // Collapsed while something narrows the list: say
+                          // what, so a short list is never a mystery.
+                          ? Padding(
+                              key: const ValueKey('home.narrowing'),
+                              padding: const EdgeInsets.fromLTRB(24, 8, 12, 4),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.filter_alt_outlined,
+                                    size: 18,
+                                    color: p.secondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Showing ${narrowing.join(' · ')}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: p.muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _clearNarrowing,
+                                    child: const Text('Clear'),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : const SizedBox(width: double.infinity, height: 14),
                     ),
-                  ),
+                  ],
                   Expanded(
                     child:
                         chatCount == 0 &&

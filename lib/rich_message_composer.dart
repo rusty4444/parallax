@@ -15,6 +15,7 @@ import 'features/rich_timeline/mention_suggestions.dart';
 import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
+import 'haptics.dart';
 
 typedef MediaPicker = Future<MediaSelection?> Function();
 
@@ -722,6 +723,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       _showError(problem);
       return;
     }
+    Haptics.confirm();
     final onSend = widget.onSend;
     _consumeDraft(() async {
       await onSend(text, media);
@@ -792,6 +794,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       _showError(problem);
       return;
     }
+    Haptics.longPress();
     setState(() => _sendOptionsOpen = true);
     ComposerSendOption? chosen;
     try {
@@ -958,6 +961,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         }
         await recorder.start();
         if (!_ownsVoice(epoch)) return;
+        Haptics.confirm();
         _recordingSeconds = 0;
         setState(() => _voiceMode = _VoiceMode.recording);
         _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -985,6 +989,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     if (!_alive || _voiceMode != _VoiceMode.recording) return;
     final epoch = _voiceEpoch;
     _durationTimer?.cancel();
+    Haptics.confirm();
     setState(() => _voiceMode = _VoiceMode.stopping);
     final recorder = _voiceRecorder();
     _enqueueVoice(() async {
@@ -1299,43 +1304,11 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                 ),
               ],
             ),
+          // The message box gets its own full-width row with Send beside it,
+          // so the composer buttons below can never squeeze it.
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (formatting)
-                // Element X replaces "add attachment" while formatting.
-                IconButton(
-                  key: const ValueKey('composer-close-formatting'),
-                  tooltip: 'Close text formatting',
-                  onPressed: _toggleFormatting,
-                  icon: const Icon(Icons.close_rounded),
-                )
-              else ...[
-                IconButton(
-                  tooltip: 'Attach media',
-                  onPressed:
-                      _pickOwned ||
-                          _sourceSheetOpen ||
-                          voiceActive ||
-                          _background
-                      ? null
-                      : _showSources,
-                  icon: _pickOwned
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add_circle_outline),
-                ),
-                if (formattingAvailable)
-                  IconButton(
-                    key: const ValueKey('composer-text-formatting'),
-                    tooltip: 'Text formatting',
-                    onPressed: _background ? null : _toggleFormatting,
-                    icon: const Icon(Icons.text_format_rounded),
-                  ),
-              ],
               Expanded(
                 child: TextField(
                   controller: _input,
@@ -1363,27 +1336,76 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: 'Emoji',
-                onPressed: _emojiSheetOpen || _background ? null : _showEmoji,
-                icon: const Icon(Icons.emoji_emotions_outlined),
-              ),
-              if (_media == null && !voiceActive)
-                IconButton(
-                  tooltip: 'Record voice message',
-                  onPressed: _sending || _pickOwned || _background
-                      ? null
-                      : _startRecording,
-                  icon: const Icon(Icons.mic_none_rounded),
-                ),
-              if (widget.onCancel != null)
-                IconButton(
-                  tooltip: 'Cancel',
-                  onPressed: _cancel,
-                  icon: const Icon(Icons.close),
-                ),
+              const SizedBox(width: 6),
               _sendButton(context),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                if (formatting)
+                  // Element X replaces "add attachment" while formatting.
+                  IconButton(
+                    key: const ValueKey('composer-close-formatting'),
+                    tooltip: 'Close text formatting',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _toggleFormatting,
+                    icon: const Icon(Icons.close_rounded),
+                  )
+                else ...[
+                  IconButton(
+                    tooltip: 'Attach media',
+                    visualDensity: VisualDensity.compact,
+                    onPressed:
+                        _pickOwned ||
+                            _sourceSheetOpen ||
+                            voiceActive ||
+                            _background
+                        ? null
+                        : _showSources,
+                    icon: _pickOwned
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.add_circle_outline),
+                  ),
+                  if (formattingAvailable)
+                    IconButton(
+                      key: const ValueKey('composer-text-formatting'),
+                      tooltip: 'Text formatting',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _background ? null : _toggleFormatting,
+                      icon: const Icon(Icons.text_format_rounded),
+                    ),
+                ],
+                IconButton(
+                  tooltip: 'Emoji',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _emojiSheetOpen || _background ? null : _showEmoji,
+                  icon: const Icon(Icons.emoji_emotions_outlined),
+                ),
+                if (_media == null && !voiceActive)
+                  IconButton(
+                    tooltip: 'Record voice message',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _sending || _pickOwned || _background
+                        ? null
+                        : _startRecording,
+                    icon: const Icon(Icons.mic_none_rounded),
+                  ),
+                const Spacer(),
+                if (widget.onCancel != null)
+                  IconButton(
+                    tooltip: 'Cancel',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _cancel,
+                    icon: const Icon(Icons.close),
+                  ),
+              ],
+            ),
           ),
           if (formatting)
             TextFieldTapRegion(

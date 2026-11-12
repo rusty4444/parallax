@@ -12,6 +12,7 @@ import 'features/threads/thread_widgets.dart';
 import 'hooks/hook_types.dart';
 import 'media_viewer.dart';
 import 'messaging_features.dart';
+import 'haptics.dart';
 
 /// A thread: its root, the replies (oldest first) and an in-thread composer.
 /// Replies are sent with `m.thread` relations through the outbox; viewing the
@@ -271,6 +272,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   Future<void> _actions(ChatEntry entry) async {
     if (!mounted || !_ownerCurrent || entry.redacted) return;
+    Haptics.longPress();
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,

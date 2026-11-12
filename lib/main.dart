@@ -20,6 +20,7 @@ import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/platform/background_connection.dart';
+import 'haptics.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -104,6 +105,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     _ownsNotifications = widget.notifications == null;
     _ownsBackend = widget.backend == null;
     _preferences = widget.preferences ?? AppearancePreferences();
+    _preferences.addListener(_syncHaptics);
+    _syncHaptics();
     _draftStore = widget.draftStore ?? MessageDraftStore();
     _notifications =
         widget.notifications ??
@@ -133,6 +136,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       unawaited(_loadTheme());
     });
   }
+
+  void _syncHaptics() => Haptics.enabled = _preferences.haptics;
 
   void _sessionChanged() {
     final account = BackendSessionOwner.keyFor(_backend);
@@ -527,6 +532,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     _startupDeadlines.clear();
     ++_pushGeneration;
     WidgetsBinding.instance.removeObserver(this);
+    _preferences.removeListener(_syncHaptics);
     _backend.removeListener(_sessionChanged);
     // Cancel immediately; release the SDK only after all accepted push callbacks
     // and exact pusher removals have joined. Never dispose borrowed resources.

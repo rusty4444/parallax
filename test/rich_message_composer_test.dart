@@ -162,6 +162,65 @@ Future<void> flushCleanup(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('message box sits above the composer buttons at full width', (
+    tester,
+  ) async {
+    tester.view
+      ..physicalSize = const Size(412, 900)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final haptics = <String?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'HapticFeedback.vibrate') {
+          haptics.add(call.arguments as String?);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final controller = TextEditingController(text: 'hi');
+    var sent = 0;
+    await mount(
+      tester,
+      controller: controller,
+      onSend: (_, _) async {
+        sent++;
+      },
+      onCancel: () {},
+    );
+    final field = tester.getRect(find.byType(TextField));
+    for (final tip in [
+      'Attach media',
+      'Text formatting',
+      'Emoji',
+      'Record voice message',
+      'Cancel',
+    ]) {
+      expect(
+        tester.getRect(find.byTooltip(tip)).top,
+        greaterThanOrEqualTo(field.bottom),
+        reason: tip,
+      );
+    }
+    // Only Send shares the message box's row.
+    expect(field.width, greaterThan(412 * 0.75));
+    expect(
+      tester.getCenter(find.byTooltip('Send message')).dy,
+      closeTo(field.center.dy, field.height / 2),
+    );
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(sent, 1);
+    expect(haptics, ['HapticFeedbackType.mediumImpact']);
+  });
+
   testWidgets('rapid send taps own one request synchronously', (tester) async {
     final controller = TextEditingController(text: 'hello');
     final gate = Completer<void>();

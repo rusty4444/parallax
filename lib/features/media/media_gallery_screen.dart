@@ -12,6 +12,7 @@ import 'media_content.dart';
 import 'media_features.dart';
 import 'media_viewer_pager.dart';
 import '../../media_preview_policy.dart';
+import '../../haptics.dart';
 
 /// Element X "Media and files": images and videos in a grid, and documents,
 /// audio and voice messages in a list, newest first, paginated from the
@@ -415,7 +416,10 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen>
       label: '${video ? 'Video' : 'Image'}: ${info.name}',
       child: GestureDetector(
         onTap: () => unawaited(_open(entry, media)),
-        onLongPress: () => unawaited(_actions(entry)),
+        onLongPress: () {
+          Haptics.longPress();
+          unawaited(_actions(entry));
+        },
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Stack(

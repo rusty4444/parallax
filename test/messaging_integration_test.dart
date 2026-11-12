@@ -22,6 +22,7 @@ import 'package:parallax/thread_screen.dart';
 import 'package:parallax/user_directory_screen.dart';
 
 import 'widget_test.dart' show FakeBackend, FakeBackgroundStore;
+import 'home_options.dart';
 
 const roomId = '!r:example.org';
 
@@ -624,6 +625,7 @@ void main() {
         ),
       ),
     );
+    await openHomeOptions(tester);
     await tester.tap(find.text('Unread'));
     await tester.pump();
     expect(find.text('Failed room'), findsOneWidget);
@@ -649,6 +651,7 @@ void main() {
           ),
         ),
       );
+      await openHomeOptions(tester);
       await tester.tap(find.text('Find people'));
       await tester.pumpAndSettle();
       expect(find.byType(UserDirectoryScreen), findsOneWidget);
@@ -778,7 +781,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         MediaQuery.textScalerOf(
-          tester.element(find.text('Messages')),
+          tester.element(find.byType(InboxScreen)),
         ).scale(20),
         closeTo(20 * preferences.textScale, 0.001),
       );

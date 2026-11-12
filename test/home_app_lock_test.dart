@@ -14,6 +14,7 @@ import 'package:parallax/features/home/app_lock/pin_hash.dart';
 import 'package:parallax/secure_store.dart';
 
 import 'home_fakes.dart';
+import 'package:parallax/inbox_screen.dart';
 
 class _Store implements SecureValueStore {
   final values = <String, String>{};
@@ -297,13 +298,13 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Parallax is locked'), findsOneWidget);
-    expect(find.text('Messages'), findsNothing);
+    expect(find.byType(InboxScreen), findsNothing);
     for (final digit in '2580'.split('')) {
       await tester.tap(find.byKey(ValueKey('pin-key-$digit')));
       await tester.pump();
     }
     await tester.pumpAndSettle();
-    expect(find.text('Messages'), findsOneWidget);
+    expect(find.byType(InboxScreen), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });

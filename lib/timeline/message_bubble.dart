@@ -14,6 +14,7 @@ import '../hooks/registry.dart';
 import '../media_viewer.dart';
 import '../message_image.dart';
 import '../room_avatar.dart';
+import '../haptics.dart';
 
 /// Width of the sender-avatar column beside others' messages.
 const senderAvatarSize = 32.0;
@@ -240,11 +241,14 @@ class MessageBubble extends StatelessWidget {
                           for (final reaction in entry.reactions)
                             GestureDetector(
                               // Element X: long-press a reaction to see who reacted.
-                              onLongPress: () => showReactionSummaryForEntry(
-                                context,
-                                hook,
-                                emoji: reaction.emoji,
-                              ),
+                              onLongPress: () {
+                                Haptics.longPress();
+                                showReactionSummaryForEntry(
+                                  context,
+                                  hook,
+                                  emoji: reaction.emoji,
+                                );
+                              },
                               child: ActionChip(
                                 tooltip: reaction.mine
                                     ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'

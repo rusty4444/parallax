@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'push_notifications_test.dart'
     show FakePushDriver, MemoryPushStore, configuration;
 import 'widget_test.dart' show FakeBackend;
+import 'package:parallax/inbox_screen.dart';
 
 const _roomId = '!push:example.org';
 const _joined = ChatRoom(
@@ -591,7 +592,7 @@ void main() {
     h.store.failDeletion = true;
     await h.boot(tester);
     expect(h.backend.initializations, 1);
-    expect(find.text('Messages'), findsOneWidget);
+    expect(find.byType(InboxScreen), findsOneWidget);
     expect(find.textContaining('local notification storage'), findsOneWidget);
     expect(h.push.hasSession, isFalse);
     expect(h.driver.initializations, 0);
@@ -647,7 +648,7 @@ void main() {
     h.backend.status = SessionStatus.ready;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
-    expect(find.text('Messages'), findsOneWidget);
+    expect(find.byType(InboxScreen), findsOneWidget);
     expect(h.backend.initializations, 2);
     expect(h.push.hasSession, isTrue);
     await h.close(tester);

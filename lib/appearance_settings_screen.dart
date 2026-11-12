@@ -72,6 +72,37 @@ class AppearanceSettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          _heading(context, 'Home screen'),
+          Card(
+            child: SwitchListTile(
+              key: const ValueKey('appearance.expanded_home'),
+              secondary: const Icon(Icons.dashboard_customize_outlined),
+              title: const Text('Show all home options'),
+              subtitle: const Text(
+                'Keep search, filters, Spaces and folders above your chats. '
+                'When off, they’re in the options menu at the top.',
+              ),
+              value: preferences.expandedHome,
+              onChanged: (value) =>
+                  _save(context, () => preferences.setExpandedHome(value)),
+            ),
+          ),
+          _heading(context, 'Touch'),
+          Card(
+            child: SwitchListTile(
+              key: const ValueKey('appearance.haptics'),
+              secondary: const Icon(Icons.vibration_rounded),
+              title: const Text('Haptic feedback'),
+              subtitle: const Text(
+                'Vibrate when you long-press a message, send, react or '
+                'pick a filter. Also follows your phone’s touch feedback '
+                'setting.',
+              ),
+              value: preferences.haptics,
+              onChanged: (value) =>
+                  _save(context, () => preferences.setHaptics(value)),
+            ),
+          ),
           _heading(context, 'Media & privacy'),
           Card(
             child: RadioGroup<MediaPreviewMode>(

@@ -13,6 +13,7 @@ import 'package:parallax/inbox_screen.dart';
 
 import 'saved_fakes.dart';
 import 'widget_test.dart' show FakeBackend;
+import 'home_options.dart';
 
 final _palette = paletteFor(VisualTheme.parallax);
 
@@ -56,6 +57,9 @@ Future<void> _pumpInbox(WidgetTester tester, SavedFakeBackend backend) async {
       ),
     ),
   );
+  await tester.pumpAndSettle();
+  // Folder tabs, filters and the Saved button live in the options menu.
+  await openHomeOptions(tester);
   await tester.pumpAndSettle();
 }
 

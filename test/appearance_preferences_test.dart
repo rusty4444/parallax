@@ -45,11 +45,16 @@ void main() {
     expect(preferences.compact, isFalse);
     expect(preferences.autoLoadMedia, isTrue);
     expect(preferences.sendReadReceipts, isTrue);
+    // Home options start tucked into the menu; haptics start on.
+    expect(preferences.expandedHome, isFalse);
+    expect(preferences.haptics, isTrue);
     await preferences.load();
     expect(preferences.textScale, 1.0);
     expect(preferences.compact, isFalse);
     expect(preferences.autoLoadMedia, isTrue);
     expect(preferences.sendReadReceipts, isTrue);
+    expect(preferences.expandedHome, isFalse);
+    expect(preferences.haptics, isTrue);
   });
 
   test(
@@ -62,8 +67,10 @@ void main() {
       await preferences.setSendReadReceipts(false);
       await preferences.setSendTypingNotifications(false);
       await preferences.setHideInviteAvatars(true);
+      await preferences.setExpandedHome(true);
+      await preferences.setHaptics(false);
       // Media previews store the mode plus the legacy on/off key.
-      expect(prefs.getKeys(), hasLength(7));
+      expect(prefs.getKeys(), hasLength(9));
       final restored = AppearancePreferences(prefs: prefs);
       addTearDown(restored.dispose);
       await restored.load();
@@ -74,6 +81,8 @@ void main() {
       expect(restored.sendReadReceipts, isFalse);
       expect(restored.sendTypingNotifications, isFalse);
       expect(restored.hideInviteAvatars, isTrue);
+      expect(restored.expandedHome, isTrue);
+      expect(restored.haptics, isFalse);
     },
   );
 
