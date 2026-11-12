@@ -13,10 +13,35 @@ import 'matrix_push_projection.dart';
 import 'notification_media.dart';
 import 'notification_model.dart';
 
+/// An event this device's sync received that should notify.
+typedef SyncedNotification = ({String roomId, String eventId});
+
+/// Maps an SDK `onNotification` event to what the built-in delivery shows.
+/// Null for events that never notify (beacons, call membership) or carry no
+/// usable ID. The SDK reports a new invite with a synthetic event ID, which
+/// becomes a stable `$`-prefixed one per room.
+SyncedNotification? syncedNotificationFor({
+  required String roomId,
+  required String eventId,
+  required String type,
+}) {
+  if (silentPushEventTypes.contains(type)) return null;
+  if (type == matrix.EventTypes.RoomMember && eventId == 'invite_for_$roomId') {
+    return (roomId: roomId, eventId: '\$invite:$roomId');
+  }
+  if (!eventId.startsWith(r'$') || eventId.length > 1024) return null;
+  return (roomId: roomId, eventId: eventId);
+}
+
 abstract interface class NotificationFeatures {
   /// The signed-in account and device, or null when signed out.
   String? get userId;
   String? get deviceId;
+
+  /// Events the account's push rules say should notify, as this device's own
+  /// sync receives them (built-in delivery). Never the initial sync or your
+  /// own messages.
+  Stream<SyncedNotification> get syncNotifications;
 
   /// Fetches and decrypts [envelope]'s event with the live client. Returns
   /// null when it was already read; throws when it cannot be resolved.
@@ -89,6 +114,25 @@ class MatrixNotificationFeatures implements NotificationFeatures {
     return client != null && _access.isSessionCurrent(client)
         ? client.deviceID
         : null;
+  }
+
+  @override
+  Stream<SyncedNotification> get syncNotifications {
+    final client = _access.sdkClient;
+    if (client == null || !_access.isSessionCurrent(client)) {
+      return const Stream.empty();
+    }
+    return client.onNotification.stream
+        .where((_) => _access.isSessionCurrent(client))
+        .map(
+          (event) => syncedNotificationFor(
+            roomId: event.room.id,
+            eventId: event.eventId,
+            type: event.type,
+          ),
+        )
+        .where((notification) => notification != null)
+        .cast<SyncedNotification>();
   }
 
   @override

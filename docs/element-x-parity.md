@@ -85,7 +85,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 
 | Area | Status | Notes |
 |---|---|---|
-| Push through your own Firebase project or UnifiedPush (for example ntfy) | Built | Opt-in, and must be re-enabled after each restart (existing design). |
+| Notifications with the app closed | Built | On by default with no external service: Parallax keeps its own sync running in a foreground service (Element X uses Element's Firebase project and push gateway instead). Your own Firebase project or UnifiedPush remain optional and opt-in. Not yet tested on a physical phone. |
 | Global notification settings (direct chats, groups, @room, invites, calls) | Built | |
 | Sender and message text in notifications; inline reply | Built | `lib/features/notifications/`: fetched and decrypted on the device, so the push provider sees only IDs. Can be turned off in Settings. A reply sent while the app is closed waits until it next opens. |
 | Notification troubleshooting screen | Missing | |

@@ -18,7 +18,7 @@ Parallax covers the features Element X Android v26.11.0 turns on by default, plu
 - **Media:** voice messages with waveforms, inline audio and video, stickers, animated GIF/WebP, a swipeable media viewer, a per-room media gallery and optimised image uploads.
 - **Rooms:** start a chat; create private, ask-to-join or public rooms; join by address. Room info covers editing, per-room notifications, security and privacy, roles and permissions, members, join requests, reporting and leaving. User profiles let you message, verify, block and moderate.
 - **Calls:** Element Call embedded in the app, with a call button, an ongoing-call banner, call items in the timeline and ringing while the app is open.
-- **Notifications and links:** push through your own Firebase project or UnifiedPush (for example ntfy), and global notification settings. Share into Parallax from other apps, and open matrix.to or `matrix:` links in Parallax.
+- **Notifications and links:** notifications on by default with no Google or push service (Parallax keeps its own background connection), optional Firebase or UnifiedPush delivery, and global notification settings. Share into Parallax from other apps, and open matrix.to or `matrix:` links in Parallax.
 - **Search:** an on-device search index of your encrypted history alongside server search.
 - **Account and settings:** profile, sessions, blocked users, account management, sign out (warns if key backup isn't on) and account deactivation.
 - **Parallax extras:** room backgrounds, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.

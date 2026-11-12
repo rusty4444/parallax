@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Notifications without Google or a push service
+
+- Notifications are on by default after sign-in, with no opt-in. Parallax keeps its own connection to your homeserver in the background (a foreground service with a small “Parallax is connected” notification) and shows new messages itself, so no Firebase project, push gateway or UnifiedPush app is needed. It restarts after a reboot or an update.
+- Settings → Notifications on this device can turn them off (remembered on the device) and asks Android to let Parallax run in the background. Your own Firebase project or UnifiedPush remain optional.
+
+## 0.5.0 — Round 2
+
+- Rich notifications, QR sign-in, Space admin, room key export/import, formatting toolbar, send later and undo send, saved messages, folders and note to self, live location, emoji and sticker packs, slash commands and chat effects. See `docs/element-x-parity.md`.
+
 ## 0.4.0 — Parallax
 
 ### Renamed and rethemed

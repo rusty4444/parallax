@@ -4,20 +4,29 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'features/platform/background_connection.dart';
 import 'features/platform/unified_push.dart';
 import 'push_notifications.dart';
 
 /// Edits client configuration only, never gateway/server credentials. The app
 /// owns [notifications]; leaving this route must not dispose the shared owner.
 class PushSettingsScreen extends StatefulWidget {
-  const PushSettingsScreen({super.key, required this.notifications});
+  const PushSettingsScreen({
+    super.key,
+    required this.notifications,
+    this.connection = const MethodChannelBackgroundConnection(),
+  });
   final PushNotifications notifications;
+
+  /// Battery optimisation state for the built-in delivery (fake in tests).
+  final BackgroundConnectionPlatform connection;
 
   @override
   State<PushSettingsScreen> createState() => _PushSettingsScreenState();
 }
 
-class _PushSettingsScreenState extends State<PushSettingsScreen> {
+class _PushSettingsScreenState extends State<PushSettingsScreen>
+    with WidgetsBindingObserver {
   late final TextEditingController _gateway;
   late final TextEditingController _matrixAppId;
   late final TextEditingController _apiKey;
@@ -28,11 +37,14 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
   late PushProvider _provider;
   String? _distributor;
   Future<List<String>>? _distributors;
+  Future<bool>? _batteryExempt;
   bool _actionBusy = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _batteryExempt = widget.connection.isIgnoringBatteryOptimizations();
     final config = widget.notifications.configuration;
     final firebase = config.isUnifiedPush ? null : config;
     _provider = config.provider;
@@ -60,7 +72,18 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from Android's battery prompt or settings.
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {
+        _batteryExempt = widget.connection.isIgnoringBatteryOptimizations();
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final controller in [
       _gateway,
       _matrixAppId,
@@ -132,13 +155,19 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
       _provider = provider;
       if (provider == PushProvider.unifiedPush) _loadDistributors();
     });
-    await _run(
-      () => widget.notifications.configure(
-        provider == PushProvider.unifiedPush
-            ? _unifiedPushConfiguration()
-            : _firebaseConfiguration(),
-      ),
-    );
+    await _run(() async {
+      final notifications = widget.notifications;
+      await notifications.configure(switch (provider) {
+        PushProvider.inApp => const PushConfiguration.inApp(),
+        PushProvider.unifiedPush => _unifiedPushConfiguration(),
+        PushProvider.firebase => _firebaseConfiguration(),
+      });
+      // The built-in delivery needs no consent: back on unless turned off.
+      if (provider == PushProvider.inApp &&
+          !await InAppNotificationPreferences.turnedOff()) {
+        await notifications.enable(consent: true);
+      }
+    });
   }
 
   Future<void> _selectDistributor(String distributor) async {
@@ -150,6 +179,28 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
 
   Future<void> _toggle(bool enabled) => _run(() async {
     final notifications = widget.notifications;
+    if (_provider == PushProvider.inApp) {
+      await InAppNotificationPreferences.setTurnedOff(!enabled);
+      if (!enabled) {
+        await notifications.disable();
+        return;
+      }
+      if (!notifications.configuration.isInApp) {
+        await notifications.configure(const PushConfiguration.inApp());
+      }
+      if (!notifications.hasSession) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sign in before turning on notifications.'),
+            ),
+          );
+        }
+        return;
+      }
+      await notifications.enable(consent: true);
+      return;
+    }
     if (!enabled) {
       await notifications.disable();
       return;
@@ -367,6 +418,50 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
     },
   );
 
+  List<Widget> _inAppSection() => [
+    const Text(
+      'Built into Parallax',
+      style: TextStyle(fontWeight: FontWeight.bold),
+    ),
+    const SizedBox(height: 8),
+    const Text(
+      'Parallax stays connected to your homeserver in the background and '
+      'shows new messages itself, like Element does but without Google, a '
+      'push gateway or another app. Messages are fetched and decrypted on '
+      'this device.',
+    ),
+    const SizedBox(height: 8),
+    FutureBuilder<bool>(
+      future: _batteryExempt,
+      builder: (context, snapshot) {
+        final exempt = snapshot.data ?? false;
+        return ListTile(
+          key: const ValueKey('push.battery'),
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            exempt ? Icons.battery_full_rounded : Icons.battery_alert_rounded,
+          ),
+          title: const Text('Background activity'),
+          subtitle: Text(
+            exempt
+                ? 'Allowed. Android won’t stop the connection to save battery.'
+                : 'Android may pause Parallax to save battery, which can '
+                      'delay notifications. Allow background activity to '
+                      'keep them on time.',
+          ),
+          trailing: exempt
+              ? null
+              : TextButton(
+                  onPressed: () => unawaited(
+                    widget.connection.requestIgnoreBatteryOptimizations(),
+                  ),
+                  child: const Text('Allow'),
+                ),
+        );
+      },
+    ),
+  ];
+
   List<Widget> _unifiedPushSection(
     PushNotifications notifications,
     bool editable,
@@ -400,7 +495,7 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Push notifications')),
+    appBar: AppBar(title: const Text('Notifications on this device')),
     body: ListenableBuilder(
       listenable: widget.notifications,
       builder: (context, _) {
@@ -408,15 +503,22 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
         final editable =
             !notifications.enabled && !notifications.busy && !_actionBusy;
         final unifiedPush = _provider == PushProvider.unifiedPush;
+        final inApp = _provider == PushProvider.inApp;
         return ListView(
           padding: const EdgeInsets.all(20),
           children: [
             SwitchListTile(
               key: const ValueKey('push.enable'),
               contentPadding: EdgeInsets.zero,
-              title: const Text('Enable push notifications'),
-              subtitle: const Text(
-                'Off by default. Requires your own configured services and consent.',
+              title: Text(
+                inApp
+                    ? 'Notifications on this device'
+                    : 'Enable push notifications',
+              ),
+              subtitle: Text(
+                inApp
+                    ? 'On by default. Turn off to stop notifications and the background connection on this device.'
+                    : 'Off by default. Requires your own configured services and consent.',
               ),
               value: notifications.enabled,
               onChanged: _actionBusy ? null : _toggle,
@@ -431,7 +533,11 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        notifications.active
+                        inApp
+                            ? (notifications.active
+                                  ? 'Notifications are on'
+                                  : 'Notifications are off')
+                            : notifications.active
                             ? 'Registered — delivery unverified'
                             : 'Push is not active',
                         style: Theme.of(context).textTheme.titleMedium,
@@ -449,12 +555,17 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Push provider',
+              'How notifications arrive',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             SegmentedButton<PushProvider>(
               segments: const [
+                ButtonSegment(
+                  value: PushProvider.inApp,
+                  icon: Icon(Icons.sync_rounded),
+                  label: Text('Built in'),
+                ),
                 ButtonSegment(
                   value: PushProvider.firebase,
                   icon: Icon(Icons.cloud_outlined),
@@ -467,12 +578,15 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
                 ),
               ],
               selected: {_provider},
-              onSelectionChanged: editable
+              // Switching turns the current delivery off first.
+              onSelectionChanged: !notifications.busy && !_actionBusy
                   ? (selection) => unawaited(_selectProvider(selection.first))
                   : null,
             ),
             const SizedBox(height: 16),
-            if (unifiedPush)
+            if (inApp)
+              ..._inAppSection()
+            else if (unifiedPush)
               ..._unifiedPushSection(notifications, editable)
             else
               ..._firebaseSection(notifications, editable),
@@ -487,7 +601,14 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
             ],
             const SizedBox(height: 20),
             Text(
-              unifiedPush
+              inApp
+                  ? 'Android shows a small “Parallax is connected” notification '
+                        'while the connection runs; you can hide it in Android’s '
+                        'notification settings without stopping it. Some phone '
+                        'makers stop background apps anyway. Notifications show '
+                        'content fetched and decrypted on this device; you can '
+                        'hide it under Settings → Notification content.'
+                  : unifiedPush
                   ? 'Android only. Permission is not proof of delivery. A live test with '
                         'your distributor, its Matrix gateway and your Matrix account is still '
                         'required. Foreground restarts and account changes require enabling '

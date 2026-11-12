@@ -33,6 +33,10 @@ class _Backend extends FakeBackend implements NotificationFeatures {
 
   SessionStatus status = SessionStatus.ready;
   final replies = <(String, String)>[];
+  final synced = StreamController<SyncedNotification>.broadcast();
+
+  @override
+  Stream<SyncedNotification> get syncNotifications => synced.stream;
   Object? replyError;
 
   @override
@@ -163,7 +167,11 @@ void main() {
   Future<(PushNotifications, _Driver, PushRegistration)> enabledPush() async {
     final driver = _Driver();
     final registrations = <PushRegistration>[];
-    final push = PushNotifications(driver: driver, store: _PushStore());
+    final push = PushNotifications(
+      driver: driver,
+      store: _PushStore(),
+      configuration: const PushConfiguration(),
+    );
     await push.configure(_configuration);
     await push.setSession(
       PushSession(
@@ -199,6 +207,55 @@ void main() {
     expect(push.richRenderer, isNull);
     // Still signed in: history is kept.
     expect(store.clears, 0);
+    await tester.runAsync(push.shutdown);
+  });
+
+  testWidgets('built-in delivery shows events from this device’s sync', (
+    tester,
+  ) async {
+    final driver = _Driver();
+    final registrations = <PushRegistration>[];
+    final push = PushNotifications(
+      inAppDriver: driver,
+      store: _PushStore(),
+      configuration: const PushConfiguration.inApp(),
+    );
+    await push.setSession(
+      PushSession(
+        userId: '@me:example.org',
+        deviceId: 'DEVICE',
+        registerPusher: (r) async => registrations.add(r),
+        removePusher: (_) async {},
+        onNavigate: (_) async {},
+      ),
+    );
+    await push.enable(consent: true);
+    expect(push.active, isTrue);
+    expect(registrations, isEmpty);
+    await pumpHost(tester, push: push);
+    backend.synced.add((roomId: _room, eventId: r'$event'));
+    await tester.pump();
+    await push.settle();
+    await tester.pump();
+    final shown = surface.byId(roomNotificationId(_room))!;
+    expect(shown.body, 'Alice: Live client says hi');
+    expect(driver.shown, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(push.shutdown);
+  });
+
+  testWidgets('synced events are ignored while a push service delivers', (
+    tester,
+  ) async {
+    final (push, driver, _) = await enabledPush();
+    await pumpHost(tester, push: push);
+    backend.synced.add((roomId: _room, eventId: r'$event'));
+    await tester.pump();
+    await push.settle();
+    await tester.pump();
+    expect(surface.shown, isEmpty);
+    expect(driver.shown, isEmpty);
+    await tester.pumpWidget(const SizedBox());
     await tester.runAsync(push.shutdown);
   });
 

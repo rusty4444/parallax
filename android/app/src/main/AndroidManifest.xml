@@ -23,6 +23,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Notifications without Google or a push gateway: Parallax keeps its own
+         Matrix sync running in a foreground service (BackgroundConnection.kt),
+         restarted after a reboot or update, and may ask to be exempt from
+         battery optimisation so Android doesn't stop it. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <application
         android:label="Parallax"
         android:name="${applicationName}"
@@ -126,6 +133,24 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- Background connection: keeps the shared Flutter engine (and so the
+             Matrix client) syncing while Parallax is closed. -->
+        <service
+            android:name=".BackgroundConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the Matrix sync connection open so new messages are delivered without Google services or a push gateway." />
+        </service>
+        <receiver
+            android:name=".BackgroundConnectionBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- Rich notifications: the inline Reply action runs in a background
              isolate through the plugin's (non-exported) action receiver. -->
         <receiver

@@ -161,8 +161,8 @@ class _NotificationSettingsScreenState
         SettingsGroup(
           palette: p,
           footer:
-              'Notifications on this device need a push gateway you control. '
-              'The rules below apply to all your devices.',
+              'Parallax delivers notifications itself by staying connected '
+              'in the background. The rules below apply to all your devices.',
           children: [
             ListTile(
               leading: const Icon(Icons.notifications_active_outlined),
@@ -170,7 +170,7 @@ class _NotificationSettingsScreenState
               subtitle: Text(
                 push == null
                     ? 'Push setup is unavailable right now'
-                    : 'Push gateway, consent and this device',
+                    : 'On or off, background activity and delivery',
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: push == null

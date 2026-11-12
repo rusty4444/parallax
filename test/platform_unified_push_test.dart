@@ -187,6 +187,7 @@ void main() {
         }),
       ),
       store: store,
+      configuration: const PushConfiguration(),
     );
   });
 
@@ -721,6 +722,7 @@ void main() {
             MockClient((_) async => http.Response(_discovered, 200)),
       ),
       store: _Store(),
+      configuration: const PushConfiguration(),
     );
 
     testWidgets('switches to UnifiedPush, picks a distributor and enables', (

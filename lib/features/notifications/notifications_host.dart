@@ -4,7 +4,9 @@
 //    richRenderer);
 //  - receives pushes and quick replies handed over by background isolates;
 //  - sends quick replies through the guarded send path;
-//  - clears a room's notification when it is opened or read.
+//  - clears a room's notification when it is opened or read;
+//  - shows notifications for events this device's own sync receives when the
+//    built-in delivery is on (PushNotifications.presentInApp).
 import 'dart:async';
 import 'dart:io';
 
@@ -75,6 +77,7 @@ class _NotificationsHostState extends State<NotificationsHost>
   String? _deviceId;
   String? _lastActiveRoom;
   final _unread = <String, int>{};
+  StreamSubscription<SyncedNotification>? _synced;
   bool _disposed = false;
   bool _draining = false;
 
@@ -87,6 +90,10 @@ class _NotificationsHostState extends State<NotificationsHost>
     _userId = features.userId;
     _deviceId = features.deviceId;
     _server = PushHandoffServer(_onHandoff, directory: _env.directory)..start();
+    _synced = features.syncNotifications.listen(
+      _onSyncNotification,
+      onError: (Object _) {},
+    );
     _backend.addListener(_backendChanged);
     WidgetsBinding.instance.addObserver(this);
     _backendChanged();
@@ -121,6 +128,8 @@ class _NotificationsHostState extends State<NotificationsHost>
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_synced?.cancel());
+    _synced = null;
     _detachRenderer();
     _server?.stop();
     _server = null;
@@ -191,6 +200,15 @@ class _NotificationsHostState extends State<NotificationsHost>
     final handler = await _handler(isCurrent: isCurrent);
     if (handler == null) throw StateError('Notifications are not ready');
     await handler.handle(envelope);
+  }
+
+  /// Built-in delivery: PushNotifications ignores this unless it is active.
+  void _onSyncNotification(SyncedNotification notification) {
+    if (!_sessionCurrent) return;
+    _notifications?.presentInApp(
+      roomId: notification.roomId,
+      eventId: notification.eventId,
+    );
   }
 
   /// Synchronous accept/reject for background hand-offs.

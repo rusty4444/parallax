@@ -19,6 +19,7 @@ import 'security_overlay.dart';
 import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
+import 'features/platform/background_connection.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -305,6 +306,12 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       await binding;
       if (!mounted || _closing || generation != _pushGeneration) return;
       _pushError = null;
+      if (_pushSession == null) {
+        // Signed out: nothing to stay connected for, now or after a reboot.
+        unawaited(_stopBackgroundConnection());
+      } else {
+        unawaited(_startNotifications());
+      }
     } catch (_) {
       if (!mounted || _closing || generation != _pushGeneration) return;
       _pushError =
@@ -312,6 +319,40 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
           'out; you may need to remove this device’s pusher on your homeserver.';
     }
     _scheduleRebuild();
+  }
+
+  /// Built-in notifications are on by default, with no opt-in: start them for
+  /// the signed-in account unless the user turned them off on this device.
+  /// Retried when Parallax comes to the foreground (for example after the
+  /// notification permission was granted in Android settings).
+  Future<void> _startNotifications() async {
+    final notifications = _notifications;
+    bool ready() =>
+        mounted &&
+        !_closing &&
+        _pushReady &&
+        _pushSession != null &&
+        notifications.configuration.isInApp &&
+        !notifications.enabled;
+    if (!ready()) return;
+    if (await InAppNotificationPreferences.turnedOff()) return;
+    if (!ready()) return;
+    await notifications.enable(consent: true);
+    if (!mounted || _closing || !notifications.active) return;
+    await askBatteryExemptionOnce();
+  }
+
+  Future<void> _stopBackgroundConnection() async {
+    try {
+      await const MethodChannelBackgroundConnection().stop();
+    } catch (_) {
+      // Best effort; the service also stops itself when turned off.
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_startNotifications());
   }
 
   Future<void> _navigatePush(PushNavigationRequest request) async {

@@ -16,6 +16,7 @@ import 'feature_settings_scope.dart';
 import 'chat_backend.dart';
 import 'crypto_setup_policy.dart';
 import 'crypto_setup_screen.dart';
+import 'push_notifications.dart';
 import 'push_settings_screen.dart';
 import 'secure_window.dart';
 import 'widgets.dart';
@@ -504,9 +505,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (notifications != null)
                     ListTile(
                       leading: const Icon(Icons.notifications_outlined),
-                      title: const Text('Push notifications'),
-                      subtitle: const Text(
-                        'Off by default · use your own services',
+                      title: const Text('Notifications on this device'),
+                      subtitle: Text(
+                        notifications.configuration.isInApp
+                            ? (notifications.enabled
+                                  ? 'On · built in, no Google or push service'
+                                  : 'Off')
+                            : '${notifications.provider.label} · '
+                                  '${notifications.enabled ? 'on' : 'off'}',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.of(context).push<void>(

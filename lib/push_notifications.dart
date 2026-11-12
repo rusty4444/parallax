@@ -11,10 +11,15 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:matrix/matrix.dart' as matrix;
 
 import 'features/notifications/background_push.dart';
+import 'features/platform/background_connection.dart';
 import 'features/platform/unified_push.dart';
 
 /// How push messages reach this device.
 enum PushProvider {
+  /// Built in (the default): Parallax keeps its own sync connection running
+  /// in the background. No Firebase, gateway or distributor app.
+  inApp,
+
   /// Google FCM via your own Firebase project and Matrix push gateway.
   firebase,
 
@@ -24,6 +29,7 @@ enum PushProvider {
 
 extension PushProviderLabel on PushProvider {
   String get label => switch (this) {
+    PushProvider.inApp => 'Built in',
     PushProvider.firebase => 'Firebase',
     PushProvider.unifiedPush => 'UnifiedPush',
   };
@@ -68,8 +74,21 @@ class PushConfiguration {
       appId = unifiedPushAppId,
       firebaseOptions = null;
 
+  /// Built-in delivery through Parallax's own background sync connection.
+  const PushConfiguration.inApp()
+    : provider = PushProvider.inApp,
+      gatewayUrl = null,
+      appId = '',
+      firebaseOptions = null,
+      distributor = null;
+
+  /// Firebase when a build supplies it, otherwise the built-in delivery.
   factory PushConfiguration.fromEnvironment() {
     const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
+    const gateway = String.fromEnvironment('MATRIX_PUSH_GATEWAY');
+    if (firebaseAppId.isEmpty && gateway.isEmpty) {
+      return const PushConfiguration.inApp();
+    }
     return PushConfiguration(
       gatewayUrl: Uri.tryParse(
         const String.fromEnvironment('MATRIX_PUSH_GATEWAY'),
@@ -99,9 +118,12 @@ class PushConfiguration {
   final String? distributor;
 
   bool get isUnifiedPush => provider == PushProvider.unifiedPush;
+  bool get isInApp => provider == PushProvider.inApp;
 
   /// The same UnifiedPush choice with a resolved gateway.
-  PushConfiguration withGateway(Uri gateway) => isUnifiedPush
+  PushConfiguration withGateway(Uri gateway) => isInApp
+      ? this
+      : isUnifiedPush
       ? PushConfiguration.unifiedPush(
           gatewayUrl: gateway,
           distributor: distributor,
@@ -129,6 +151,7 @@ class PushConfiguration {
   }
 
   List<String> get issues {
+    if (isInApp) return const [];
     if (isUnifiedPush) {
       final issues = <String>[];
       if (gatewayUrl != null) {
@@ -176,22 +199,25 @@ class PushConfiguration {
 
   bool get isComplete => issues.isEmpty;
 
-  Map<String, dynamic> toJson() => {
-    'gateway_url': gatewayUrl?.toString(),
-    'app_id': appId,
-    if (isUnifiedPush) 'provider': 'unifiedpush',
-    if (isUnifiedPush && distributor != null) 'distributor': distributor,
-    if (firebaseOptions case final options?)
-      'firebase': {
-        'api_key': options.apiKey,
-        'app_id': options.appId,
-        'sender_id': options.messagingSenderId,
-        'project_id': options.projectId,
-      },
-  };
+  Map<String, dynamic> toJson() => isInApp
+      ? const {'provider': 'in_app'}
+      : {
+          'gateway_url': gatewayUrl?.toString(),
+          'app_id': appId,
+          if (isUnifiedPush) 'provider': 'unifiedpush',
+          if (isUnifiedPush && distributor != null) 'distributor': distributor,
+          if (firebaseOptions case final options?)
+            'firebase': {
+              'api_key': options.apiKey,
+              'app_id': options.appId,
+              'sender_id': options.messagingSenderId,
+              'project_id': options.projectId,
+            },
+        };
 
   static PushConfiguration? fromJson(Map<String, dynamic> json) {
     try {
+      if (json['provider'] == 'in_app') return const PushConfiguration.inApp();
       if (json['provider'] == 'unifiedpush') {
         final gateway = json['gateway_url'];
         final distributor = json['distributor'];
@@ -489,15 +515,18 @@ class PushNotifications extends ChangeNotifier {
     PushConfiguration? configuration,
     PushDriver? driver,
     PushDriver? unifiedPushDriver,
+    PushDriver? inAppDriver,
     PushStateStore? store,
   }) : _configuration = configuration ?? PushConfiguration.fromEnvironment(),
        _driver = driver ?? FirebasePushDriver(),
        _unifiedPushDriver = unifiedPushDriver ?? UnifiedPushDriver(),
+       _inAppDriver = inAppDriver ?? InAppPushDriver(),
        _store = store ?? const SecurePushStateStore();
 
   PushConfiguration _configuration;
   final PushDriver _driver;
   final PushDriver _unifiedPushDriver;
+  final PushDriver _inAppDriver;
   final PushStateStore _store;
   PushSession? _session;
   PushRegistration? _activeRegistration;
@@ -546,7 +575,11 @@ class PushNotifications extends ChangeNotifier {
   List<String> get configurationIssues => _configuration.issues;
 
   PushDriver _driverFor(PushConfiguration configuration) =>
-      configuration.isUnifiedPush ? _unifiedPushDriver : _driver;
+      switch (configuration.provider) {
+        PushProvider.inApp => _inAppDriver,
+        PushProvider.unifiedPush => _unifiedPushDriver,
+        PushProvider.firebase => _driver,
+      };
 
   /// Installed UnifiedPush distributors (Android package names). Never
   /// registers or initialises push.
@@ -636,9 +669,12 @@ class PushNotifications extends ChangeNotifier {
     _enabled = true;
     final generation = ++_generation;
     final unifiedPush = _configuration.isUnifiedPush;
+    final inApp = _configuration.isInApp;
     _emit(
       PushStatus.starting,
-      unifiedPush
+      inApp
+          ? 'Turning on notifications…'
+          : unifiedPush
           ? 'Requesting notification permission and registering with your UnifiedPush distributor…'
           : 'Requesting notification permission and registering your device…',
     );
@@ -662,7 +698,9 @@ class PushNotifications extends ChangeNotifier {
           if (generation == _generation) {
             _emit(
               PushStatus.permissionDenied,
-              'Notifications are blocked. Allow them in Android app settings, then enable push again.',
+              inApp
+                  ? 'Notifications are blocked. Allow them for Parallax in Android settings, then turn them on again.'
+                  : 'Notifications are blocked. Allow them in Android app settings, then enable push again.',
             );
           }
           return;
@@ -688,6 +726,8 @@ class PushNotifications extends ChangeNotifier {
             PushStatus.error,
             error is PushSetupException
                 ? '${error.message} No delivery is confirmed.'
+                : inApp
+                ? 'Notifications could not start. Allow notifications for Parallax in Android settings, then try again.'
                 : unifiedPush
                 ? 'UnifiedPush could not start. Check your distributor app (for example ntfy), its Matrix gateway, notification permission and homeserver connectivity. No delivery is confirmed.'
                 : 'Push could not start. Check your Firebase Android app, gateway/project pairing, permission and homeserver connectivity. No delivery is confirmed.',
@@ -832,6 +872,35 @@ class PushNotifications extends ChangeNotifier {
     return true;
   }
 
+  /// An event this device's own sync received that the push rules say should
+  /// notify (built-in delivery). Shown like a verified push; ignored unless
+  /// the built-in delivery is active. Returns whether it was accepted.
+  bool presentInApp({required String roomId, required String eventId}) {
+    final generation = _generation;
+    final driver = _touched;
+    final registration = _activeRegistration;
+    if (!_configuration.isInApp ||
+        !active ||
+        driver == null ||
+        registration == null ||
+        !_current(generation)) {
+      return false;
+    }
+    final envelope = PushEnvelope.parse({
+      'registration_id': registration.registrationId,
+      'room_id': roomId,
+      'event_id': eventId,
+    }, registration.registrationId);
+    if (envelope == null) return false;
+    _backgroundJob(() async {
+      if (_activeRegistration?.registrationId != envelope.registrationId) {
+        return;
+      }
+      await _present(envelope, driver, generation);
+    }, generation);
+    return true;
+  }
+
   /// Verifies a locally generated notification payload (for example a quick
   /// reply handed over from the notification-action isolate) against the
   /// live registration and session. Null when stale.
@@ -927,10 +996,14 @@ class PushNotifications extends ChangeNotifier {
         List<int>.generate(24, (_) => random.nextInt(256)),
       ),
     );
-    // Record BEFORE the network await: an ambiguous/late success needs removal.
-    _pendingRemovals.add(_OwnedRegistration(session, registration));
-    await session.registerPusher(registration);
-    if (!_current(generation) || revision != _tokenRevision) return;
+    if (!configuration.isInApp) {
+      // Record BEFORE the network await: an ambiguous/late success needs removal.
+      _pendingRemovals.add(_OwnedRegistration(session, registration));
+      await session.registerPusher(registration);
+      if (!_current(generation) || revision != _tokenRevision) return;
+    }
+    // Built in: no pusher. This device's own sync is the delivery, and the
+    // registration ID only authenticates its local notification payloads.
     _storedBinding = true;
     await _store.write(
       jsonEncode({
@@ -946,7 +1019,11 @@ class PushNotifications extends ChangeNotifier {
     _activeRegistration = registration;
     _emit(
       PushStatus.active,
-      configuration.isUnifiedPush
+      configuration.isInApp
+          ? (driver is InAppPushDriver && !driver.connected
+                ? 'Notifications are on, but Android did not allow the background connection, so they arrive only while Parallax is running.'
+                : 'Notifications are on. Parallax stays connected to your homeserver in the background.')
+          : configuration.isUnifiedPush
           ? 'Registered with UnifiedPush via ${configuration.gatewayUrl!.host}. Live delivery has not been verified.'
           : 'Device registered. Live push delivery has not been verified.',
     );

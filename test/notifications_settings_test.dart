@@ -23,6 +23,8 @@ class _Backend extends FakeBackend implements NotificationFeatures {
   @override
   String? get deviceId => 'DEVICE';
   @override
+  Stream<SyncedNotification> get syncNotifications => const Stream.empty();
+  @override
   Future<ResolvedPushEvent?> resolvePush(
     PushEnvelope envelope,
     NotificationPreferences preferences, {

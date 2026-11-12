@@ -412,6 +412,7 @@ void main() {
       final push = PushNotifications(
         unifiedPushDriver: UnifiedPushDriver(api: api, alerts: alerts),
         store: store,
+        configuration: const PushConfiguration(),
       );
       final registered = <PushRegistration>[];
       await tester.runAsync(() async {

@@ -30,6 +30,18 @@ class MainActivity : FlutterFragmentActivity() {
     private val permissionRequests = mutableMapOf<Int, Pair<MethodChannel.Result, List<String>>>()
     private var nextPermissionRequest = 4100
     private var intentChannel: MethodChannel? = null
+    private var secureWindowChannel: MethodChannel? = null
+    private var permissionsChannel: MethodChannel? = null
+
+    /**
+     * Always the process-wide cached engine (see BackgroundConnection.kt), so
+     * the Matrix client survives this activity and keeps syncing for
+     * notifications. A cached engine is never destroyed with the activity.
+     */
+    override fun getCachedEngineId(): String {
+        ParallaxEngine.obtain(this)
+        return ParallaxEngine.ID
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,8 +63,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/secure_window")
-            .setMethodCallHandler { call, result ->
+        val secureWindow = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/secure_window")
+        secureWindowChannel = secureWindow
+        secureWindow.setMethodCallHandler { call, result ->
                 if (call.method != "setSecure") {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -72,8 +85,9 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         // Minimal runtime-permission bridge (camera/microphone for calls).
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/permissions")
-            .setMethodCallHandler { call, result ->
+        val permissionsBridge = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/permissions")
+        permissionsChannel = permissionsBridge
+        permissionsBridge.setMethodCallHandler { call, result ->
                 val permissions = call.argument<List<String>>("permissions")
                 if (permissions == null || permissions.isEmpty()) {
                     result.error("INVALID_ARGUMENT", "Missing permissions", null)
@@ -115,8 +129,18 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // The engine outlives this activity: drop handlers that hold it, and
+        // answer permission requests it can no longer show.
         intentChannel?.setMethodCallHandler(null)
         intentChannel = null
+        secureWindowChannel?.setMethodCallHandler(null)
+        secureWindowChannel = null
+        permissionsChannel?.setMethodCallHandler(null)
+        permissionsChannel = null
+        for ((result, permissions) in permissionRequests.values) {
+            result.success(grantedMap(permissions))
+        }
+        permissionRequests.clear()
         SharedIntentStore.listener = null
         super.cleanUpFlutterEngine(flutterEngine)
     }

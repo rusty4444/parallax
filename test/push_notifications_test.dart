@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parallax/features/platform/background_connection.dart';
 import 'package:parallax/push_notifications.dart';
 import 'package:parallax/push_settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const options = FirebaseOptions(
   apiKey: 'test-not-a-live-key',
@@ -18,6 +20,17 @@ final configuration = PushConfiguration(
   appId: 'org.example.parallax',
   firebaseOptions: options,
 );
+
+class _Connection implements BackgroundConnectionPlatform {
+  @override
+  Future<bool> start() async => true;
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<bool> isIgnoringBatteryOptimizations() async => false;
+  @override
+  Future<bool> requestIgnoreBatteryOptimizations() async => true;
+}
 
 class MemoryPushStore implements PushStateStore {
   String? value;
@@ -117,7 +130,12 @@ void main() {
     registered = [];
     removed = [];
     navigated = [];
-    push = PushNotifications(driver: driver, store: store);
+    // An incomplete Firebase setup, as before the built-in delivery existed.
+    push = PushNotifications(
+      driver: driver,
+      store: store,
+      configuration: const PushConfiguration(),
+    );
   });
   tearDown(() async {
     await push.shutdown();
@@ -600,6 +618,166 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  group('built-in delivery', () {
+    late FakePushDriver inApp;
+    late PushNotifications builtIn;
+
+    setUp(() {
+      inApp = FakePushDriver();
+      builtIn = PushNotifications(
+        driver: driver,
+        inAppDriver: inApp,
+        store: store,
+        configuration: const PushConfiguration.inApp(),
+      );
+    });
+    tearDown(() async {
+      await builtIn.shutdown();
+      await inApp.tokens.close();
+      await inApp.received.close();
+      await inApp.opened.close();
+    });
+
+    test('is the default, complete, and survives a JSON round trip', () {
+      expect(PushConfiguration.fromEnvironment().isInApp, isTrue);
+      const config = PushConfiguration.inApp();
+      expect(config.issues, isEmpty);
+      expect(config.isComplete, isTrue);
+      expect(config.toJson(), {'provider': 'in_app'});
+      expect(PushConfiguration.fromJson(config.toJson())!.isInApp, isTrue);
+      expect(PushProvider.inApp.label, 'Built in');
+    });
+
+    test('enables without registering a pusher or touching Firebase', () async {
+      await builtIn.setSession(session('@alice:example.org'));
+      await builtIn.enable(consent: true);
+      expect(builtIn.active, isTrue);
+      expect(builtIn.status, PushStatus.active);
+      expect(builtIn.message, contains('stays connected'));
+      expect(registered, isEmpty);
+      expect(inApp.initializations, 1);
+      expect(inApp.permissions, 1);
+      expect(inApp.tokenReads, 1);
+      expect(driver.initializations, 0);
+      await builtIn.disable();
+      expect(inApp.deactivations, 1);
+      expect(removed, isEmpty);
+    });
+
+    test('denied permission keeps it off', () async {
+      inApp.permission = PushPermission.denied;
+      await builtIn.setSession(session('@alice:example.org'));
+      await builtIn.enable(consent: true);
+      expect(builtIn.active, isFalse);
+      expect(builtIn.status, PushStatus.permissionDenied);
+      expect(builtIn.message, contains('turn them on again'));
+      expect(inApp.tokenReads, 0);
+    });
+
+    test('presents synced events through the rich renderer', () async {
+      final rendered = <PushEnvelope>[];
+      builtIn.richRenderer = (envelope, isCurrent) async {
+        expect(isCurrent(), isTrue);
+        rendered.add(envelope);
+      };
+      expect(
+        builtIn.presentInApp(roomId: '!room:example.org', eventId: r'$e'),
+        isFalse,
+        reason: 'not active yet',
+      );
+      await builtIn.setSession(session('@alice:example.org'));
+      await builtIn.enable(consent: true);
+      expect(
+        builtIn.presentInApp(roomId: '!room:example.org', eventId: r'$e'),
+        isTrue,
+      );
+      expect(
+        builtIn.presentInApp(roomId: 'not-a-room', eventId: r'$e'),
+        isFalse,
+      );
+      await builtIn.settle();
+      expect(rendered.single.roomId, '!room:example.org');
+      expect(rendered.single.eventId, r'$e');
+      // Taps on it verify against the live (pusher-less) registration.
+      final request = builtIn.verifiedRequest(rendered.single.toJson());
+      expect(request?.roomId, '!room:example.org');
+      await builtIn.disable();
+      expect(builtIn.verifiedRequest(rendered.single.toJson()), isNull);
+      expect(
+        builtIn.presentInApp(roomId: '!room:example.org', eventId: r'$e'),
+        isFalse,
+      );
+    });
+
+    testWidgets('turning it off is remembered and needs no consent', (
+      tester,
+    ) async {
+      // Owned in the widget test's fake-async zone, so UI taps can chain its
+      // queue.
+      SharedPreferences.setMockInitialValues({});
+      final owner = PushNotifications(
+        driver: FakePushDriver(),
+        inAppDriver: FakePushDriver(),
+        store: MemoryPushStore(),
+        configuration: const PushConfiguration.inApp(),
+      );
+      await owner.setSession(session('@alice:example.org'));
+      await owner.enable(consent: true);
+      expect(owner.active, isTrue);
+      // Cancelling stream subscriptions completes through the root zone, so
+      // alternate fake-time pumps with real event-loop turns.
+      Future<void> settle() async {
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        }
+      }
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PushSettingsScreen(
+            notifications: owner,
+            connection: _Connection(),
+          ),
+        ),
+      );
+      await settle();
+      expect(find.text('Notifications are on'), findsOneWidget);
+      expect(find.text('Built in'), findsWidgets);
+      expect(find.byKey(const ValueKey('push.battery')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('push.enable')));
+      await settle();
+      expect(owner.enabled, isFalse);
+      expect(find.text('Notifications are off'), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(await InAppNotificationPreferences.turnedOff(), isTrue);
+      await tester.tap(find.byKey(const ValueKey('push.enable')));
+      await settle();
+      expect(owner.active, isTrue);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(await InAppNotificationPreferences.turnedOff(), isFalse);
+      await tester.pumpWidget(const SizedBox());
+      var done = false;
+      unawaited(owner.shutdown().whenComplete(() => done = true));
+      for (var i = 0; i < 100 && !done; i++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      expect(done, isTrue);
+    });
+
+    test('push providers ignore synced events', () async {
+      await push.configure(configuration);
+      await push.setSession(session('@alice:example.org'));
+      await push.enable(consent: true);
+      expect(push.active, isTrue);
+      expect(
+        push.presentInApp(roomId: '!room:example.org', eventId: r'$e'),
+        isFalse,
+      );
+    });
+  });
 
   group('rich notifications', () {
     Future<PushRegistration> enable() async {

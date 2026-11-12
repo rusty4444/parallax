@@ -1,8 +1,43 @@
-# Configurable Android push notifications
+# Android notifications
 
-## Status and consent boundary
+## Built-in delivery (default)
 
-Push is **disabled by default**. No service credentials, Firebase project, gateway,
+Notifications are **on by default** after sign-in, with no opt-in and no
+external service: no Firebase project, push gateway or UnifiedPush distributor.
+Parallax keeps its own Matrix sync running and turns events that the account's
+push rules mark as notifying (`Client.onNotification`: not the initial sync, not
+your own messages) into the same rich notifications described below. Live-location
+beacons and call-membership events never notify.
+
+How it stays running (`android/app/src/main/kotlin/.../BackgroundConnection.kt`,
+`lib/features/platform/background_connection.dart`):
+
+- The Flutter engine is cached for the whole process (`MainActivity.getCachedEngineId`),
+  so the Matrix client outlives the activity instead of being torn down with it.
+- `BackgroundConnectionService`, a `specialUse` foreground service with a
+  minimum-priority “Parallax is connected” notification, keeps the process alive.
+  It starts once notification permission is granted and stops on sign-out or when
+  the user turns notifications off. When Android restarts the process it brings
+  the engine back headless, and `BackgroundConnectionBootReceiver` restarts it after
+  a reboot or an app update.
+- Parallax asks once (while on screen) to be exempt from battery optimisation;
+  Settings → Notifications on this device shows the state and can ask again.
+- Turning notifications off is remembered on the device
+  (`notifications.in_app_off`). There is no pusher, so nothing is registered on
+  the homeserver.
+
+Trade-offs: a permanent low-priority notification (the channel can be hidden),
+more battery use than FCM, and some phone makers stop background apps regardless.
+Delivery has not yet been checked on a physical phone.
+
+The optional push services below (your own Firebase project and gateway, or
+UnifiedPush) remain available under Settings → Notifications on this device →
+How notifications arrive. Choosing one turns the built-in delivery off; the app
+starts with the built-in delivery again on its next launch.
+
+## Push services: status and consent boundary
+
+Push through a push service is **disabled by default**. No service credentials, Firebase project, gateway,
 friend's service, or working push backend are bundled. The production Android
 adapter exists, but **live delivery is unverified**. Tests use injected drivers and
 pusher callbacks; they do not prove FCM, gateway or homeserver interoperability.

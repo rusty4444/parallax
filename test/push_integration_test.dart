@@ -75,7 +75,14 @@ class _Store extends MemoryPushStore {
 }
 
 class _Push extends PushNotifications {
-  _Push(this.events, {required super.driver, required super.store});
+  // The opt-in push flow unless a test asks for the built-in delivery.
+  _Push(
+    this.events, {
+    required super.driver,
+    required super.store,
+    super.inAppDriver,
+    PushConfiguration configuration = const PushConfiguration(),
+  }) : super(configuration: configuration);
   final List<String> events;
   final bound = <PushSession?>[];
   bool disposed = false;
@@ -252,13 +259,22 @@ class _Drafts extends MessageDraftStore {
 }
 
 class _Harness {
-  _Harness() {
+  _Harness({bool builtIn = false}) {
     store = _Store(events);
-    push = _Push(events, driver: driver, store: store);
+    push = _Push(
+      events,
+      driver: driver,
+      store: store,
+      inAppDriver: inApp,
+      configuration: builtIn
+          ? const PushConfiguration.inApp()
+          : const PushConfiguration(),
+    );
     backend = _Backend(events)..cleanupBeforeLogout = push.logout;
   }
   final events = <String>[];
   final driver = FakePushDriver();
+  final inApp = FakePushDriver();
   final preferences = AppearancePreferences();
   late final _Store store;
   late final _Push push;
@@ -350,6 +366,22 @@ void main() {
     await h.close(tester);
   });
 
+  testWidgets('built-in notifications start after sign-in with no opt-in', (
+    tester,
+  ) async {
+    final h = _Harness(builtIn: true);
+    await h.boot(tester);
+    await _join(tester, h.push.settle);
+    await tester.pumpAndSettle();
+    expect(h.push.active, isTrue);
+    expect(h.inApp.permissions, 1);
+    expect(h.inApp.tokenReads, 1);
+    expect(h.backend.registrations, isEmpty);
+    expect(h.driver.initializations, 0);
+    await h.close(tester);
+    expect(h.inApp.deactivations, 1);
+  });
+
   testWidgets('settings reaches the shared push owner with a legacy backend', (
     tester,
   ) async {
@@ -357,8 +389,8 @@ void main() {
     await h.boot(tester, legacyBackend: _LegacyReadyBackend());
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Push notifications'));
-    await tester.tap(find.text('Push notifications'));
+    await tester.ensureVisible(find.text('Notifications on this device'));
+    await tester.tap(find.text('Notifications on this device'));
     await tester.pumpAndSettle();
     expect(find.byType(PushSettingsScreen), findsOneWidget);
     final screen = tester.widget<PushSettingsScreen>(
