@@ -708,6 +708,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Old text'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Edit message'),
       120,
@@ -723,6 +725,8 @@ void main() {
 
     await tester.longPress(find.text('Old text'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Delete message'),
       120,
@@ -734,6 +738,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.lastRedactedId, isNull);
     await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Delete message'),
@@ -1325,6 +1331,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Hello'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Verify sender'));
     await tester.pumpAndSettle();

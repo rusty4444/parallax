@@ -8,6 +8,7 @@ import 'attachment_picker.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'features/reactions/reaction_hooks.dart';
+import 'features/reactions/emoji_picker_sheet.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/scheduled/undo_send.dart';
 import 'hooks/registry.dart';
@@ -633,6 +634,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     Haptics.selection();
     try {
       await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
+      unawaited(EmojiRecents.instance.record(emoji));
     } catch (_) {
       if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -677,93 +679,136 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
     Haptics.longPress();
     final hookActions = messageActionsFor(context, _entryContext(entry));
+    final forwardAction = hookActions
+        .where((item) => item.id == 'reactions.forward')
+        .firstOrNull;
+    final remainingHookActions = [
+      for (final item in hookActions)
+        if (item.id != 'reactions.forward') item,
+    ];
+    final verifySender =
+        !entry.mine &&
+        widget.backend.rooms.any(
+          (room) => room.id == widget.roomId && room.encrypted,
+        );
+    final hasMoreActions =
+        verifySender ||
+        _features != null ||
+        entry.isImage ||
+        entry.isAttachment ||
+        entry.mine ||
+        remainingHookActions.isNotEmpty;
+    var expanded = false;
     final choice = await showModalBottomSheet<String>(
       isScrollControlled: true,
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.reply_rounded),
-              title: const Text('Reply'),
-              onTap: () => Navigator.pop(sheetContext, 'reply'),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          ListTile hookTile(MessageActionItem item) => ListTile(
+            leading: Icon(
+              item.icon,
+              color: item.destructive ? Colors.redAccent : null,
             ),
-            if (!entry.mine &&
-                widget.backend.rooms.any(
-                  (room) => room.id == widget.roomId && room.encrypted,
-                ))
-              ListTile(
-                leading: const Icon(Icons.verified_user_outlined),
-                title: const Text('Verify sender'),
-                onTap: () => Navigator.pop(sheetContext, 'verify'),
+            title: Text(
+              item.label,
+              style: item.destructive
+                  ? const TextStyle(color: Colors.redAccent)
+                  : null,
+            ),
+            onTap: () => Navigator.pop(sheetContext, 'hook:${item.id}'),
+          );
+
+          return SafeArea(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.reply_rounded),
+                    title: const Text('Reply'),
+                    onTap: () => Navigator.pop(sheetContext, 'reply'),
+                  ),
+                  if (reactionsAllowed(_roomContext(_currentRoom)))
+                    _QuickReactions(
+                      palette: widget.palette,
+                      onPick: (emoji) => Navigator.pop(sheetContext, emoji),
+                      onMore: emojiPickerAvailable
+                          ? () => Navigator.pop(sheetContext, _moreReactions)
+                          : null,
+                    ),
+                  if (forwardAction != null) hookTile(forwardAction),
+                  if (!expanded && hasMoreActions)
+                    ListTile(
+                      key: const ValueKey('message-actions-more'),
+                      leading: const Icon(Icons.expand_more_rounded),
+                      title: const Text('More'),
+                      onTap: () => setSheetState(() => expanded = true),
+                    )
+                  else if (expanded) ...[
+                    if (verifySender)
+                      ListTile(
+                        leading: const Icon(Icons.verified_user_outlined),
+                        title: const Text('Verify sender'),
+                        onTap: () => Navigator.pop(sheetContext, 'verify'),
+                      ),
+                    if (_features != null) ...[
+                      ListTile(
+                        leading: const Icon(Icons.forum_outlined),
+                        title: const Text('Open thread'),
+                        onTap: () => Navigator.pop(sheetContext, 'thread'),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.done_all_rounded),
+                        title: const Text('Read receipts'),
+                        onTap: () => Navigator.pop(sheetContext, 'receipts'),
+                      ),
+                    ],
+                    if (entry.isImage || entry.isAttachment)
+                      ListTile(
+                        leading: const Icon(Icons.open_in_full_rounded),
+                        title: const Text('Open media'),
+                        onTap: () => Navigator.pop(sheetContext, 'media'),
+                      ),
+                    if (entry.isAttachment)
+                      ListTile(
+                        leading: const Icon(Icons.download_rounded),
+                        title: const Text('Save attachment'),
+                        onTap: () => Navigator.pop(sheetContext, 'save'),
+                      ),
+                    if (entry.mine &&
+                        const {
+                          EntryKind.text,
+                          EntryKind.emote,
+                          EntryKind.notice,
+                        }.contains(entry.kind))
+                      ListTile(
+                        leading: const Icon(Icons.edit_outlined),
+                        title: const Text('Edit message'),
+                        onTap: () => Navigator.pop(sheetContext, 'edit'),
+                      ),
+                    if (entry.mine)
+                      ListTile(
+                        leading: const Icon(Icons.delete_outline),
+                        title: const Text('Delete message'),
+                        onTap: () => Navigator.pop(sheetContext, 'delete'),
+                      ),
+                    for (final item in remainingHookActions) hookTile(item),
+                    ListTile(
+                      key: const ValueKey('message-actions-less'),
+                      leading: const Icon(Icons.expand_less_rounded),
+                      title: const Text('Less'),
+                      onTap: () => setSheetState(() => expanded = false),
+                    ),
+                  ],
+                ],
               ),
-            if (reactionsAllowed(_roomContext(_currentRoom)))
-              _QuickReactions(
-                palette: widget.palette,
-                onPick: (emoji) => Navigator.pop(sheetContext, emoji),
-                onMore: emojiPickerAvailable
-                    ? () => Navigator.pop(sheetContext, _moreReactions)
-                    : null,
-              ),
-            if (_features != null) ...[
-              ListTile(
-                leading: const Icon(Icons.forum_outlined),
-                title: const Text('Open thread'),
-                onTap: () => Navigator.pop(sheetContext, 'thread'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.done_all_rounded),
-                title: const Text('Read receipts'),
-                onTap: () => Navigator.pop(sheetContext, 'receipts'),
-              ),
-            ],
-            if (entry.isImage || entry.isAttachment)
-              ListTile(
-                leading: const Icon(Icons.open_in_full_rounded),
-                title: const Text('Open media'),
-                onTap: () => Navigator.pop(sheetContext, 'media'),
-              ),
-            if (entry.isAttachment)
-              ListTile(
-                leading: const Icon(Icons.download_rounded),
-                title: const Text('Save attachment'),
-                onTap: () => Navigator.pop(sheetContext, 'save'),
-              ),
-            if (entry.mine &&
-                const {
-                  EntryKind.text,
-                  EntryKind.emote,
-                  EntryKind.notice,
-                }.contains(entry.kind))
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit message'),
-                onTap: () => Navigator.pop(sheetContext, 'edit'),
-              ),
-            if (entry.mine)
-              ListTile(
-                leading: const Icon(Icons.delete_outline),
-                title: const Text('Delete message'),
-                onTap: () => Navigator.pop(sheetContext, 'delete'),
-              ),
-            for (final item in hookActions)
-              ListTile(
-                leading: Icon(
-                  item.icon,
-                  color: item.destructive ? Colors.redAccent : null,
-                ),
-                title: Text(
-                  item.label,
-                  style: item.destructive
-                      ? const TextStyle(color: Colors.redAccent)
-                      : null,
-                ),
-                onTap: () => Navigator.pop(sheetContext, 'hook:${item.id}'),
-              ),
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
     if (!mounted || !_owner.isCurrent || choice == null) return;
@@ -1609,8 +1654,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
 const _moreReactions = '__more_reactions__';
 
-/// Element X-style quick reaction row in the message action sheet.
-class _QuickReactions extends StatelessWidget {
+/// Six newest-first reactions, topped up with defaults until enough emojis
+/// have been used. The full picker remains available through the + button.
+class _QuickReactions extends StatefulWidget {
   const _QuickReactions({
     required this.palette,
     required this.onPick,
@@ -1621,22 +1667,44 @@ class _QuickReactions extends StatelessWidget {
   final VoidCallback? onMore;
 
   @override
+  State<_QuickReactions> createState() => _QuickReactionsState();
+}
+
+class _QuickReactionsState extends State<_QuickReactions> {
+  List<String> _emojis = defaultQuickEmojis.take(6).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadRecents());
+  }
+
+  Future<void> _loadRecents() async {
+    final recents = await EmojiRecents.instance.load();
+    if (!mounted) return;
+    setState(() => _emojis = quickEmojis(recents).take(6).toList());
+  }
+
+  @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        for (final emoji in const ['❤️', '👍', '😂', '🎉', '😮', '🙏'])
+        for (final emoji in _emojis)
           IconButton(
             tooltip: 'React $emoji',
-            onPressed: () => onPick(emoji),
+            onPressed: () => widget.onPick(emoji),
             icon: Text(emoji, style: const TextStyle(fontSize: 24)),
           ),
-        if (onMore != null)
+        if (widget.onMore != null)
           IconButton(
             tooltip: 'More reactions',
-            onPressed: onMore,
-            icon: Icon(Icons.add_reaction_outlined, color: palette.secondary),
+            onPressed: widget.onMore,
+            icon: Icon(
+              Icons.add_reaction_outlined,
+              color: widget.palette.secondary,
+            ),
           ),
       ],
     ),

@@ -15,6 +15,8 @@ import 'package:parallax/media_viewer.dart';
 import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/message_image.dart';
 import 'package:parallax/messaging_features.dart';
+import 'package:parallax/features/reactions/message_action_features.dart';
+import 'package:parallax/features/reactions/emoji_picker_sheet.dart';
 import 'package:parallax/rich_message_composer.dart';
 import 'package:parallax/room_screen.dart';
 import 'package:parallax/space_browser_screen.dart';
@@ -52,7 +54,8 @@ class Drafts extends MessageDraftStore {
   }
 }
 
-class FeaturesBackend extends FakeBackend implements MessagingFeatures {
+class FeaturesBackend extends FakeBackend
+    implements MessagingFeatures, MessageActionFeatures {
   String account = 'account-a';
   SessionStatus status = SessionStatus.ready;
   Completer<void>? queueGate;
@@ -151,6 +154,58 @@ class FeaturesBackend extends FakeBackend implements MessagingFeatures {
   }
 
   @override
+  MessageActionPermissions permissions(String roomId) =>
+      const MessageActionPermissions(
+        canReact: true,
+        canPin: true,
+        canRedactOthers: true,
+        canSendMessages: true,
+      );
+
+  @override
+  List<String> pinnedEventIds(String roomId) => const [];
+
+  @override
+  Future<void> setPinned(
+    String roomId,
+    String eventId, {
+    required bool pinned,
+  }) async {}
+
+  @override
+  Future<ChatEntry?> loadEvent(String roomId, String eventId) async => null;
+
+  @override
+  Future<List<ReactionSender>> reactionSenders(
+    String roomId,
+    String eventId,
+  ) async => [];
+
+  @override
+  Future<String> forwardEvent(
+    String roomId,
+    String type,
+    Map<String, Object?> content,
+  ) async => r'$forwarded';
+
+  @override
+  Future<void> reportContent(
+    String roomId,
+    String eventId, {
+    required String reason,
+  }) async {}
+
+  @override
+  Future<void> ignoreUser(String userId) async {}
+
+  @override
+  Future<void> removeEvent(
+    String roomId,
+    String eventId, {
+    String? reason,
+  }) async {}
+
+  @override
   Future<ProviderDiscovery> discoverProvider(String input) async =>
       throw UnimplementedError();
   @override
@@ -180,7 +235,10 @@ Widget room(
 );
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    EmojiRecents.instance = EmojiRecents();
+  });
 
   testWidgets('scoped draft loads, debounces and flushes on route disposal', (
     tester,
@@ -349,6 +407,8 @@ void main() {
     await tester.pumpWidget(room(backend, drafts));
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Old text'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Edit message'),
@@ -681,6 +741,139 @@ void main() {
     },
   );
 
+  testWidgets('message actions stay compact until More expands them', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$compact-actions-event',
+          sender: '@a:s',
+          body: 'Compact actions',
+          time: DateTime(2026),
+          mine: false,
+          content: const {'msgtype': 'm.text', 'body': 'Compact actions'},
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Compact actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reply'), findsOneWidget);
+    expect(find.byTooltip('React ❤️'), findsOneWidget);
+    expect(find.text('Forward'), findsOneWidget);
+    expect(find.text('More'), findsOneWidget);
+    for (final hidden in [
+      'Open thread',
+      'Read receipts',
+      'Copy text',
+      'Copy link to message',
+      'View source',
+    ]) {
+      expect(find.text(hidden), findsNothing, reason: hidden);
+    }
+    final replyY = tester.getTopLeft(find.text('Reply')).dy;
+    final reactionsY = tester.getTopLeft(find.byTooltip('React ❤️')).dy;
+    final forwardY = tester.getTopLeft(find.text('Forward')).dy;
+    final moreY = tester.getTopLeft(find.text('More')).dy;
+    expect(replyY, lessThan(reactionsY));
+    expect(reactionsY, lessThan(forwardY));
+    expect(forwardY, lessThan(moreY));
+
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
+    expect(find.text('More'), findsNothing);
+    expect(find.text('Open thread'), findsOneWidget);
+    expect(find.text('Read receipts'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Less'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Less'));
+    await tester.pumpAndSettle();
+    expect(find.text('More'), findsOneWidget);
+    expect(find.text('Open thread'), findsNothing);
+    expect(find.text('Read receipts'), findsNothing);
+  });
+
+  testWidgets('+ picker reaction leads a persisted six-emoji recent row', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      EmojiRecents.storageKey: '["❤️","👍","😂","🎉","😮","🙏"]',
+    });
+    EmojiRecents.instance = EmojiRecents();
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$recent-reactions-event',
+          sender: '@a:s',
+          body: 'Recent reactions',
+          time: DateTime(2026),
+          mine: false,
+          content: const {'msgtype': 'm.text', 'body': 'Recent reactions'},
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+
+    Future<void> openActions() async {
+      await tester.longPress(find.text('Recent reactions'));
+      await tester.pumpAndSettle();
+    }
+
+    void expectRowOrder(List<String> emojis) {
+      for (var i = 0; i < emojis.length; i++) {
+        expect(
+          find.byTooltip('React ${emojis[i]}'),
+          findsOneWidget,
+          reason: emojis[i],
+        );
+        if (i > 0) {
+          expect(
+            tester.getTopLeft(find.byTooltip('React ${emojis[i - 1]}')).dx,
+            lessThan(
+              tester.getTopLeft(find.byTooltip('React ${emojis[i]}')).dx,
+            ),
+          );
+        }
+      }
+    }
+
+    await openActions();
+    expectRowOrder(const ['❤️', '👍', '😂', '🎉', '😮', '🙏']);
+    expect(find.byTooltip('React 😀'), findsNothing);
+
+    await tester.tap(find.byTooltip('More reactions'));
+    await tester.pumpAndSettle();
+    final grinning = find.text('😀');
+    expect(grinning, findsWidgets);
+    await tester.tap(grinning.first);
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+
+    // Force a disk read rather than relying on the previous store's cache.
+    EmojiRecents.instance = EmojiRecents();
+    await openActions();
+    expectRowOrder(const ['😀', '❤️', '👍', '😂', '🎉', '😮']);
+    expect(find.byTooltip('React 🙏'), findsNothing);
+
+    // A quick-row selection is also a use and moves to the front next time.
+    await tester.tap(find.byTooltip('React 👍'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    EmojiRecents.instance = EmojiRecents();
+    await openActions();
+    expectRowOrder(const ['👍', '😀', '❤️', '😂', '🎉', '😮']);
+  });
+
   testWidgets('thread and receipt actions keep the selected event identity', (
     tester,
   ) async {
@@ -698,6 +891,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Thread root'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Open thread'),
       120,
@@ -712,6 +907,8 @@ void main() {
     Navigator.pop(tester.element(find.byType(ThreadScreen)));
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Thread root'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Read receipts'),
@@ -879,6 +1076,8 @@ void main() {
     await tester.pumpWidget(room(backend, drafts));
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Edit original'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Edit message'),

@@ -60,6 +60,10 @@ ChatEntry entry(String id, String body, {bool mine = false}) => ChatEntry(
 Future<void> action(WidgetTester tester, String body, String action) async {
   await tester.longPress(find.text(body).first);
   await tester.pumpAndSettle();
+  if (find.text(action).evaluate().isEmpty) {
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
+  }
   await tester.scrollUntilVisible(
     find.text(action),
     120,
