@@ -80,6 +80,41 @@ class _Transport {
   }
 }
 
+class _HoldTimer implements Timer {
+  _HoldTimer(this.duration, this.callback);
+  final Duration duration;
+  final void Function() callback;
+  bool _active = true;
+
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    callback();
+  }
+
+  @override
+  void cancel() => _active = false;
+  @override
+  bool get isActive => _active;
+  @override
+  int get tick => 0;
+}
+
+class _HoldTimers {
+  final created = <_HoldTimer>[];
+  Timer create(Duration duration, void Function() callback) {
+    final timer = _HoldTimer(duration, callback);
+    created.add(timer);
+    return timer;
+  }
+
+  void fireAll() {
+    for (final timer in List.of(created)) {
+      timer.fire();
+    }
+  }
+}
+
 void main() {
   late _Store store;
   late _Transport transport;
@@ -87,12 +122,16 @@ void main() {
   late List<MessageOutbox> boxes;
   late StreamController<void> changes;
   late int emissions;
+  late _HoldTimers timers;
+  final now = DateTime.utc(2026, 11, 12, 9);
 
   MessageOutbox makeBox({int storedByteLimit = MessageOutbox.maxStoredBytes}) {
     final box = MessageOutbox(
       storage: store,
       storedByteLimit: storedByteLimit,
       currentAccount: () => account,
+      holdTimer: timers.create,
+      clock: () => now,
       transmit: transport.send,
       onChanged: () {
         emissions++;
@@ -124,6 +163,7 @@ void main() {
     boxes = [];
     changes = StreamController<void>.broadcast(sync: true);
     emissions = 0;
+    timers = _HoldTimers();
   });
 
   tearDown(() async {
@@ -1165,4 +1205,193 @@ void main() {
       expect(store.values, isEmpty);
     },
   );
+
+  group('undo send hold', () {
+    test('a held send waits for its deadline, then transmits', () async {
+      final box = makeBox();
+      final id = await box.enqueueText(
+        'alice',
+        '!r',
+        'held',
+        hold: const Duration(seconds: 5),
+      );
+      expect(box.records.single.state, DeliveryState.queued);
+      expect(box.heldUntil(id), now.add(const Duration(seconds: 5)));
+      expect(timers.created.single.duration, const Duration(seconds: 5));
+      expect(store.values.values.single, contains('queued'));
+      await pumpEventQueue();
+      expect(transport.attempts, isEmpty);
+      timers.fireAll();
+      final attempt = await transport.at(0);
+      expect(attempt.record.id, id);
+      expect(box.heldUntil(id), isNull);
+      attempt.succeed();
+      await retired(box, id);
+    });
+
+    test('undo withdraws a held send durably and returns it', () async {
+      final box = makeBox();
+      final id = await box.enqueueText(
+        'alice',
+        '!r',
+        'take it back',
+        replyToId: r'$reply',
+        hold: const Duration(seconds: 10),
+      );
+      final undone = await box.undo(id);
+      expect(undone!.body, 'take it back');
+      expect(undone.replyToId, r'$reply');
+      expect(box.records, isEmpty);
+      expect(store.values, isEmpty);
+      expect(timers.created.single.isActive, isFalse);
+      timers.fireAll();
+      await pumpEventQueue();
+      expect(transport.attempts, isEmpty);
+      expect(await box.undo(id), isNull);
+    });
+
+    test('undo is too late once transmission started', () async {
+      final box = makeBox();
+      final id = await box.enqueueText(
+        'alice',
+        '!r',
+        'too late',
+        hold: const Duration(seconds: 5),
+      );
+      timers.fireAll();
+      final attempt = await transport.at(0);
+      expect(await box.undo(id), isNull);
+      expect(attempt.cancellation.isCancelled, isFalse);
+      expect(box.records.single.id, id);
+      attempt.succeed();
+      await retired(box, id);
+    });
+
+    test('media holds keep the caption for the composer', () async {
+      final box = makeBox();
+      final id = await box.enqueueMedia(
+        'alice',
+        '!r',
+        MediaSelection(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          name: 'photo.png',
+          mimeType: 'image/png',
+        ),
+        caption: 'Look',
+        hold: const Duration(seconds: 5),
+      );
+      final undone = await box.undo(id);
+      expect(undone!.caption, 'Look');
+      expect(undone.media!.name, 'photo.png');
+      expect(transport.attempts, isEmpty);
+    });
+
+    test(
+      'cancel during a hold fails the record and the timer never sends',
+      () async {
+        final box = makeBox();
+        final id = await box.enqueueText(
+          'alice',
+          '!r',
+          'cancelled',
+          hold: const Duration(seconds: 5),
+        );
+        await box.cancel(id);
+        await stateIs(box, id, DeliveryState.failed);
+        expect(box.heldUntil(id), isNull);
+        timers.fireAll();
+        await pumpEventQueue();
+        expect(transport.attempts, isEmpty);
+      },
+    );
+
+    test('retry and releaseHeld skip the grace period', () async {
+      final box = makeBox();
+      final first = await box.enqueueText(
+        'alice',
+        '!r',
+        'one',
+        hold: const Duration(seconds: 20),
+      );
+      final second = await box.enqueueText(
+        'alice',
+        '!r',
+        'two',
+        hold: const Duration(seconds: 20),
+      );
+      final third = await box.enqueueText(
+        'alice',
+        '!r',
+        'three',
+        hold: const Duration(seconds: 20),
+      );
+      await box.retry(first);
+      expect((await transport.at(0)).record.id, first);
+      expect(box.heldUntil(first), isNull);
+      box.releaseHeld();
+      final ids = {
+        (await transport.at(1)).record.id,
+        (await transport.at(2)).record.id,
+      };
+      expect(ids, {second, third});
+      expect(timers.created.where((timer) => timer.isActive), isEmpty);
+      for (final attempt in transport.attempts) {
+        attempt.succeed();
+      }
+      await retired(box, third);
+    });
+
+    test('closing retires holds; restore reports them interrupted', () async {
+      final first = makeBox();
+      final id = await first.enqueueText(
+        'alice',
+        '!r',
+        'held at close',
+        hold: const Duration(seconds: 5),
+      );
+      await first.closeAccount();
+      expect(timers.created.single.isActive, isFalse);
+      final second = makeBox();
+      await second.restore('alice');
+      expect(second.records.single.id, id);
+      expect(second.records.single.state, DeliveryState.failed);
+      expect(second.heldUntil(id), isNull);
+      timers.fireAll();
+      await pumpEventQueue();
+      expect(transport.attempts, isEmpty);
+    });
+
+    test('a failed undo write never transmits silently', () async {
+      final box = makeBox();
+      final id = await box.enqueueText(
+        'alice',
+        '!r',
+        'stuck',
+        hold: const Duration(seconds: 5),
+      );
+      store.failDelete = true;
+      await expectLater(box.undo(id), throwsStateError);
+      expect(box.records.single.state, DeliveryState.failed);
+      timers.fireAll();
+      await pumpEventQueue();
+      expect(transport.attempts, isEmpty);
+      store.failDelete = false;
+      await box.discard(id);
+      expect(box.records, isEmpty);
+    });
+
+    test('holds are bounded', () async {
+      final box = makeBox();
+      await expectLater(
+        box.enqueueText(
+          'alice',
+          '!r',
+          'x',
+          hold: MessageOutbox.maxHold + const Duration(seconds: 1),
+        ),
+        throwsArgumentError,
+      );
+      expect(store.values, isEmpty);
+    });
+  });
 }
