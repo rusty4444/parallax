@@ -6,6 +6,8 @@
 import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
+import 'undo_send.dart';
+import 'undo_send_settings.dart';
 
 List<ComposerSendOption> scheduledSendOptions(
   BuildContext context,
@@ -15,7 +17,11 @@ List<ComposerSendOption> scheduledSendOptions(
 List<Widget> scheduledRoomBanners(BuildContext context, RoomHookContext ctx) =>
     const [];
 
+/// Settings → Sending → Undo send.
 List<Widget> scheduledSettingsSections(
   BuildContext context,
   SettingsHookContext ctx,
-) => const [];
+) {
+  if (undoSendFeaturesOf(ctx.backend) == null) return const [];
+  return [UndoSendSettingsSection(palette: ctx.palette)];
+}
