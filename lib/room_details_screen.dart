@@ -17,6 +17,9 @@ import 'features/rooms_admin/rooms_admin_hooks.dart' show roomsAdminCallAction;
 import 'features/rooms_admin/rooms_admin_models.dart';
 import 'features/rooms_admin/security_privacy_screen.dart';
 import 'features/rooms_admin/share_text.dart';
+import 'features/spaces_admin/space_options_sheet.dart' show openLeaveSpace;
+import 'features/spaces_admin/spaces_admin_features.dart';
+import 'features/spaces_admin/spaces_admin_hooks.dart';
 import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'room_avatar.dart';
@@ -25,6 +28,11 @@ import 'room_details.dart';
 /// Element X style "Room info": header, quick actions and the room's
 /// settings sections. Everything permission-related comes from a fresh server
 /// state read; failures clear the controls rather than keep stale ones.
+///
+/// For a Space (`m.room.create` type `m.space`) this is Element X
+/// SpaceSettings: room-only items (encryption, notifications, favourite,
+/// calls, report and timeline sections) are hidden and leaving offers to
+/// leave the Space's rooms too.
 class RoomDetailsScreen extends StatefulWidget {
   const RoomDetailsScreen({
     super.key,
@@ -85,7 +93,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       final details = await widget.backend.getRoomDetails(widget.roomId);
       if (mounted && _owner.isCurrent && generation == _generation) {
         setState(() => _details = details);
-        _loadNotifications(generation);
+        // Per-room notification rules are not meaningful for a Space.
+        if (!details.isSpace) _loadNotifications(generation);
       }
     } catch (_) {
       if (mounted && _owner.isCurrent && generation == _generation) {
@@ -214,6 +223,18 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   }
 
   Future<void> _leave(RoomDetails details) async {
+    if (details.isSpace && spacesAdminFeaturesOf(widget.backend) != null) {
+      final left = await openLeaveSpace(
+        context,
+        backend: widget.backend,
+        palette: widget.palette,
+        spaceId: widget.roomId,
+      );
+      if (left && mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      return;
+    }
     final left = await leaveRoomFlow(
       context,
       backend: widget.backend,
@@ -238,10 +259,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     final p = widget.palette;
     final details = _details;
     final idle = !_busy && !_loading;
+    final space = details?.isSpace ?? false;
     return AdminPage(
       palette: p,
-      title: 'Room info',
-      backTooltip: 'Back to room',
+      title: space ? 'Space settings' : 'Room info',
+      backTooltip: space ? 'Back' : 'Back to room',
       busy: _loading || _busy,
       actions: [
         if (details != null && details.canEditDetails && idle)
@@ -278,7 +300,12 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
               children: [
                 _header(details, idle),
                 ..._sections(details, idle),
-                ...roomDetailsSectionsFor(context, _hookContext),
+                // Timeline features (pins, threads, media, polls) do not
+                // apply to a Space; only Space management does.
+                if (space)
+                  ...spacesAdminRoomDetailsSections(context, _hookContext)
+                else
+                  ...roomDetailsSectionsFor(context, _hookContext),
               ],
             ),
     );
@@ -287,8 +314,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   Widget _header(RoomDetails details, bool idle) {
     final p = widget.palette;
     final room = _room;
-    final notifications = _notifications;
-    final call = idle ? roomsAdminCallAction(context, _hookContext) : null;
+    final space = details.isSpace;
+    final notifications = space ? null : _notifications;
+    final call = idle && !space
+        ? roomsAdminCallAction(context, _hookContext)
+        : null;
     final avatarRoom = ChatRoom(
       id: widget.roomId,
       name: details.hasName ? details.name : (room?.name ?? details.name),
@@ -296,6 +326,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       lastActivity: null,
       avatarUrl: details.avatarUrl ?? room?.avatarUrl,
       heroes: details.avatarUrl == null ? room?.heroes ?? const [] : const [],
+      isSpace: space,
     );
     final subtitle = details.canonicalAlias ?? widget.roomId;
     return Padding(
@@ -338,19 +369,26 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             runSpacing: 8,
             alignment: WrapAlignment.center,
             children: [
-              AdminBadge(
-                palette: p,
-                icon: details.encrypted
-                    ? Icons.lock_outline_rounded
-                    : Icons.lock_open_rounded,
-                label: details.encrypted ? 'Encrypted' : 'Not encrypted',
-                highlight: details.encrypted,
-              ),
+              if (space)
+                AdminBadge(
+                  palette: p,
+                  icon: Icons.workspaces_outline,
+                  label: 'Space',
+                )
+              else
+                AdminBadge(
+                  palette: p,
+                  icon: details.encrypted
+                      ? Icons.lock_outline_rounded
+                      : Icons.lock_open_rounded,
+                  label: details.encrypted ? 'Encrypted' : 'Not encrypted',
+                  highlight: details.encrypted,
+                ),
               if (details.isPublic)
                 AdminBadge(
                   palette: p,
                   icon: Icons.public_rounded,
-                  label: 'Public room',
+                  label: space ? 'Public space' : 'Public room',
                 ),
             ],
           ),
@@ -360,7 +398,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             spacing: 4,
             runSpacing: 10,
             children: [
-              if (_messaging != null)
+              if (_messaging != null && !space)
                 HeaderAction(
                   palette: p,
                   icon: _isFavourite
@@ -412,6 +450,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     final p = widget.palette;
     final admin = _admin;
     final direct = _room?.isDirect ?? false;
+    final space = details.isSpace;
     final notifications = _notifications;
     final knocks = details.knockRequests.length;
     return [
@@ -509,47 +548,48 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             ),
         ],
       ),
-      AdminSection(
-        palette: p,
-        children: [
-          if (admin != null)
-            AdminTile(
-              palette: p,
-              icon: Icons.notifications_none_rounded,
-              title: 'Notifications',
-              subtitle: notifications == null
-                  ? null
-                  : notifications.isDefault
-                  ? 'Default · ${notifications.defaultMode.label}'
-                  : 'Custom · ${notifications.customMode!.label}',
-              onTap: idle
-                  ? () => _push(
-                      RoomNotificationsScreen(
-                        backend: widget.backend,
-                        palette: p,
-                        roomId: widget.roomId,
-                      ),
-                    )
-                  : null,
-            ),
-          if (!direct && admin != null && details.canManageSecurity)
-            AdminTile(
-              palette: p,
-              icon: Icons.shield_outlined,
-              title: 'Security & privacy',
-              onTap: idle
-                  ? () => _push(
-                      SecurityPrivacyScreen(
-                        backend: widget.backend,
-                        palette: p,
-                        roomId: widget.roomId,
-                      ),
-                    )
-                  : null,
-            ),
-        ],
-      ),
-      if (details.encrypted)
+      if (!space || (admin != null && details.canManageSecurity))
+        AdminSection(
+          palette: p,
+          children: [
+            if (admin != null && !space)
+              AdminTile(
+                palette: p,
+                icon: Icons.notifications_none_rounded,
+                title: 'Notifications',
+                subtitle: notifications == null
+                    ? null
+                    : notifications.isDefault
+                    ? 'Default · ${notifications.defaultMode.label}'
+                    : 'Custom · ${notifications.customMode!.label}',
+                onTap: idle
+                    ? () => _push(
+                        RoomNotificationsScreen(
+                          backend: widget.backend,
+                          palette: p,
+                          roomId: widget.roomId,
+                        ),
+                      )
+                    : null,
+              ),
+            if (!direct && admin != null && details.canManageSecurity)
+              AdminTile(
+                palette: p,
+                icon: Icons.shield_outlined,
+                title: 'Security & privacy',
+                onTap: idle
+                    ? () => _push(
+                        SecurityPrivacyScreen(
+                          backend: widget.backend,
+                          palette: p,
+                          roomId: widget.roomId,
+                        ),
+                      )
+                    : null,
+              ),
+          ],
+        ),
+      if (details.encrypted && !space)
         AdminSection(
           palette: p,
           title: 'Security',
@@ -567,7 +607,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       AdminSection(
         palette: p,
         children: [
-          if (admin != null)
+          if (admin != null && !space)
             AdminTile(
               palette: p,
               icon: Icons.flag_outlined,
@@ -587,7 +627,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           AdminTile(
             palette: p,
             icon: Icons.logout_rounded,
-            title: direct ? 'Leave conversation' : 'Leave room',
+            title: space
+                ? 'Leave space'
+                : direct
+                ? 'Leave conversation'
+                : 'Leave room',
             destructive: true,
             onTap: idle ? () => _leave(details) : null,
           ),

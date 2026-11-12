@@ -2,23 +2,37 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'features/home/home_features.dart';
+import 'features/threads/thread_widgets.dart' show paletteFromTheme;
+import 'features/spaces_admin/manage_space_screen.dart';
+import 'features/spaces_admin/space_options_sheet.dart';
+import 'features/spaces_admin/spaces_admin_features.dart';
 import 'messaging_features.dart';
+import 'room_details_screen.dart';
 import 'room_join_dialog.dart';
 
 /// Browse joined Spaces, or direct children of [spaceId]. A selected/joined chat
 /// room ID is propagated through every nested browser back to the caller.
+///
+/// With Space administration available, the root offers "New space" and a
+/// joined Space offers "Manage rooms", "Space settings" and Element X
+/// LeaveSpace (choose which rooms to leave too).
 class SpaceBrowserScreen extends StatefulWidget {
   const SpaceBrowserScreen({
     super.key,
     required this.backend,
     this.spaceId,
     this.ancestors = const {},
+    this.palette,
   });
   final ChatBackend backend;
   final String? spaceId;
   final Set<String> ancestors;
+
+  /// Palette for the Space administration screens; defaults to the theme's.
+  final AppPalette? palette;
 
   @override
   State<SpaceBrowserScreen> createState() => _SpaceBrowserScreenState();
@@ -41,6 +55,8 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     final MessagingFeatures features => features,
     _ => null,
   };
+  bool get _spacesAdmin => spacesAdminFeaturesOf(widget.backend) != null;
+  AppPalette get _palette => paletteFromTheme(context, widget.palette);
   bool get _ownerCurrent =>
       !_expired &&
       _account == _features?.accountKey &&
@@ -199,6 +215,7 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
       MaterialPageRoute(
         builder: (_) => SpaceBrowserScreen(
           backend: widget.backend,
+          palette: widget.palette,
           spaceId: space.id,
           ancestors: {
             ...widget.ancestors,
@@ -261,8 +278,51 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     }
   }
 
+  /// Creates a Space and browses it; a room opened there is returned.
+  Future<void> _newSpace() async {
+    if (!_ownerCurrent) return;
+    final generation = _joinGeneration;
+    final spaceId = await openCreateSpace(
+      context,
+      backend: widget.backend,
+      palette: _palette,
+    );
+    if (spaceId == null ||
+        !mounted ||
+        !_ownerCurrent ||
+        generation != _joinGeneration) {
+      return;
+    }
+    unawaited(_refresh());
+    await _openSpace(
+      SpaceSummary(id: spaceId, name: 'Space', isSpace: true, joined: true),
+    );
+  }
+
+  Future<void> _manage(Widget screen) async {
+    if (!_ownerCurrent) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => screen),
+    );
+    if (mounted && _ownerCurrent) await _refresh();
+  }
+
   Future<void> _leave() async {
     final spaceId = widget.spaceId;
+    if (spaceId != null && _spacesAdmin && _ownerCurrent) {
+      final generation = _joinGeneration;
+      final left = await openLeaveSpace(
+        context,
+        backend: widget.backend,
+        palette: _palette,
+        spaceId: spaceId,
+      );
+      if (left && mounted && _ownerCurrent && generation == _joinGeneration) {
+        Navigator.pop(context);
+      }
+      return;
+    }
     final features = roomListFeaturesOf(widget.backend);
     if (spaceId == null || features == null || !_ownerCurrent) return;
     final confirmed = await showDialog<bool>(
@@ -314,6 +374,36 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     appBar: AppBar(
       title: Text(widget.spaceId == null ? 'Spaces' : 'Browse Space'),
       actions: [
+        if (widget.spaceId == null && _spacesAdmin && !_expired)
+          IconButton(
+            tooltip: 'New space',
+            onPressed: _newSpace,
+            icon: const Icon(Icons.add_rounded),
+          ),
+        if (_canLeave && _spacesAdmin) ...[
+          IconButton(
+            tooltip: 'Manage rooms',
+            onPressed: () => _manage(
+              ManageSpaceScreen(
+                backend: widget.backend,
+                palette: _palette,
+                spaceId: widget.spaceId!,
+              ),
+            ),
+            icon: const Icon(Icons.dashboard_customize_outlined),
+          ),
+          IconButton(
+            tooltip: 'Space settings',
+            onPressed: () => _manage(
+              RoomDetailsScreen(
+                backend: widget.backend,
+                palette: _palette,
+                roomId: widget.spaceId!,
+              ),
+            ),
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
         if (_canLeave)
           IconButton(
             tooltip: 'Leave Space',
@@ -359,7 +449,9 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
                       padding: const EdgeInsets.all(32),
                       child: Text(
                         widget.spaceId == null
-                            ? 'No joined Spaces yet. Join a Space from the room directory to browse its rooms.'
+                            ? _spacesAdmin
+                                  ? 'No joined Spaces yet. Create one, or join a Space from the room directory to browse its rooms.'
+                                  : 'No joined Spaces yet. Join a Space from the room directory to browse its rooms.'
                             : 'No accessible rooms in this Space.',
                         textAlign: TextAlign.center,
                       ),

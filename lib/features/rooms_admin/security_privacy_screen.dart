@@ -4,6 +4,9 @@ import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../room_details.dart';
+import '../spaces_admin/manage_authorised_spaces_screen.dart';
+import '../spaces_admin/spaces_admin_features.dart';
+import '../spaces_admin/spaces_admin_models.dart';
 import 'admin_ui.dart';
 import 'rooms_admin_features.dart';
 import 'rooms_admin_models.dart';
@@ -11,6 +14,11 @@ import 'rooms_admin_models.dart';
 /// Element X "Security & privacy": access (join rule), address and public
 /// directory, encryption and history visibility. Each change is written
 /// immediately and re-read from the server.
+///
+/// "Space members" access (`restricted` / `knock_restricted`) and its
+/// authorised Spaces come from the spaces_admin module (Element X
+/// ManageAuthorizedSpaces). For a Space, encryption and history visibility
+/// are hidden as in Element X.
 class SecurityPrivacyScreen extends StatefulWidget {
   const SecurityPrivacyScreen({
     super.key,
@@ -29,6 +37,7 @@ class SecurityPrivacyScreen extends StatefulWidget {
 class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
   late final _owner = BackendSessionOwner(widget.backend);
   RoomDetails? _details;
+  AuthorisedSpaces? _authorised;
   bool? _published;
   bool _loading = false;
   bool _busy = false;
@@ -36,6 +45,7 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
   int _generation = 0;
 
   RoomsAdminFeatures? get _admin => roomsAdminFeaturesOf(widget.backend);
+  SpacesAdminFeatures? get _spaces => spacesAdminFeaturesOf(widget.backend);
 
   @override
   void initState() {
@@ -59,7 +69,19 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
     try {
       final details = await widget.backend.getRoomDetails(widget.roomId);
       if (!mounted || !_owner.isCurrent || generation != _generation) return;
-      setState(() => _details = details);
+      AuthorisedSpaces? authorised;
+      try {
+        authorised = _spaces?.authorisedSpacesFor(
+          widget.roomId,
+          details.allowedRoomIds,
+        );
+      } catch (_) {
+        authorised = null;
+      }
+      setState(() {
+        _details = details;
+        _authorised = authorised;
+      });
       bool? published;
       try {
         published = await _admin?.isPublishedInDirectory(widget.roomId);
@@ -73,6 +95,7 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
       if (mounted && _owner.isCurrent && generation == _generation) {
         setState(() {
           _details = null;
+          _authorised = null;
           _error = 'Couldn’t load room settings. Check your connection.';
         });
       }
@@ -103,6 +126,88 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
       'Couldn’t change who can join.',
       () => admin.setJoinRule(widget.roomId, rule),
     );
+  }
+
+  /// Element X: with one candidate Space it is used directly, otherwise the
+  /// user picks the authorised Spaces first.
+  Future<void> _selectSpaceMembers(String rule) async {
+    final details = _details;
+    final authorised = _authorised;
+    if (details == null || authorised == null || rule == details.joinRule) {
+      return;
+    }
+    final askToJoin = rule == 'knock_restricted';
+    final current = details.joinRule;
+    List<String>? ids;
+    if ((current == 'restricted' || current == 'knock_restricted') &&
+        details.allowedRoomIds.isNotEmpty) {
+      // Switching between the two Space-member variants keeps the list.
+      ids = details.allowedRoomIds;
+    } else if (authorised.count == 1) {
+      ids = [
+        ...authorised.selectable.map((space) => space.id),
+        ...authorised.unknown,
+      ];
+    } else {
+      ids = await _pickSpaces(details, authorised);
+    }
+    if (ids == null || ids.isEmpty || !mounted || !_owner.isCurrent) return;
+    await _writeSpaces(ids, askToJoin: askToJoin);
+  }
+
+  Future<List<String>?> _pickSpaces(
+    RoomDetails details,
+    AuthorisedSpaces authorised,
+  ) => Navigator.of(context).push<List<String>>(
+    MaterialPageRoute(
+      builder: (_) => ManageAuthorisedSpacesScreen(
+        backend: widget.backend,
+        palette: widget.palette,
+        spaces: authorised,
+        initial: details.allowedRoomIds,
+      ),
+    ),
+  );
+
+  Future<void> _manageSpaces() async {
+    final details = _details;
+    final authorised = _authorised;
+    if (details == null || authorised == null) return;
+    final ids = await _pickSpaces(details, authorised);
+    if (ids == null || ids.isEmpty || !mounted || !_owner.isCurrent) return;
+    final current = details.allowedRoomIds.toSet();
+    if (ids.length == current.length && current.containsAll(ids)) return;
+    await _writeSpaces(ids, askToJoin: details.joinRule == 'knock_restricted');
+  }
+
+  Future<void> _writeSpaces(List<String> ids, {required bool askToJoin}) async {
+    final spaces = _spaces;
+    if (spaces == null) return;
+    await _write(
+      'Couldn’t change who can join.',
+      () =>
+          spaces.setAuthorisedSpaces(widget.roomId, ids, askToJoin: askToJoin),
+    );
+  }
+
+  String _spaceMembersDescription(
+    RoomDetails details, {
+    required bool askToJoin,
+  }) {
+    final authorised = _authorised;
+    final ids = details.allowedRoomIds.isNotEmpty
+        ? details.allowedRoomIds
+        : [
+            ...?authorised?.selectable.map((space) => space.id),
+            ...?authorised?.unknown,
+          ];
+    final single = ids.length == 1
+        ? (authorised?.nameOf(ids.single) ?? 'the authorised space')
+        : null;
+    final who = single == null
+        ? 'Anyone in authorised spaces can join'
+        : 'Anyone in $single can join';
+    return askToJoin ? '$who, but everyone else must request access.' : '$who.';
   }
 
   Future<void> _setHistory(String visibility) async {
@@ -231,6 +336,13 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
     final spaceMembers =
         details.joinRule == 'restricted' ||
         details.joinRule == 'knock_restricted';
+    final spaceOptions = _spaces != null && (_authorised?.count ?? 0) > 0;
+    final showRestricted =
+        details.joinRule == 'restricted' ||
+        (spaceOptions && details.supportsRestricted);
+    final showKnockRestricted =
+        details.joinRule == 'knock_restricted' ||
+        (spaceOptions && supportsKnockRestricted(details));
     final showVisibility = details.isPublic || details.isKnockable;
     final history = details.historyVisibility;
     final worldReadableAllowed =
@@ -245,7 +357,12 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
             RadioGroup<String>(
               groupValue: rule,
               onChanged: (value) {
-                if (idle && value != null) _setJoinRule(value);
+                if (!idle || value == null) return;
+                if (value == 'restricted' || value == 'knock_restricted') {
+                  _selectSpaceMembers(value);
+                } else {
+                  _setJoinRule(value);
+                }
               },
               child: Column(
                 children: [
@@ -255,6 +372,16 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
                     subtitle: 'Only invited people can join.',
                     enabled: idle,
                   ),
+                  if (showRestricted)
+                    _radio(
+                      value: 'restricted',
+                      title: 'Space members',
+                      subtitle: _spaceMembersDescription(
+                        details,
+                        askToJoin: false,
+                      ),
+                      enabled: idle && spaceOptions,
+                    ),
                   _radio(
                     value: 'knock',
                     title: 'Ask to join',
@@ -271,20 +398,30 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
                         'organisation.',
                     enabled: idle,
                   ),
-                  if (spaceMembers)
+                  if (showKnockRestricted)
                     _radio(
-                      value: details.joinRule,
-                      title: details.joinRule == 'knock_restricted'
-                          ? 'Ask to join (space members join directly)'
-                          : 'Space members',
-                      subtitle:
-                          'Anyone in authorised spaces can join. Manage '
-                          'authorised spaces from a desktop client.',
-                      enabled: idle && details.allowedRoomIds.isNotEmpty,
+                      value: 'knock_restricted',
+                      title: 'Ask to join (space members join directly)',
+                      subtitle: _spaceMembersDescription(
+                        details,
+                        askToJoin: true,
+                      ),
+                      enabled: idle && spaceOptions,
                     ),
                 ],
               ),
             ),
+            if (spaceMembers && spaceOptions)
+              AdminTile(
+                palette: p,
+                icon: Icons.workspaces_outline,
+                title: 'Manage spaces',
+                subtitle: details.allowedRoomIds.length == 1
+                    ? '1 authorised space'
+                    : '${details.allowedRoomIds.length} authorised spaces',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: idle ? _manageSpaces : null,
+              ),
           ],
         ),
       if (showVisibility && details.canChangeAddress)
@@ -332,7 +469,8 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
             ),
           ],
         ),
-      if (details.encrypted || details.canEnableEncryption)
+      if (!details.isSpace &&
+          (details.encrypted || details.canEnableEncryption))
         AdminSection(
           palette: p,
           title: 'Encryption',
@@ -350,7 +488,7 @@ class _SecurityPrivacyScreenState extends State<SecurityPrivacyScreen> {
             ),
           ],
         ),
-      if (details.canChangeHistory)
+      if (details.canChangeHistory && !details.isSpace)
         AdminSection(
           palette: p,
           title: 'Who can read history',
