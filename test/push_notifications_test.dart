@@ -600,4 +600,84 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  group('rich notifications', () {
+    Future<PushRegistration> enable() async {
+      await push.configure(configuration);
+      await push.setSession(session('@alice:example.org'));
+      await push.enable(consent: true);
+      return registered.single;
+    }
+
+    test(
+      'verified pushes reach the rich renderer, not the generic alert',
+      () async {
+        final registration = await enable();
+        final rendered = <PushEnvelope>[];
+        push.richRenderer = (envelope, isCurrent) async {
+          expect(isCurrent(), isTrue);
+          rendered.add(envelope);
+        };
+        driver.received.add(payload(registration));
+        driver.received.add({...payload(registration), 'registration_id': 'x'});
+        await push.settle();
+        expect(rendered.single.eventId, r'$event');
+        // Only routing fields reach the renderer; content never comes from push.
+        expect(rendered.single.toJson().keys, isNot(contains('body')));
+        expect(driver.shown, isEmpty);
+        expect(push.active, isTrue);
+      },
+    );
+
+    test('a failing rich renderer falls back to the generic alert', () async {
+      final registration = await enable();
+      push.richRenderer = (_, _) async => throw StateError('no keys');
+      driver.received.add(payload(registration));
+      await push.settle();
+      expect(driver.shown.single.roomId, '!room:example.org');
+      expect(push.active, isTrue);
+    });
+
+    test('a render that outlives push posts nothing', () async {
+      final registration = await enable();
+      final gate = Completer<void>();
+      bool? currentAfter;
+      push.richRenderer = (_, isCurrent) async {
+        await gate.future;
+        currentAfter = isCurrent();
+        throw StateError('stale');
+      };
+      driver.received.add(payload(registration));
+      await Future<void>.delayed(Duration.zero);
+      final disabling = push.disable();
+      gate.complete();
+      await disabling;
+      await push.settle();
+      expect(currentAfter, isFalse);
+      expect(driver.shown, isEmpty);
+    });
+
+    test('background hand-offs are verified like foreground pushes', () async {
+      final registration = await enable();
+      final rendered = <PushEnvelope>[];
+      push.richRenderer = (envelope, _) async => rendered.add(envelope);
+      expect(
+        push.acceptHandedOffPush({
+          ...payload(registration),
+          'registration_id': 'C' * 32,
+        }),
+        isFalse,
+      );
+      expect(push.acceptHandedOffPush(payload(registration)), isTrue);
+      await push.settle();
+      expect(rendered, hasLength(1));
+      expect(
+        push.verifiedRequest(payload(registration))?.roomId,
+        '!room:example.org',
+      );
+      await push.disable();
+      expect(push.acceptHandedOffPush(payload(registration)), isFalse);
+      expect(push.verifiedRequest(payload(registration)), isNull);
+    });
+  });
 }
