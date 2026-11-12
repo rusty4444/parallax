@@ -482,7 +482,8 @@ void main() {
       ..entries = [
         ChatEntry(
           id: 'original',
-          sender: '@friend:example.org',
+          sender: '@meta_555000222:samprim.net',
+          senderName: 'Meta',
           body: 'First message',
           time: DateTime(2026),
           mine: false,
@@ -503,14 +504,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Reply'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Replying to @friend'), findsOneWidget);
+    expect(find.text('Replying to Meta: First message'), findsOneWidget);
+    expect(find.textContaining('Replying to @meta_'), findsNothing);
     await tester.enterText(find.byType(TextField), 'My reply');
     expect(backend.typingStates.last, isTrue);
     await tester.tap(find.byTooltip('Send message'));
     await tester.pump();
     expect(backend.lastReplyId, 'original');
     expect(backend.lastMessage, 'My reply');
-    expect(find.textContaining('Replying to @friend'), findsNothing);
+    expect(find.textContaining('Replying to Meta'), findsNothing);
     expect(backend.typingStates.last, isFalse);
   });
 

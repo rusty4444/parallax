@@ -1499,7 +1499,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                             Expanded(
                               child: Text(
                                 _editing == null
-                                    ? 'Replying to ${_replyingTo!.sender}: ${_replyingTo!.body}'
+                                    ? 'Replying to ${_replyingTo!.senderLabel}: ${_replyingTo!.body}'
                                     : 'Editing: ${_editing!.body}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
