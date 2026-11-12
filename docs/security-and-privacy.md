@@ -34,7 +34,13 @@ Android blocks screenshots and recent-app previews while recovery credentials ar
 
 Push is disabled by default and requires the user's own Firebase project and Matrix-compatible HTTPS push gateway. No borrowed gateway, service account or Firebase project credentials are bundled. Configuration alone does not demonstrate live delivery. Notification permission, token creation and pusher registration require complete configuration and explicit opt-in; disabling push or signing out must retire that account's registration.
 
-Enabling push introduces Google Firebase Cloud Messaging and the configured gateway as external services. They can receive device registration and routing metadata. Notifications should contain generic text rather than decrypted message bodies. Notification navigation must be bound to the active account/device, not merely a room ID from an old payload. See [push setup](push-notifications.md) for the actual configuration contract and limitations.
+Enabling push introduces Google Firebase Cloud Messaging (or your UnifiedPush distributor) and the configured gateway as external services. They can receive device registration and routing metadata — room and event IDs, counts and timing — but never message content: pushers use `event_id_only`, and the gateway must not add content.
+
+Notifications show the sender, message text and media previews, like Element X. That content is fetched from your homeserver and decrypted **on this device** after a push arrives: by the running app's Matrix client, or, when Parallax is not running, by a short-lived read-only client that opens the local database without syncing, uploading keys or writing. If fetching or decrypting fails or takes too long, the generic “New message” alert is shown instead. Settings → Notification content turns message content (and separately media previews) off; with content off the generic alert is used and nothing is fetched. Notifications use Android's *private* lock-screen visibility, so a secure lock screen hides their content when you choose to hide sensitive notifications in system settings; on an unlocked or insecure screen, other people can read notification content.
+
+Decrypted previews are bounded downloads, re-encoded and written to `cache/notification_media/` in the app sandbox; Android's system UI reads only the image attached to a posted notification through a non-exported FileProvider. Recent notification lines, the notification settings and quick replies waiting to be sent are stored in the private app support directory (excluded from backup). They are scoped to one account and device and deleted on sign-out. Quick replies are only sent by the running app through the normal recipient-trust and encryption guards, never from a background isolate.
+
+Notification navigation and actions must be bound to the active account/device, not merely a room ID from an old payload. See [push setup](push-notifications.md) for the actual configuration contract and limitations.
 
 ## Required live acceptance checks
 
@@ -46,5 +52,6 @@ Use disposable accounts before trusting this preview with important messages:
 - Gallery/document/keyboard media, voice recording, audio/video playback and lifecycle interruption on a physical Android device.
 - Directory, thread pagination, Spaces hierarchy/join, favourites and receipts against the actual homeserver.
 - Opted-in push delivery, token rotation, disable/logout and stale-notification rejection using the user's own infrastructure.
+- Rich notifications with the app open, in the background and closed: decrypted text, image previews, mentions, invites, ringing calls, quick reply (including while closed) and the generic fallback when keys are missing.
 
 Calls/Element Call interoperability, production signing and a complete independent security audit are outside this preview. Consult release notes for the exact automated checks and device smoke tests actually executed; an unchecked live test must not be treated as passed.

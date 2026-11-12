@@ -18,7 +18,7 @@ unverified.” Failed/missing configuration must never claim active.
 The foreground process does not restore consent automatically. Call `initialize()`
 once at foreground startup; it only clears the previous background routing binding.
 A process restart and each account/session replacement require fresh opt-in. An
-already opted-in registration can show generic background alerts while the app is
+already opted-in registration can show background notifications while the app is
 terminated, until the next foreground startup or explicit disable/logout. Old
 notification launch payloads are deliberately discarded, not reassigned to a newly
 signed-in account.
@@ -189,19 +189,107 @@ zero-metadata delivery. The nonce binds routing to a locally authenticated
 account/device generation; it is not a cryptographic signature from the homeserver
 and does not authorize access to a room.
 
-All app-rendered alerts use fixed text: “New message” / “Open Parallax to read your
-messages.” Only the registration nonce, room ID and optional event ID survive
-payload parsing. Notifications never render untrusted private message contents.
-The background top-level `matrixPushBackgroundHandler` is registered **only** after
-valid configuration and explicit enable. It verifies persisted consent, complete
-configuration, nonempty account/device identity, and the current registration nonce;
-it never initializes Firebase or contacts Matrix. Locked/unavailable secure storage
-fails closed. It rechecks its binding before showing a generic local alert.
+Only the registration nonce, room ID and optional event ID survive payload parsing:
+**no message content ever comes from the push**. The background top-level
+`matrixPushBackgroundHandler` is registered **only** after valid configuration and
+explicit enable. It verifies persisted consent, complete configuration, nonempty
+account/device identity, and the current registration nonce; it never initializes
+Firebase. Locked/unavailable secure storage fails closed. It rechecks its binding
+before posting anything.
+
+## What notifications show (rich notifications)
+
+Like Element X, a verified push is turned into a real notification **on the
+device**: Parallax fetches the notified event from your homeserver with the signed-in
+session and decrypts it with the keys already on the phone. Your gateway, Google FCM
+or UnifiedPush distributor only ever see event and room IDs.
+
+- **One conversation per room** (Android MessagingStyle, ID derived from the room
+  ID): sender name and avatar as the person icon, the room name as the title of
+  group rooms, and the last few messages of that room. Notifications are grouped
+  under a summary.
+- **Message text per type:** text and notices; emotes as “\* Name waves”; images,
+  videos and stickers (“Image”, “Video”, “Sticker” or the caption); files as
+  “📎 name”; “Voice message”; “📍 Location”; polls as “Poll: question”; reactions;
+  live location. Mentions and keyword highlights (push rule `highlight`) are marked
+  “Mentioned you: …” and raised in priority.
+- **Media previews:** a decrypted image/sticker/video thumbnail, downloaded with
+  strict size caps (3 MB for encrypted originals; server-scaled thumbnails for
+  plaintext media), decoded with pixel bounds and re-encoded to a small JPEG in the
+  app's private cache (`cache/notification_media/`). Android's system UI reads it
+  through a non-exported FileProvider
+  (`${applicationId}.notifications.fileprovider`) using only the URI attached to the
+  posted notification. Android 9+ shows the image inline; older versions show text.
+- **Invites:** “Alice invited you to Book club” (or “… invited you to chat”).
+- **Calls:** an MSC4075 `m.rtc.notification` ring (or legacy `m.call.invite`) in a
+  DM becomes a high-priority, call-category notification on the “Calls” channel
+  that opens the room. Expired rings show “Missed call”.
+- **Actions:** tap opens the room, “Mark as read” (as before) and an inline
+  **Reply**. Notifications of a room are cleared when you open it in Parallax or it
+  becomes read (for example on another device), and already-read events are not
+  shown.
+- **Settings → Notification content:** “Show message content” (on by default; off
+  restores the generic “New message” alert and removes existing rich
+  notifications) and “Show media previews in notifications” (on by default).
+  Lock-screen visibility stays *private*: Android hides content on a secure lock
+  screen when you choose to hide sensitive notifications.
+
+If the event cannot be fetched or decrypted within the time limit (15 s), or
+anything else fails, the previous generic alert (“New message” / “Open Parallax to
+read your messages.”) is shown instead; a push is never silently dropped because
+rendering failed.
+
+### Which process does the work
+
+The main isolate owns the Matrix client and database.
+
+1. **App running (foreground or background):** foreground FCM/UnifiedPush messages
+   are rendered by the main isolate with the live client
+   (`Client.getEventByPushNotification(storeInDatabase: false)`). FCM background
+   messages arrive in a separate background isolate; it hands the push to the main
+   isolate through an `IsolateNameServer` port registered by
+   `wrapWithNotifications` and waits up to 2 s for an acknowledgement. The main
+   isolate re-verifies the envelope against its live registration exactly like a
+   foreground message.
+2. **No main isolate (app closed):** the background isolate opens a short-lived
+   **read-only** client on the same database (separate, read-only SQLite
+   connection): no `Client.init`, no sync loop, no key upload, no to-device
+   processing, no token refresh and no database writes. It reads the stored session
+   (which must match the push binding's account and device), fetches the one event
+   over HTTPS, decrypts it with the stored Megolm session and closes everything.
+   A lock file (`push_background_client.lock`) marks the client; at most one runs.
+3. **Residual risk:** Parallax can be launched while a background client is open.
+   The background connection cannot write, so it cannot corrupt crypto state; the
+   main isolate additionally waits (bounded, 8 s) for the lock before opening the
+   database so startup migrations do not race the read. A port left behind by a dead
+   isolate is detected by the missing acknowledgement and removed.
+
+### Quick reply
+
+The Reply action never opens the app and is never sent from a background isolate.
+flutter_local_notifications delivers it to its (non-exported) action receiver in a
+background isolate, which hands it to the main isolate; the main isolate verifies
+the payload against the live registration and sends it through the normal guarded
+send path (recipient trust, fail-closed encryption, final HTTP guard), then shows it
+as “Me” in the conversation (or “Couldn’t send your reply…”). When Parallax is not
+running, the reply is kept in the app's private storage and the notification says
+“Reply not sent yet. Open Parallax to send it.”; the next time Parallax is opened
+by that account and device it is sent through the same guarded path. Replies older
+than 30 minutes are not sent.
+
+### Local notification data
+
+The last few messages per room (needed to rebuild MessagingStyle across isolates),
+the two preferences and pending quick replies are kept in
+`parallax_notifications/` in the app's private support directory (excluded from
+backup, like the Matrix database, which already stores decrypted history). It is
+scoped to one account and device, pruned after three days, and deleted with the
+cached previews on sign-out.
 
 On disable, rotation, logout or account replacement the foreground owner invalidates
 routing immediately, cancels listeners, removes exact old pushers, clears background
 state and deactivates/deletes the FCM token. Native/isolate/OS delivery is not an
-atomic transaction with foreground logout: an already dispatched generic alert can
+atomic transaction with foreground logout: an already dispatched alert can
 race revocation, although its tap is discarded after generation invalidation. OS
 force-stop, crashes, app deletion or already-invalid credentials can prevent remote
 pusher removal. Clean transitions are covered by joined cleanup; no claim of
@@ -219,6 +307,16 @@ flutter analyze --no-pub lib/push_notifications.dart lib/push_settings_screen.da
 The tests cover missing config/no contact, consent, denied permission/no token,
 `event_id_only`, exact token rotation/removal, generic payloads, stale account/tap
 rejection, registration and navigation logout joins, cancellation during permission
-and default settings state. Still required: APK/native integration and a real
-opted-in account/device test against your own gateway/Firebase, including background,
-terminated, token rotation, permission denial, offline cleanup and logout races.
+and default settings state. `test/notifications_*_test.dart` cover the rich
+notification wording per event type, sender/room naming, media decisions and
+bounded preview processing, the MessagingStyle history store, fallback paths
+(content off, fetch failure, timeout, plugin failure, stale binding), isolate
+hand-off with fake port directories, quick replies and the settings toggles.
+
+Still required (not verifiable without a device, homeserver and second client):
+APK/native integration and a real opted-in account/device test against your own
+gateway/Firebase or distributor, including background, terminated, token rotation,
+permission denial, offline cleanup and logout races; decryption by the background
+read-only client (vodozemac and sqflite in a headless engine); MessagingStyle image
+display through the FileProvider; the inline Reply round trip through the action
+isolate; and ringing-call presentation.
