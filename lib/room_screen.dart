@@ -1099,60 +1099,64 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       fit: StackFit.expand,
                       children: [
                         _opening
-                        ? Center(
-                            child: CircularProgressIndicator(color: p.accent),
-                          )
-                        : _error != null
-                        ? Center(
-                            child: Text(
-                              _error!,
-                              style: TextStyle(color: p.foreground),
-                            ),
-                          )
-                        : entries.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                BrandMark(palette: p, size: 53),
-                                const SizedBox(height: 18),
-                                Text(
-                                  'Start something good.',
-                                  style: TextStyle(
-                                    color: p.foreground,
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                            ? Center(
+                                child: CircularProgressIndicator(
+                                  color: p.accent,
                                 ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Messages in this room will appear here.',
-                                  style: TextStyle(color: p.muted),
+                              )
+                            : _error != null
+                            ? Center(
+                                child: Text(
+                                  _error!,
+                                  style: TextStyle(color: p.foreground),
                                 ),
-                                if (widget.backend.canLoadOlder) ...[
-                                  const SizedBox(height: 14),
-                                  TextButton(
-                                    onPressed: widget.backend.loadingHistory
-                                        ? null
-                                        : _loadOlder,
-                                    child: const Text('Load earlier messages'),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          )
-                        : TimelineView(
-                            backend: widget.backend,
-                            roomId: widget.roomId,
-                            palette: p,
-                            entries: entries,
-                            compact: compact,
-                            room: room,
-                            onHeart: _heart,
-                            onAction: _showActions,
-                            onReaction: _react,
-                            onLoadOlder: _loadOlder,
-                          ),
+                              )
+                            : entries.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    BrandMark(palette: p, size: 53),
+                                    const SizedBox(height: 18),
+                                    Text(
+                                      'Start something good.',
+                                      style: TextStyle(
+                                        color: p.foreground,
+                                        fontSize: 21,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Messages in this room will appear here.',
+                                      style: TextStyle(color: p.muted),
+                                    ),
+                                    if (widget.backend.canLoadOlder) ...[
+                                      const SizedBox(height: 14),
+                                      TextButton(
+                                        onPressed: widget.backend.loadingHistory
+                                            ? null
+                                            : _loadOlder,
+                                        child: const Text(
+                                          'Load earlier messages',
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              )
+                            : TimelineView(
+                                backend: widget.backend,
+                                roomId: widget.roomId,
+                                palette: p,
+                                entries: entries,
+                                compact: compact,
+                                room: room,
+                                onHeart: _heart,
+                                onAction: _showActions,
+                                onReaction: _react,
+                                onLoadOlder: _loadOlder,
+                              ),
                         // Chat effects and other full-screen overlays.
                         ...roomOverlaysFor(context, roomCtx),
                       ],
