@@ -163,6 +163,13 @@ class MatrixBackend extends ChatBackend
   final _roomIndex = <String, matrix.Room>{};
   Timer? _messageRefreshTimer;
 
+  /// Room-list members (heroes, preview senders) without loaded state,
+  /// fetched once per room and user, a few at a time.
+  final _memberRequests = <String>{};
+  final _memberQueue = Queue<(matrix.Room, String)>();
+  final _memberPending = <String>{};
+  var _memberActive = 0;
+
   /// Senders of the open room whose membership wasn't cached, fetched once.
   final _requestedSenders = <String>{};
   final _senderProfiles = <String, ({String? name, Uri? avatar})>{};
@@ -2803,6 +2810,9 @@ class MatrixBackend extends ChatBackend
     _messageRefreshTimer?.cancel();
     _requestedSenders.clear();
     _senderProfiles.clear();
+    _memberRequests.clear();
+    _memberQueue.clear();
+    _memberPending.clear();
     _messages = const [];
     _sending = false;
     _loadingHistory = false;
@@ -3241,6 +3251,42 @@ class MatrixBackend extends ChatBackend
   @visibleForTesting
   int debugRoomProjections = 0;
 
+  /// Queues [userIds] of [room] that have no member state for a background
+  /// lookup (database, server state, profile); the room is projected again
+  /// when each finishes.
+  void _needMembers(matrix.Room room, Iterable<String> userIds) {
+    for (final id in userIds) {
+      if (id.isEmpty ||
+          !id.isValidMatrixIdStrict() ||
+          room.getState(matrix.EventTypes.RoomMember, id) != null ||
+          !_memberRequests.add('${room.id}|$id')) {
+        continue;
+      }
+      _memberPending.add('${room.id}|$id');
+      _memberQueue.add((room, id));
+    }
+    _pumpMembers();
+  }
+
+  void _pumpMembers() {
+    final generation = _securityGeneration;
+    while (_memberActive < 4 && _memberQueue.isNotEmpty && !_disposed) {
+      final (room, id) = _memberQueue.removeFirst();
+      _memberActive++;
+      unawaited(
+        room
+            .loadMissingMembers([id], timeout: const Duration(seconds: 15))
+            .whenComplete(() {
+              _memberActive--;
+              _memberPending.remove('${room.id}|$id');
+              if (_disposed || generation != _securityGeneration) return;
+              _scheduleRoomUpdate(roomIds: {room.id});
+              _pumpMembers();
+            }),
+      );
+    }
+  }
+
   /// Feeds a sync to the room list as the sync stream would.
   @visibleForTesting
   void debugRoomsSynced(matrix.SyncUpdate update) => _roomsSynced(update);
@@ -3272,8 +3318,10 @@ class MatrixBackend extends ChatBackend
     final name = room.parallaxName;
     final heroIds = room.peopleHeroes;
     final tags = room.tags.keys.toList(growable: false);
-    // Cached membership only: never trigger member fetches while projecting.
+    // Cached membership only while projecting; missing members (lazy
+    // loading) are fetched in the background and the room projected again.
     String? previewSender;
+    String? unresolvedSender;
     if (!room.isDirectChat &&
         event != null &&
         (event.type == matrix.EventTypes.Message ||
@@ -3281,14 +3329,27 @@ class MatrixBackend extends ChatBackend
       if (event.senderId == client.userID) {
         previewSender = 'You';
       } else {
-        final member = room
-            .getState(matrix.EventTypes.RoomMember, event.senderId)
-            ?.content['displayname'];
-        previewSender = member is String && member.trim().isNotEmpty
-            ? member.trim()
-            : event.senderId;
+        final member = room.getState(
+          matrix.EventTypes.RoomMember,
+          event.senderId,
+        );
+        final name = member?.content['displayname'];
+        if (name is String && name.trim().isNotEmpty) {
+          previewSender = name.trim();
+        } else if (member == null &&
+            (!_memberRequests.contains('${room.id}|${event.senderId}') ||
+                _memberPending.contains('${room.id}|${event.senderId}'))) {
+          // Still loading: show the message without a raw Matrix ID.
+          unresolvedSender = event.senderId;
+        } else {
+          previewSender = matrix.User(
+            event.senderId,
+            room: room,
+          ).calcDisplayname();
+        }
       }
     }
+    _needMembers(room, [...heroIds.take(4), ?unresolvedSender]);
     return ChatRoom(
       highlightCount: room.highlightCount,
       favourite: tags.contains(matrix.TagType.favourite),

@@ -60,6 +60,76 @@ extension ParallaxRoomNames on Room {
     return isDirectChat ? result : i18n.groupWith(result);
   }
 
+  /// Loads names and avatars for [userIds] this room holds no member state
+  /// for: members are lazy-loaded, so rooms not opened since the app
+  /// started often lack them. Each is looked up in the database, then the
+  /// room's state on the server, then the user's profile (SDK
+  /// [requestUser], which keeps what it finds). Gives up after [timeout].
+  Future<void> loadMissingMembers(
+    Iterable<String> userIds, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    final missing = <String>{
+      for (final id in userIds)
+        if (id.isValidMatrixIdStrict() &&
+            getState(EventTypes.RoomMember, id) == null)
+          id,
+    }.take(6);
+    if (missing.isEmpty) return;
+    try {
+      await Future.wait([
+        for (final id in missing) _loadMember(id),
+      ]).timeout(timeout);
+    } catch (_) {
+      // Slow or unreachable: the caller uses what it has.
+    }
+  }
+
+  Future<void> _loadMember(String userId) async {
+    try {
+      await requestUser(userId, ignoreErrors: true);
+    } catch (_) {}
+    if (getState(EventTypes.RoomMember, userId) != null) return;
+    // The SDK stores what it fetches and gives up when that write fails
+    // (the notification isolate opens the database read-only), so read the
+    // member, then the profile, directly and keep them in memory only.
+    String? name;
+    String? avatar;
+    var membership = Membership.leave.name;
+    try {
+      final member = await client.request(
+        RequestType.GET,
+        '/client/v3/rooms/${Uri.encodeComponent(id)}/state/'
+        'm.room.member/${Uri.encodeComponent(userId)}',
+      );
+      name = member.tryGet<String>('displayname', TryGet.silent);
+      avatar = member.tryGet<String>('avatar_url', TryGet.silent);
+      membership =
+          member.tryGet<String>('membership', TryGet.silent) ?? membership;
+    } catch (_) {}
+    if (name == null) {
+      try {
+        final profile = await client.request(
+          RequestType.GET,
+          '/client/v3/profile/${Uri.encodeComponent(userId)}',
+        );
+        name = profile.tryGet<String>('displayname', TryGet.silent);
+        avatar ??= profile.tryGet<String>('avatar_url', TryGet.silent);
+      } catch (_) {}
+    }
+    if (name == null && avatar == null) return;
+    if (getState(EventTypes.RoomMember, userId) != null) return;
+    setState(
+      User(
+        userId,
+        room: this,
+        displayName: name,
+        avatarUrl: avatar,
+        membership: membership,
+      ),
+    );
+  }
+
   /// [avatar], except a DM whose partner is a bridge bot shows its people
   /// (the avatar cluster) instead of the bot's logo.
   Uri? get parallaxAvatar {

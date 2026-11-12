@@ -1,11 +1,29 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:matrix/matrix.dart' as matrix;
 import 'package:parallax/matrix_backend.dart';
 
 class _Database extends Fake implements matrix.DatabaseApi {
+  /// Members stored by an earlier sync (lazy loading keeps them out of
+  /// memory for rooms not opened yet).
+  final names = <String, String>{};
+
   @override
   Future<void> close() async {}
+
+  @override
+  Future<matrix.User?> getUser(String userId, matrix.Room room) async {
+    final name = names[userId];
+    return name == null
+        ? null
+        : matrix.User(
+            userId,
+            room: room,
+            displayName: name,
+            membership: 'join',
+          );
+  }
 }
 
 class _Client extends matrix.Client {
@@ -13,7 +31,9 @@ class _Client extends matrix.Client {
     : super(
         'projection-test',
         database: _Database(),
-        httpClient: http.Client(),
+        httpClient: MockClient(
+          (_) async => http.Response('{"errcode":"M_NOT_FOUND"}', 404),
+        ),
       ) {
     homeserver = Uri.parse('https://matrix.example');
     accessToken = 'token';
@@ -33,6 +53,17 @@ void main() {
 
   matrix.Room room(String id, String body) {
     final r = matrix.Room(id: id, client: client);
+    r.setState(
+      matrix.Event(
+        type: matrix.EventTypes.RoomMember,
+        stateKey: '@friend:example.org',
+        senderId: '@friend:example.org',
+        content: const {'membership': 'join', 'displayname': 'Friend'},
+        room: r,
+        eventId: '\$member-$id',
+        originServerTs: DateTime(2026, 11, 12),
+      ),
+    );
     r.lastEvent = matrix.Event(
       type: matrix.EventTypes.Message,
       senderId: '@friend:example.org',
@@ -141,6 +172,43 @@ void main() {
     await settle();
     expect(backend.rooms.map((r) => r.id), isNot(contains('!c:example.org')));
     expect(backend.debugRoomProjections, 3);
+  });
+
+  test('a preview sender not loaded yet never shows their Matrix ID', () async {
+    const ghost = '@whatsapp_lid-100000000000001:example.org';
+    (client.database as _Database).names[ghost] = 'Gen (WA)';
+    final r = matrix.Room(id: '!d:example.org', client: client);
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: ghost,
+      content: const {'msgtype': 'm.text', 'body': 'Love our little bmfer'},
+      room: r,
+      eventId: r'$bmf',
+      originServerTs: DateTime(2026, 11, 14),
+    );
+    client.rooms.add(r);
+    final seen = <String?>[];
+    backend.addListener(() {
+      for (final room in backend.rooms) {
+        if (room.id == '!d:example.org') seen.add(room.previewSender);
+      }
+    });
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(
+          join: {'!d:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    await settle();
+    // First without a sender, then with the name from the database.
+    expect(seen.first, isNull);
+    expect(seen.last, 'Gen (WA)');
+    expect(seen, isNot(contains(ghost)));
+    final projected = backend.rooms.firstWhere((r) => r.id == '!d:example.org');
+    expect(projected.preview, 'Love our little bmfer');
   });
 
   test('favourites are read from the room index', () {

@@ -18,11 +18,13 @@ class _Database extends Fake implements matrix.DatabaseApi {
 }
 
 class _Client extends matrix.Client {
-  _Client()
+  _Client([MockClientHandler? handler])
     : super(
         'notifications-test',
         database: _Database(),
-        httpClient: MockClient((_) async => http.Response('{}', 500)),
+        httpClient: MockClient(
+          handler ?? (_) async => http.Response('{}', 500),
+        ),
       ) {
     homeserver = Uri.parse('https://matrix.example.org');
     accessToken = 'token';
@@ -104,6 +106,57 @@ void main() {
     expect(resolved.line.timestamp, DateTime(2026, 11, 12, 9, 30));
     expect(resolved.line.imagePath, isNull);
   });
+
+  test(
+    'a sender not loaded yet is named from the server, not their ID',
+    () async {
+      const ghost = '@whatsapp_lid-100000000000001:example.org';
+      final requested = <String>[];
+      final client = _Client((request) async {
+        requested.add(request.url.path);
+        if (request.url.path.endsWith(
+          '/state/m.room.member/${Uri.encodeComponent(ghost)}',
+        )) {
+          return http.Response(
+            '{"membership":"join","displayname":"Gen (WA)"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.url.path.contains('/profile/')) {
+          return http.Response(
+            '{"displayname":"Gen (WA)"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('{"errcode":"M_NOT_FOUND"}', 404);
+      });
+      final room = _groupRoom(client);
+      final event = matrix.Event(
+        type: 'm.room.message',
+        content: const {'msgtype': 'm.text', 'body': 'Love our little bmfer'},
+        senderId: ghost,
+        eventId: r'$ghost',
+        originServerTs: DateTime(2026, 11, 12, 18, 50),
+        room: room,
+      );
+      final resolved = await projectPushEvent(
+        event: event,
+        room: room,
+        myUserId: _me,
+        isDirect: false,
+        highlight: false,
+      );
+      expect(resolved.line.senderName, 'Gen (WA)');
+      expect(requested, isNotEmpty);
+      // Kept for the next notification and the room list.
+      expect(
+        room.getState('m.room.member', ghost)?.content['displayname'],
+        'Gen (WA)',
+      );
+    },
+  );
 
   test('emotes use the display name', () async {
     final room = _groupRoom(client);

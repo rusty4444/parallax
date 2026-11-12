@@ -58,6 +58,12 @@ Future<ResolvedPushEvent> projectPushEvent({
   if (silentPushEventTypes.contains(event.type)) {
     throw const SilentPushEvent();
   }
+  // Show people's names, not Matrix IDs: the sender (and a DM partner, who
+  // names the conversation) may not be loaded for a room not opened yet.
+  await room.loadMissingMembers([
+    event.senderId,
+    if (isDirect) ...room.peopleHeroes.take(1),
+  ]);
   final sender = event.senderFromMemoryOrFallback;
   final senderName =
       sanitiseNotificationName(sender.calcDisplayname()) ??
@@ -125,6 +131,7 @@ Future<ResolvedPushEvent> projectInvite({
   if (member == null || member.content['membership'] != 'invite') {
     throw const UndescribablePushEvent();
   }
+  await room.loadMissingMembers([member.senderId]);
   final inviter = room.unsafeGetUserFromMemoryOrFallback(member.senderId);
   final senderName =
       sanitiseNotificationName(inviter.calcDisplayname()) ??
