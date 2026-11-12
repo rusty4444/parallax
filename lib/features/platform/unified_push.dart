@@ -41,6 +41,13 @@ final defaultUnifiedPushGateway = Uri.parse(
 const _noMatrixGatewayStatuses = {401, 403, 404, 405, 406};
 
 /// Where users can find a distributor (same page Element X links to).
+/// ntfy on Google Play: with its default server (ntfy.sh, which has a Matrix
+/// gateway) it is the simplest UnifiedPush setup, with no ongoing
+/// notification.
+final ntfyPlayStoreUrl = Uri.parse(
+  'https://play.google.com/store/apps/details?id=io.heckel.ntfy',
+);
+
 final unifiedPushDistributorsUrl = Uri.parse(
   'https://unifiedpush.org/users/distributors/',
 );

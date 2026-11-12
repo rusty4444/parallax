@@ -1024,7 +1024,7 @@ class PushNotifications extends ChangeNotifier {
                 ? 'Notifications are on, but Android did not allow the background connection, so they arrive only while Parallax is running.'
                 : 'Notifications are on. Parallax stays connected to your homeserver in the background.')
           : configuration.isUnifiedPush
-          ? 'Registered with UnifiedPush via ${configuration.gatewayUrl!.host}. Live delivery has not been verified.'
+          ? 'Notifications are on through UnifiedPush via ${configuration.gatewayUrl!.host}.'
           : 'Device registered. Live push delivery has not been verified.',
     );
   }

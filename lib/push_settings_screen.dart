@@ -68,15 +68,17 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
       text: config.isUnifiedPush ? config.gatewayUrl?.toString() ?? '' : '',
     );
     _distributor = config.isUnifiedPush ? config.distributor : null;
-    if (_provider == PushProvider.unifiedPush) _loadDistributors();
+    // Also used by the built-in section to suggest ntfy.
+    _loadDistributors();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Back from Android's battery prompt or settings.
+    // Back from Android's battery prompt, settings or the Play Store.
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {
         _batteryExempt = widget.connection.isIgnoringBatteryOptimizations();
+        _loadDistributors();
       });
     }
   }
@@ -438,6 +440,32 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
       'this device.',
     ),
     const SizedBox(height: 8),
+    FutureBuilder<List<String>>(
+      future: _distributors,
+      builder: (context, snapshot) {
+        final installed = snapshot.data;
+        if (installed == null || installed.isNotEmpty) {
+          return const SizedBox.shrink();
+        }
+        return ListTile(
+          key: const ValueKey('push.get_ntfy'),
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.download_rounded),
+          title: const Text('Get push through ntfy'),
+          subtitle: const Text(
+            'Install ntfy from Google Play and open it once. Parallax then '
+            'uses it automatically, with no ongoing notification and less '
+            'battery use.',
+          ),
+          trailing: TextButton(
+            onPressed: () => unawaited(
+              launchUrl(ntfyPlayStoreUrl, mode: LaunchMode.externalApplication),
+            ),
+            child: const Text('Get ntfy'),
+          ),
+        );
+      },
+    ),
     FutureBuilder<bool>(
       future: _batteryExempt,
       builder: (context, snapshot) {

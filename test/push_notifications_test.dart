@@ -734,6 +734,10 @@ void main() {
         }
       }
 
+      tester.view
+        ..physicalSize = const Size(900, 2600)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
           home: PushSettingsScreen(
@@ -746,6 +750,8 @@ void main() {
       expect(find.text('Notifications are on'), findsOneWidget);
       expect(find.text('Built in'), findsWidgets);
       expect(find.byKey(const ValueKey('push.battery')), findsOneWidget);
+      // No distributor installed: suggest ntfy from Google Play.
+      expect(find.byKey(const ValueKey('push.get_ntfy')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('push.enable')));
       await settle();
       expect(owner.enabled, isFalse);

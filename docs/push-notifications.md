@@ -20,6 +20,14 @@ is remembered (`notifications.delivery`), as is turning notifications off
 (`notifications.in_app_off`). Firebase stays manual and opt-in, and the
 automatic choice leaves it alone.
 
+Recommended setup: install **ntfy from Google Play** and open it once (allow its
+notifications), keeping its default server `ntfy.sh`. ntfy.sh answers the Matrix
+gateway discovery (`{"unifiedpush":{"gateway":"matrix"}}`) and relays the
+homeserver's push body unchanged; a captured relay is pinned in
+`test/platform_unified_push_test.dart`. ntfy then wakes the phone through
+Google's Firebase, so there's no ongoing notification. Settings → Notifications
+on this device offers a "Get ntfy" link when no distributor is installed.
+
 With a self-hosted ntfy server, the ntfy app keeps its own connection open (with
 its own ongoing notification) and the server must be reachable over HTTPS from
 your homeserver. With the Play Store ntfy app and `ntfy.sh`, ntfy wakes through

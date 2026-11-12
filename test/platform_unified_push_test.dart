@@ -516,6 +516,24 @@ void main() {
   });
 
   group('parseUnifiedPushMessage', () {
+    test('accepts a notification exactly as ntfy.sh relays it', () {
+      // Captured from https://ntfy.sh/_matrix/push/v1/notify on 12 Nov 2026:
+      // ntfy forwards the Matrix push body unchanged as the message.
+      const relayed =
+          '{"notification": {"event_id": "\$evt:example.org", "room_id": '
+          '"!room:example.org", "counts": {"unread": 2}, "devices": [{"app_id": '
+          '"net.samrussell.parallax.up", "pushkey": '
+          '"https://ntfy.sh/upKvy5ZDySH2ty?up=1", "data": {"registration_id": '
+          '"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}]}}';
+      final parsed = parseUnifiedPushMessage(
+        Uint8List.fromList(utf8.encode(relayed)),
+      )!;
+      expect(parsed['registration_id'], 'A' * 32);
+      expect(parsed['room_id'], '!room:example.org');
+      expect(parsed['event_id'], r'$evt:example.org');
+      expect(parsed['unread'], 2);
+    });
+
     test('keeps routing fields only', () {
       final parsed = parseUnifiedPushMessage(_relayed('D' * 32))!;
       expect(parsed, {
