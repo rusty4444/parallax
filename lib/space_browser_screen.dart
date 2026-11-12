@@ -308,6 +308,19 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     if (mounted && _ownerCurrent) await _refresh();
   }
 
+  /// The open Space is joined (Space administration or home module).
+  bool get _joinedSpace {
+    final spaceId = widget.spaceId;
+    if (spaceId == null || _expired) return false;
+    try {
+      if (spacesAdminFeaturesOf(widget.backend)?.isJoinedSpace(spaceId) ??
+          false) {
+        return true;
+      }
+    } catch (_) {}
+    return _canLeave;
+  }
+
   Future<void> _leave() async {
     final spaceId = widget.spaceId;
     if (spaceId != null && _spacesAdmin && _ownerCurrent) {
@@ -380,7 +393,7 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
             onPressed: _newSpace,
             icon: const Icon(Icons.add_rounded),
           ),
-        if (_canLeave && _spacesAdmin) ...[
+        if (_joinedSpace && _spacesAdmin) ...[
           IconButton(
             tooltip: 'Manage rooms',
             onPressed: () => _manage(
@@ -404,7 +417,7 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
-        if (_canLeave)
+        if (_canLeave || _joinedSpace && _spacesAdmin)
           IconButton(
             tooltip: 'Leave Space',
             onPressed: _leave,

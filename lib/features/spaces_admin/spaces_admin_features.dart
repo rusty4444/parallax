@@ -19,7 +19,7 @@ abstract interface class SpacesAdminFeatures {
   bool isJoinedSpace(String roomId);
 
   /// Joined Spaces, sorted by name (synced state).
-  List<SpaceRef> get joinedSpaces;
+  List<SpaceRef> get joinedSpaceRefs;
 
   /// Joined Spaces that [roomId] may be added to according to synced power
   /// levels and that do not already list it. Writes re-check fresh state.
@@ -42,7 +42,7 @@ abstract interface class SpacesAdminFeatures {
   );
 
   /// Fresh server state: permissions and children in spec order.
-  Future<SpaceGraph> loadSpace(String spaceId);
+  Future<SpaceGraph> loadSpaceGraph(String spaceId);
 
   /// Writes `m.space.child` for each room (and `m.space.parent` on the
   /// child when permitted). Returns the room IDs that failed.
@@ -66,7 +66,7 @@ abstract interface class SpacesAdminFeatures {
 
   /// Leaves [roomIds], then the Space. Throws [LeaveSpaceFailure] when a
   /// room could not be left (the Space is then kept).
-  Future<void> leaveSpace(String spaceId, List<String> roomIds);
+  Future<void> leaveSpaceAndRooms(String spaceId, List<String> roomIds);
 
   /// Spaces offered for [roomId]'s "Space members" access, given the
   /// currently [allowed] Space IDs (synced state).

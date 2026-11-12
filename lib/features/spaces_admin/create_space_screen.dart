@@ -174,6 +174,7 @@ class _CreateSpaceScreenState extends State<CreateSpaceScreen> {
     final spaces = _spaces;
     if (spaces == null) return;
     setState(() {
+      _waiting = false;
       _linking = true;
       _linkFailedRoom = null;
     });

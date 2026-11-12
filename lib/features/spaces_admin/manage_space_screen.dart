@@ -69,7 +69,7 @@ class _ManageSpaceScreenState extends State<ManageSpaceScreen> {
       _error = null;
     });
     try {
-      final graph = await spaces.loadSpace(widget.spaceId);
+      final graph = await spaces.loadSpaceGraph(widget.spaceId);
       if (_current && generation == _generation) {
         setState(() => _graph = graph);
       }

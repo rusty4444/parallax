@@ -101,6 +101,12 @@ class _ManageAuthorisedSpacesScreenState
                   CheckboxListTile(
                     value: _selected.contains(id),
                     onChanged: (value) => _toggle(id, value),
+                    secondary: CircleAvatar(
+                      radius: 20,
+                      backgroundColor: p.raised,
+                      foregroundColor: p.muted,
+                      child: const Icon(Icons.workspaces_outline, size: 20),
+                    ),
                     title: Text(
                       '(Unknown space)',
                       style: TextStyle(color: p.foreground),

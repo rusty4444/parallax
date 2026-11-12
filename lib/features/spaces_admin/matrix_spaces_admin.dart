@@ -126,7 +126,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
   );
 
   @override
-  List<SpaceRef> get joinedSpaces {
+  List<SpaceRef> get joinedSpaceRefs {
     final client = _sdk.sdkClient;
     if (client == null || !_sdk.isSessionCurrent(client)) return const [];
     final spaces = <SpaceRef>[];
@@ -490,7 +490,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
   // --- Children ------------------------------------------------------------
 
   @override
-  Future<SpaceGraph> loadSpace(String spaceId) async {
+  Future<SpaceGraph> loadSpaceGraph(String spaceId) async {
     final client = _client();
     if (_joined(client, spaceId) == null) {
       throw StateError('Space is not joined');
@@ -716,7 +716,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
   @override
   Future<void> moveChild(String spaceId, String roomId, int toIndex) async {
     final client = _client();
-    final graph = await loadSpace(spaceId);
+    final graph = await loadSpaceGraph(spaceId);
     if (!graph.canEditChildren) {
       throw StateError('Not permitted to manage this Space');
     }
@@ -822,7 +822,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
   }
 
   @override
-  Future<void> leaveSpace(String spaceId, List<String> roomIds) async {
+  Future<void> leaveSpaceAndRooms(String spaceId, List<String> roomIds) async {
     final client = _client();
     final left = <String>[];
     // Element X leaves the rooms first and the Space last.
@@ -864,7 +864,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
       }
     } catch (_) {}
     final selectable = <SpaceRef>[];
-    for (final space in joinedSpaces) {
+    for (final space in joinedSpaceRefs) {
       if (space.id == roomId) continue;
       final joinedSpace = _joined(client, space.id);
       final parent =

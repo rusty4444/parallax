@@ -27,41 +27,45 @@ Future<void> showSpaceOptionsSheet(
     showDragHandle: true,
     builder: (sheetContext) {
       final error = Theme.of(sheetContext).colorScheme.error;
+      // Scrolls on short screens (landscape, large text).
       return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
-                spaceName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: const Text('Space'),
-            ),
-            if (onOpenRoom != null)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.travel_explore_rounded),
-                title: const Text('Explore rooms'),
-                onTap: () => Navigator.pop(sheetContext, _SpaceOption.explore),
+                title: Text(
+                  spaceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Space'),
               ),
-            ListTile(
-              leading: const Icon(Icons.dashboard_customize_outlined),
-              title: const Text('Manage rooms'),
-              onTap: () => Navigator.pop(sheetContext, _SpaceOption.manage),
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('Space settings'),
-              onTap: () => Navigator.pop(sheetContext, _SpaceOption.settings),
-            ),
-            ListTile(
-              leading: Icon(Icons.exit_to_app_rounded, color: error),
-              title: Text('Leave space', style: TextStyle(color: error)),
-              onTap: () => Navigator.pop(sheetContext, _SpaceOption.leave),
-            ),
-          ],
+              if (onOpenRoom != null)
+                ListTile(
+                  leading: const Icon(Icons.travel_explore_rounded),
+                  title: const Text('Explore rooms'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, _SpaceOption.explore),
+                ),
+              ListTile(
+                leading: const Icon(Icons.dashboard_customize_outlined),
+                title: const Text('Manage rooms'),
+                onTap: () => Navigator.pop(sheetContext, _SpaceOption.manage),
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Space settings'),
+                onTap: () => Navigator.pop(sheetContext, _SpaceOption.settings),
+              ),
+              ListTile(
+                leading: Icon(Icons.exit_to_app_rounded, color: error),
+                title: Text('Leave space', style: TextStyle(color: error)),
+                onTap: () => Navigator.pop(sheetContext, _SpaceOption.leave),
+              ),
+            ],
+          ),
         ),
       );
     },

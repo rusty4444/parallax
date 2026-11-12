@@ -125,7 +125,7 @@ class _LeaveSpaceScreenState extends State<LeaveSpaceScreen> {
     ];
     setState(() => _leaving = true);
     try {
-      await spaces.leaveSpace(widget.spaceId, rooms);
+      await spaces.leaveSpaceAndRooms(widget.spaceId, rooms);
       if (mounted && _owner.isCurrent) Navigator.pop(context, true);
     } on LeaveSpaceFailure catch (failure) {
       if (!mounted || !_owner.isCurrent) return;
