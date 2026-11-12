@@ -67,10 +67,13 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/36.0.0"
           test -s "$APK"
-          "$BT/apksigner" verify --print-certs "$APK" |
-            grep -Fq 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7'
-          "$BT/aapt" dump badging "$APK" | grep -Fq "package: name='net.samrussell.parallax' versionCode='$APK_VERSION_CODE'"
-          unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so'
+          # Capture first: `producer | grep -q` dies of SIGPIPE under pipefail.
+          CERTS=$("$BT/apksigner" verify --print-certs "$APK")
+          grep -Fq 'Signer #1 certificate SHA-256 digest: 2e1c94446d3c1d33f843ca3b5425c6dfd1383bbd5fc3408d0c3039278715eff7' <<<"$CERTS"
+          BADGING=$("$BT/aapt" dump badging "$APK")
+          grep -Fq "package: name='net.samrussell.parallax' versionCode='$APK_VERSION_CODE'" <<<"$BADGING"
+          LIBS=$(unzip -Z1 "$APK")
+          grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so' <<<"$LIBS"
           shasum -a 256 "$APK"
 
       - name: Publish a per-commit test release
