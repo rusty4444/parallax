@@ -10,6 +10,34 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:matrix/matrix.dart' as matrix;
 
+import 'features/platform/unified_push.dart';
+
+/// How push messages reach this device.
+enum PushProvider {
+  /// Google FCM via your own Firebase project and Matrix push gateway.
+  firebase,
+
+  /// A UnifiedPush distributor app (for example ntfy) and its Matrix gateway.
+  unifiedPush,
+}
+
+extension PushProviderLabel on PushProvider {
+  String get label => switch (this) {
+    PushProvider.firebase => 'Firebase',
+    PushProvider.unifiedPush => 'UnifiedPush',
+  };
+}
+
+/// Matrix pusher app_id for UnifiedPush registrations (Element X uses one
+/// app ID per provider too). Gateways relay it unchanged.
+const unifiedPushAppId = 'net.samrussell.parallax.up';
+
+/// UnifiedPush registration instance for this app (single account).
+const unifiedPushInstance = 'parallax';
+
+/// Notification action that marks the notified room as read.
+const pushMarkReadActionId = 'parallax.mark_read';
+
 /// Client identifiers only. Never put gateway service-account/private keys here.
 @immutable
 class PushConfiguration {
@@ -17,7 +45,16 @@ class PushConfiguration {
     this.gatewayUrl,
     this.appId = '',
     this.firebaseOptions,
-  });
+  }) : provider = PushProvider.firebase,
+       distributor = null;
+
+  /// UnifiedPush needs no client secrets. [gatewayUrl] is optional: when it
+  /// is null the gateway is discovered from the distributor's endpoint, as in
+  /// Element X. [distributor] is the distributor's Android package name.
+  const PushConfiguration.unifiedPush({this.gatewayUrl, this.distributor})
+    : provider = PushProvider.unifiedPush,
+      appId = unifiedPushAppId,
+      firebaseOptions = null;
 
   factory PushConfiguration.fromEnvironment() {
     const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
@@ -44,23 +81,61 @@ class PushConfiguration {
   /// Matrix reverse-DNS pusher app_id, configured identically on your gateway.
   final String appId;
   final FirebaseOptions? firebaseOptions;
+  final PushProvider provider;
 
-  List<String> get issues {
-    final issues = <String>[];
-    final url = gatewayUrl;
+  /// UnifiedPush distributor package; null uses the saved or only one.
+  final String? distributor;
+
+  bool get isUnifiedPush => provider == PushProvider.unifiedPush;
+
+  /// The same UnifiedPush choice with a resolved gateway.
+  PushConfiguration withGateway(Uri gateway) => isUnifiedPush
+      ? PushConfiguration.unifiedPush(
+          gatewayUrl: gateway,
+          distributor: distributor,
+        )
+      : PushConfiguration(
+          gatewayUrl: gateway,
+          appId: appId,
+          firebaseOptions: firebaseOptions,
+        );
+
+  static String? _gatewayIssue(Uri? url) {
     if (url == null ||
         url.scheme != 'https' ||
         url.host.isEmpty ||
         url.userInfo.isNotEmpty ||
         url.hasQuery ||
         url.hasFragment) {
-      issues.add(
-        'Set your own HTTPS Matrix push gateway URL (no credentials, query or fragment).',
-      );
-    } else if (url.path != '/_matrix/push/v1/notify' &&
-        !url.path.endsWith('/_matrix/push/v1/notify')) {
-      issues.add('Gateway URL must end in /_matrix/push/v1/notify.');
+      return 'Set your own HTTPS Matrix push gateway URL (no credentials, query or fragment).';
     }
+    if (url.path != '/_matrix/push/v1/notify' &&
+        !url.path.endsWith('/_matrix/push/v1/notify')) {
+      return 'Gateway URL must end in /_matrix/push/v1/notify.';
+    }
+    return null;
+  }
+
+  List<String> get issues {
+    if (isUnifiedPush) {
+      final issues = <String>[];
+      if (gatewayUrl != null) {
+        final issue = _gatewayIssue(gatewayUrl);
+        if (issue != null) issues.add(issue);
+      }
+      final value = distributor;
+      if (value != null &&
+          (value.length > 255 ||
+              !RegExp(
+                r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+$',
+              ).hasMatch(value))) {
+        issues.add('Choose an installed UnifiedPush distributor.');
+      }
+      return List.unmodifiable(issues);
+    }
+    final issues = <String>[];
+    final gatewayIssue = _gatewayIssue(gatewayUrl);
+    if (gatewayIssue != null) issues.add(gatewayIssue);
     if (appId.length > 64 ||
         !RegExp(r'^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$').hasMatch(appId)) {
       issues.add(
@@ -92,6 +167,8 @@ class PushConfiguration {
   Map<String, dynamic> toJson() => {
     'gateway_url': gatewayUrl?.toString(),
     'app_id': appId,
+    if (isUnifiedPush) 'provider': 'unifiedpush',
+    if (isUnifiedPush && distributor != null) 'distributor': distributor,
     if (firebaseOptions case final options?)
       'firebase': {
         'api_key': options.apiKey,
@@ -103,6 +180,19 @@ class PushConfiguration {
 
   static PushConfiguration? fromJson(Map<String, dynamic> json) {
     try {
+      if (json['provider'] == 'unifiedpush') {
+        final gateway = json['gateway_url'];
+        final distributor = json['distributor'];
+        if (json['app_id'] != unifiedPushAppId ||
+            (gateway != null && gateway is! String) ||
+            (distributor != null && distributor is! String)) {
+          return null;
+        }
+        return PushConfiguration.unifiedPush(
+          gatewayUrl: gateway == null ? null : Uri.tryParse(gateway as String),
+          distributor: distributor as String?,
+        );
+      }
       final firebase = json['firebase'] as Map<String, dynamic>;
       return PushConfiguration(
         gatewayUrl: Uri.tryParse(json['gateway_url'] as String),
@@ -175,7 +265,9 @@ class PushRegistration {
     appId: configuration.appId,
     pushkey: token,
     appDisplayName: 'Parallax',
-    deviceDisplayName: 'Parallax Android',
+    deviceDisplayName: configuration.isUnifiedPush
+        ? 'Parallax Android (UnifiedPush)'
+        : 'Parallax Android',
     kind: 'http',
     lang: 'en',
     data: matrix.PusherData(
@@ -327,6 +419,44 @@ abstract interface class PushDriver {
   Future<void> deactivate();
 }
 
+/// Drivers whose gateway depends on the token (UnifiedPush endpoints).
+abstract interface class PushGatewayResolver {
+  /// Returns [configuration] with a complete gateway for [token]. Throws a
+  /// [PushSetupException] when no Matrix gateway can be used.
+  Future<PushConfiguration> resolveGateway(
+    String token,
+    PushConfiguration configuration,
+  );
+}
+
+/// Drivers that surface notification actions besides a plain tap.
+abstract interface class PushActionSource {
+  /// Payloads (same shape as [PushDriver.openedMessages]) for "Mark as read".
+  Stream<Map<String, dynamic>> get markReadMessages;
+}
+
+/// Drivers that let the user pick a delivery app (UnifiedPush distributors).
+abstract interface class PushDistributorSource {
+  /// Installed distributor package names. Empty when none or unsupported.
+  Future<List<String>> distributors();
+}
+
+/// Setup failure with a user-facing explanation.
+class PushSetupException implements Exception {
+  const PushSetupException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// The delivery service withdrew this app's registration.
+class PushRegistrationRevoked implements Exception {
+  const PushRegistrationRevoked(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class PushCleanupException implements Exception {
   const PushCleanupException();
   @override
@@ -346,13 +476,16 @@ class PushNotifications extends ChangeNotifier {
   PushNotifications({
     PushConfiguration? configuration,
     PushDriver? driver,
+    PushDriver? unifiedPushDriver,
     PushStateStore? store,
   }) : _configuration = configuration ?? PushConfiguration.fromEnvironment(),
        _driver = driver ?? FirebasePushDriver(),
+       _unifiedPushDriver = unifiedPushDriver ?? UnifiedPushDriver(),
        _store = store ?? const SecurePushStateStore();
 
   PushConfiguration _configuration;
   final PushDriver _driver;
+  final PushDriver _unifiedPushDriver;
   final PushStateStore _store;
   PushSession? _session;
   PushRegistration? _activeRegistration;
@@ -364,14 +497,24 @@ class PushNotifications extends ChangeNotifier {
       'Push is off. Use only your own gateway and Firebase project.';
   bool _enabled = false;
   bool _disposed = false;
-  bool _driverTouched = false;
+
+  /// The driver that was initialised and still needs deactivation.
+  PushDriver? _touched;
   bool _storedBinding = false;
   int _generation = 0;
   int _tokenRevision = 0;
   int _jobs = 0;
   String? _latestToken;
 
+  bool get _driverTouched => _touched != null;
+
+  /// Handles the notification "Mark as read" action for the current session.
+  /// When unset, the action opens the room instead. Callers must recheck
+  /// [PushNavigationRequest.isCurrent] after every await.
+  Future<void> Function(PushNavigationRequest request)? markReadHandler;
+
   PushConfiguration get configuration => _configuration;
+  PushProvider get provider => _configuration.provider;
   PushStatus get status => _status;
   String get message => _message;
   bool get enabled => _enabled;
@@ -383,6 +526,21 @@ class PushNotifications extends ChangeNotifier {
   /// Snapshot around consent UI; a changed account/config invalidates the dialog.
   int get consentRevision => _generation;
   List<String> get configurationIssues => _configuration.issues;
+
+  PushDriver _driverFor(PushConfiguration configuration) =>
+      configuration.isUnifiedPush ? _unifiedPushDriver : _driver;
+
+  /// Installed UnifiedPush distributors (Android package names). Never
+  /// registers or initialises push.
+  Future<List<String>> unifiedPushDistributors() async {
+    final driver = _unifiedPushDriver;
+    if (driver is! PushDistributorSource) return const [];
+    try {
+      return await (driver as PushDistributorSource).distributors();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   void _emit(PushStatus status, String message) {
     _status = status;
@@ -459,9 +617,12 @@ class PushNotifications extends ChangeNotifier {
     }
     _enabled = true;
     final generation = ++_generation;
+    final unifiedPush = _configuration.isUnifiedPush;
     _emit(
       PushStatus.starting,
-      'Requesting notification permission and registering your device…',
+      unifiedPush
+          ? 'Requesting notification permission and registering with your UnifiedPush distributor…'
+          : 'Requesting notification permission and registering your device…',
     );
     return _enqueue(() async {
       if (!_current(generation)) return;
@@ -471,10 +632,11 @@ class PushNotifications extends ChangeNotifier {
           await _cleanup();
         }
         if (!_current(generation)) return;
-        _driverTouched = true;
-        await _driver.initialize(_configuration);
+        final driver = _driverFor(_configuration);
+        _touched = driver;
+        await driver.initialize(_configuration);
         if (!_current(generation)) return;
-        final permission = await _driver.requestPermission();
+        final permission = await driver.requestPermission();
         if (!_current(generation)) return;
         if (permission != PushPermission.authorized) {
           _enabled = false;
@@ -487,13 +649,13 @@ class PushNotifications extends ChangeNotifier {
           }
           return;
         }
-        _subscribe(generation);
-        final token = await _driver.getToken();
+        _subscribe(generation, driver);
+        final token = await driver.getToken();
         if (!_current(generation)) return;
         final latest = _latestToken ?? token;
         if (latest == null || latest.isEmpty) throw StateError('No push token');
-        await _registerToken(latest, generation, _tokenRevision);
-      } catch (_) {
+        await _registerToken(latest, generation, _tokenRevision, driver);
+      } catch (error) {
         if (generation != _generation || _disposed) return;
         _enabled = false;
         _activeRegistration = null;
@@ -506,16 +668,34 @@ class PushNotifications extends ChangeNotifier {
         if (generation == _generation) {
           _emit(
             PushStatus.error,
-            'Push could not start. Check your Firebase Android app, gateway/project pairing, permission and homeserver connectivity. No delivery is confirmed.',
+            error is PushSetupException
+                ? '${error.message} No delivery is confirmed.'
+                : unifiedPush
+                ? 'UnifiedPush could not start. Check your distributor app (for example ntfy), its Matrix gateway, notification permission and homeserver connectivity. No delivery is confirmed.'
+                : 'Push could not start. Check your Firebase Android app, gateway/project pairing, permission and homeserver connectivity. No delivery is confirmed.',
           );
         }
       }
     });
   }
 
-  void _subscribe(int generation) {
+  PushNavigationRequest _request(
+    PushEnvelope envelope,
+    PushSession session,
+    int generation,
+  ) => PushNavigationRequest._(
+    envelope,
+    session.userId,
+    session.deviceId,
+    () =>
+        _current(generation) &&
+        identical(session, _session) &&
+        _activeRegistration?.registrationId == envelope.registrationId,
+  );
+
+  void _subscribe(int generation, PushDriver driver) {
     _subscriptions.add(
-      _driver.tokenChanges.listen((token) {
+      driver.tokenChanges.listen((token) {
         if (!_current(generation) || token == _latestToken || token.isEmpty) {
           return;
         }
@@ -524,38 +704,57 @@ class PushNotifications extends ChangeNotifier {
         _activeRegistration = null;
         _emit(PushStatus.starting, 'Updating your push registration…');
         _backgroundJob(
-          () => _registerToken(token, generation, revision),
+          () => _registerToken(token, generation, revision, driver),
           generation,
         );
-      }, onError: (Object _) => _streamFailure(generation)),
+      }, onError: (Object error) => _streamFailure(generation, error)),
     );
     _subscriptions.add(
-      _driver.messages.listen((data) {
+      driver.messages.listen((data) {
         _backgroundJob(() async {
           final envelope = _envelope(data, generation);
-          if (envelope != null) await _driver.showNotification(envelope);
+          if (envelope != null) await driver.showNotification(envelope);
         }, generation);
-      }, onError: (Object _) => _streamFailure(generation)),
+      }, onError: (Object error) => _streamFailure(generation, error)),
     );
     _subscriptions.add(
-      _driver.openedMessages.listen((data) {
+      driver.openedMessages.listen((data) {
         _backgroundJob(() async {
           final envelope = _envelope(data, generation);
           final session = _session;
           if (envelope == null || session == null) return;
-          final request = PushNavigationRequest._(
-            envelope,
-            session.userId,
-            session.deviceId,
-            () =>
-                _current(generation) &&
-                identical(session, _session) &&
-                _activeRegistration?.registrationId == envelope.registrationId,
-          );
+          final request = _request(envelope, session, generation);
           if (request.isCurrent) await session.onNavigate(request);
         }, generation);
-      }, onError: (Object _) => _streamFailure(generation)),
+      }, onError: (Object error) => _streamFailure(generation, error)),
     );
+    if (driver is PushActionSource) {
+      _subscriptions.add(
+        (driver as PushActionSource).markReadMessages.listen((data) {
+          _backgroundJob(() async {
+            final envelope = _envelope(data, generation);
+            final session = _session;
+            if (envelope == null ||
+                envelope.eventId == null ||
+                session == null) {
+              return;
+            }
+            final request = _request(envelope, session, generation);
+            if (!request.isCurrent) return;
+            final handler = markReadHandler;
+            if (handler == null) {
+              await session.onNavigate(request);
+              return;
+            }
+            try {
+              await handler(request);
+            } catch (_) {
+              // A failed receipt must not tear down push delivery.
+            }
+          }, generation);
+        }, onError: (Object error) => _streamFailure(generation, error)),
+      );
+    }
   }
 
   PushEnvelope? _envelope(Map<String, dynamic> data, int generation) {
@@ -564,7 +763,11 @@ class PushNotifications extends ChangeNotifier {
     return PushEnvelope.parse(data, registration.registrationId);
   }
 
-  void _backgroundJob(Future<void> Function() job, int generation) {
+  void _backgroundJob(
+    Future<void> Function() job,
+    int generation, {
+    String? failureMessage,
+  }) {
     unawaited(
       _enqueue(() async {
         if (!_current(generation)) return;
@@ -582,7 +785,8 @@ class PushNotifications extends ChangeNotifier {
           if (generation == _generation) {
             _emit(
               PushStatus.error,
-              'Push stopped after a registration or notification failure. Retry cleanup, check your configuration and enable again.',
+              failureMessage ??
+                  'Push stopped after a registration or notification failure. Retry cleanup, check your configuration and enable again.',
             );
           }
         }
@@ -590,14 +794,23 @@ class PushNotifications extends ChangeNotifier {
     );
   }
 
-  void _streamFailure(int generation) => _backgroundJob(() async {
-    throw StateError('Push stream failed');
-  }, generation);
+  void _streamFailure(int generation, [Object? error]) => _backgroundJob(
+    () async {
+      throw StateError('Push stream failed');
+    },
+    generation,
+    failureMessage: switch (error) {
+      PushRegistrationRevoked(:final message) => message,
+      PushSetupException(:final message) => message,
+      _ => null,
+    },
+  );
 
   Future<void> _registerToken(
     String token,
     int generation,
     int revision,
+    PushDriver driver,
   ) async {
     if (!_current(generation) || revision != _tokenRevision) return;
     if (utf8.encode(token).length > 512) {
@@ -608,10 +821,24 @@ class PushNotifications extends ChangeNotifier {
     await _clearBinding();
     await _removeRegistrations();
     if (!_current(generation) || revision != _tokenRevision) return;
+    var configuration = _configuration;
+    if (driver is PushGatewayResolver) {
+      // UnifiedPush: the gateway belongs to the distributor's endpoint.
+      configuration = await (driver as PushGatewayResolver).resolveGateway(
+        token,
+        configuration,
+      );
+      if (!_current(generation) || revision != _tokenRevision) return;
+      if (configuration.gatewayUrl == null || !configuration.isComplete) {
+        throw const PushSetupException(
+          'No usable Matrix push gateway was found for this endpoint.',
+        );
+      }
+    }
     final session = _session!;
     final random = Random.secure();
     final registration = PushRegistration(
-      configuration: _configuration,
+      configuration: configuration,
       userId: session.userId,
       deviceId: session.deviceId,
       token: token,
@@ -630,7 +857,7 @@ class PushNotifications extends ChangeNotifier {
         'user_id': session.userId,
         'device_id': session.deviceId,
         'registration_id': registration.registrationId,
-        'configuration': _configuration.toJson(),
+        'configuration': configuration.toJson(),
       }),
     );
     if (!_current(generation) || revision != _tokenRevision) return;
@@ -638,7 +865,9 @@ class PushNotifications extends ChangeNotifier {
     _activeRegistration = registration;
     _emit(
       PushStatus.active,
-      'Device registered. Live push delivery has not been verified.',
+      configuration.isUnifiedPush
+          ? 'Registered with UnifiedPush via ${configuration.gatewayUrl!.host}. Live delivery has not been verified.'
+          : 'Device registered. Live push delivery has not been verified.',
     );
   }
 
@@ -683,10 +912,11 @@ class PushNotifications extends ChangeNotifier {
     } catch (_) {
       failed = true;
     }
-    if (_driverTouched) {
+    final touched = _touched;
+    if (touched != null) {
       try {
-        await _driver.deactivate();
-        _driverTouched = false;
+        await touched.deactivate();
+        _touched = null;
       } catch (_) {
         failed = true;
       }
@@ -757,7 +987,7 @@ class PushNotifications extends ChangeNotifier {
 }
 
 /// Android production adapter. No plugin/native interaction in its constructor.
-class FirebasePushDriver implements PushDriver {
+class FirebasePushDriver implements PushDriver, PushActionSource {
   FirebasePushDriver();
   FirebaseMessaging? _messaging;
   FlutterLocalNotificationsPlugin? _local;
@@ -767,10 +997,15 @@ class FirebasePushDriver implements PushDriver {
     sync: true,
   );
   final _opened = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final _markRead = StreamController<Map<String, dynamic>>.broadcast(
+    sync: true,
+  );
   @override
   Stream<Map<String, dynamic>> get messages => _messages.stream;
   @override
   Stream<Map<String, dynamic>> get openedMessages => _opened.stream;
+  @override
+  Stream<Map<String, dynamic>> get markReadMessages => _markRead.stream;
   @override
   Stream<String> get tokenChanges => _messaging!.onTokenRefresh;
 
@@ -803,10 +1038,11 @@ class FirebasePushDriver implements PushDriver {
       sound: false,
     );
     _local = FlutterLocalNotificationsPlugin();
-    await _initializeLocal(_local!, (response) {
-      final data = _decodeMap(response.payload);
-      if (data != null) _opened.add(data);
-    });
+    await initializePushLocalNotifications(
+      _local!,
+      onOpen: _opened.add,
+      onMarkRead: _markRead.add,
+    );
     // Register only after explicit consent + validated config, never in main().
     FirebaseMessaging.onBackgroundMessage(matrixPushBackgroundHandler);
     _receivedSubscription = FirebaseMessaging.onMessage.listen(
@@ -849,7 +1085,7 @@ class FirebasePushDriver implements PushDriver {
 
   @override
   Future<void> showNotification(PushEnvelope envelope) =>
-      _showGeneric(_local!, envelope);
+      showGenericPushNotification(_local!, envelope);
 
   @override
   Future<void> deactivate() async {
@@ -894,38 +1130,96 @@ Map<String, dynamic>? _decodeMap(String? value) {
   }
 }
 
-Future<void> _initializeLocal(
-  FlutterLocalNotificationsPlugin local,
-  DidReceiveNotificationResponseCallback? onResponse,
-) async {
+/// Routes local notification taps. Only the locally generated payload is
+/// trusted for shape; ownership is still verified against the live
+/// registration before anything happens.
+@visibleForTesting
+void routePushNotificationResponse(
+  NotificationResponse response, {
+  required void Function(Map<String, dynamic>) onOpen,
+  void Function(Map<String, dynamic>)? onMarkRead,
+}) {
+  final data = _decodeMap(response.payload);
+  if (data == null) return;
+  if (response.actionId == pushMarkReadActionId) {
+    if (onMarkRead != null) onMarkRead(data);
+    return;
+  }
+  if (response.actionId == null || response.actionId!.isEmpty) onOpen(data);
+}
+
+/// Initialises local notifications for generic alerts. [onOpen] receives tap
+/// payloads and [onMarkRead] "Mark as read" action payloads.
+Future<void> initializePushLocalNotifications(
+  FlutterLocalNotificationsPlugin local, {
+  void Function(Map<String, dynamic>)? onOpen,
+  void Function(Map<String, dynamic>)? onMarkRead,
+}) async {
   final initialized = await local.initialize(
     settings: const InitializationSettings(
       android: AndroidInitializationSettings('@drawable/ic_stat_parallax'),
     ),
-    onDidReceiveNotificationResponse: onResponse,
+    onDidReceiveNotificationResponse: onOpen == null
+        ? null
+        : (response) => routePushNotificationResponse(
+            response,
+            onOpen: onOpen,
+            onMarkRead: onMarkRead,
+          ),
   );
   if (initialized != true) throw StateError('Local notifications unavailable');
 }
 
-Future<void> _showGeneric(
+const _genericAndroidDetails = AndroidNotificationDetails(
+  'parallax_messages_v1',
+  'Messages',
+  channelDescription: 'Generic Parallax message alerts',
+  importance: Importance.high,
+  priority: Priority.high,
+  visibility: NotificationVisibility.private,
+  category: AndroidNotificationCategory.message,
+  color: Color(0xFFFF5A36),
+);
+
+/// "Mark as read" brings Parallax forward: receipts need the live, verified
+/// Matrix session, which a background isolate does not have.
+const _markReadAndroidDetails = AndroidNotificationDetails(
+  'parallax_messages_v1',
+  'Messages',
+  channelDescription: 'Generic Parallax message alerts',
+  importance: Importance.high,
+  priority: Priority.high,
+  visibility: NotificationVisibility.private,
+  category: AndroidNotificationCategory.message,
+  color: Color(0xFFFF5A36),
+  actions: [
+    AndroidNotificationAction(
+      pushMarkReadActionId,
+      'Mark as read',
+      showsUserInterface: true,
+      cancelNotification: true,
+    ),
+  ],
+);
+
+/// Generic content only: the room/event IDs ride in the private payload so a
+/// tap or "Mark as read" can be verified, but are never displayed.
+@visibleForTesting
+NotificationDetails genericPushNotificationDetails(PushEnvelope envelope) =>
+    NotificationDetails(
+      android: envelope.eventId == null
+          ? _genericAndroidDetails
+          : _markReadAndroidDetails,
+    );
+
+Future<void> showGenericPushNotification(
   FlutterLocalNotificationsPlugin local,
   PushEnvelope envelope,
 ) => local.show(
   id: 1001, // One generic notification; no private per-room metadata on lockscreen.
   title: PushEnvelope.notificationTitle,
   body: PushEnvelope.notificationBody,
-  notificationDetails: const NotificationDetails(
-    android: AndroidNotificationDetails(
-      'parallax_messages_v1',
-      'Messages',
-      channelDescription: 'Generic Parallax message alerts',
-      importance: Importance.high,
-      priority: Priority.high,
-      visibility: NotificationVisibility.private,
-      category: AndroidNotificationCategory.message,
-      color: Color(0xFFFF5A36),
-    ),
-  ),
+  notificationDetails: genericPushNotificationDetails(envelope),
   payload: jsonEncode(envelope.toJson()),
 );
 
@@ -939,13 +1233,13 @@ Future<void> matrixPushBackgroundHandler(RemoteMessage message) async {
     const store = SecurePushStateStore();
     final raw = await store.read();
     final binding = PushBackgroundBinding.parse(raw);
-    if (binding == null) return;
+    if (binding == null || binding.configuration.isUnifiedPush) return;
     final envelope = binding.envelope(message.data);
     if (envelope == null) return;
     final local = FlutterLocalNotificationsPlugin();
-    await _initializeLocal(local, null);
+    await initializePushLocalNotifications(local);
     if (await store.read() != raw) return;
-    await _showGeneric(local, envelope);
+    await showGenericPushNotification(local, envelope);
   } catch (_) {
     // Never log payloads/account identifiers or synthesize an unbound alert.
   }
