@@ -219,8 +219,10 @@ Future<QrSecretsBundle> exportQrSecretsBundle(
 Future<QrServerIdentity> _serverIdentity(
   matrix.Client client,
   String userId,
-) async {
-  final keys = await client.queryKeys({userId: []}, timeout: 10000);
+) async =>
+    _identityFrom(await client.queryKeys({userId: []}, timeout: 10000), userId);
+
+QrServerIdentity _identityFrom(matrix.QueryKeysResponse keys, String userId) {
   final master = keys.masterKeys?[userId];
   final selfSigning = keys.selfSigningKeys?[userId];
   final userSigning = keys.userSigningKeys?[userId];
@@ -265,14 +267,13 @@ Future<void> importQrSecretsBundle(
 
   // Our device keys are uploaded during Client.init; allow for lag.
   matrix.MatrixDeviceKeys? ownKeys;
-  late QrServerIdentity identity;
+  QrServerIdentity? identity;
   for (var attempt = 0; attempt < 5 && ownKeys == null; attempt++) {
     if (attempt > 0) await Future<void>.delayed(const Duration(seconds: 1));
     final keys = await client.queryKeys({userId: []}, timeout: 10000);
     check();
     ownKeys = keys.deviceKeys?[userId]?[deviceId];
-    identity = await _serverIdentity(client, userId);
-    check();
+    identity = _identityFrom(keys, userId);
   }
   if (ownKeys == null ||
       ownKeys.keys['ed25519:$deviceId'] != client.fingerprintKey ||
@@ -280,7 +281,7 @@ Future<void> importQrSecretsBundle(
     throw const QrSecretsException('This device has not published its keys');
   }
   await verifyCrossSigningSecrets(
-    identity: identity,
+    identity: identity!,
     masterPrivate: bundle.masterKey,
     selfSigningPrivate: bundle.selfSigningKey,
     userSigningPrivate: bundle.userSigningKey,

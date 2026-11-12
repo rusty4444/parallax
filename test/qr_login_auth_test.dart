@@ -53,6 +53,7 @@ class _FakeMas {
     },
   ];
   String? scopeDevice;
+  bool rejectStableScopes = false;
   String? whoamiDevice;
   Map<String, Object?> deviceResponse = {
     'device_code': 'secret-device-code',
@@ -93,6 +94,9 @@ class _FakeMas {
     }
     if (path == '/oauth2/device') {
       final scope = request.bodyFields['scope']!;
+      if (rejectStableScopes && scope.startsWith('urn:matrix:client:')) {
+        return _json({'error': 'invalid_scope'}, 400);
+      }
       scopeDevice = scope.split(' ').last.split(':').last;
       return _json(deviceResponse);
     }
@@ -126,6 +130,8 @@ class _Database implements matrix.DatabaseApi {
   Map<String, dynamic>? account;
   @override
   Future<Map<String, dynamic>?> getClient(String name) async => account;
+  @override
+  Future<void> close() async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -269,6 +275,26 @@ void main() {
       'expires': true,
     });
     expect(storage.values.values, contains('device-client'));
+  });
+
+  test('falls back to MSC2967 scopes when stable ones are refused', () async {
+    mas.rejectStableScopes = true;
+    await service.deviceAuthorizationLogin(
+      _hs,
+      delay: fastWait,
+      onGrant: (_) async {},
+    );
+    final scopes = mas.requests
+        .where((r) => r.url.path == '/oauth2/device')
+        .map((r) => r.bodyFields['scope'])
+        .toList();
+    expect(scopes, hasLength(2));
+    expect(
+      scopes.last,
+      'urn:matrix:org.matrix.msc2967.client:api:* '
+      'urn:matrix:org.matrix.msc2967.client:device:${mas.scopeDevice}',
+    );
+    expect(client.inits, hasLength(1));
   });
 
   test('reuses the cached device-grant registration', () async {

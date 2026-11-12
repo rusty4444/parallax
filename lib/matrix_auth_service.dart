@@ -868,15 +868,38 @@ class MatrixAuthService {
     final clientId = await _deviceGrantClient(metadata, pin);
     checkCancelled();
     final device = matrix.generateRandomDeviceId();
-    final authorization = await _jsonRequest(
-      'POST',
-      metadata.deviceAuthorization,
-      pin,
-      form: {
-        'client_id': clientId,
-        'scope': 'urn:matrix:client:api:* urn:matrix:client:device:$device',
-      },
-    );
+    // Stable scopes as matrix-rust-sdk; providers that predate them get the
+    // MSC2967 names the browser sign-in uses.
+    Map<String, dynamic>? authorization;
+    for (final prefix in [
+      'urn:matrix:client',
+      'urn:matrix:org.matrix.msc2967.client',
+    ]) {
+      final (status, json) = await _exchange(
+        'POST',
+        metadata.deviceAuthorization,
+        pin,
+        form: {
+          'client_id': clientId,
+          'scope': '$prefix:api:* $prefix:device:$device',
+        },
+      );
+      if (status >= 200 && status < 300 && json is Map<String, dynamic>) {
+        authorization = json;
+        break;
+      }
+      if (json is Map && json['error'] == 'invalid_scope') continue;
+      throw MatrixAuthException(
+        'The authentication server could not complete the request.',
+        statusCode: status,
+        retryable: status >= 500 || status == 408 || status == 429,
+      );
+    }
+    if (authorization == null) {
+      throw const DeviceAuthorizationException(
+        DeviceAuthorizationFailure.unsupported,
+      );
+    }
     final deviceCode = _required(authorization, 'device_code');
     final userCode = _required(authorization, 'user_code');
     final verification = _verificationUri(
