@@ -11,6 +11,7 @@ class ReactionSender {
     required this.emoji,
     required this.userId,
     this.displayName,
+    this.avatarUrl,
     this.time,
   });
 
@@ -19,6 +20,9 @@ class ReactionSender {
 
   /// Display name from cached room membership, if known.
   final String? displayName;
+
+  /// Profile photo (`mxc://`) from cached room membership, if known.
+  final Uri? avatarUrl;
   final DateTime? time;
 
   String get label =>

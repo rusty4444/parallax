@@ -11,6 +11,7 @@ import 'package:parallax/hooks/hook_types.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reactions_fakes.dart';
+import 'package:parallax/room_avatar.dart';
 
 const _roomId = fakeRoomId;
 final _palette = paletteFor(defaultVisualTheme);
@@ -199,11 +200,12 @@ void main() {
   testWidgets('reaction summary lists who reacted per emoji', (tester) async {
     _phone(tester);
     final backend = FakeReactionsBackend()
-      ..senders = const [
+      ..senders = [
         ReactionSender(
           emoji: '👍',
           userId: '@alice:matrix.example',
           displayName: 'Alice',
+          avatarUrl: Uri.parse('mxc://matrix.example/alicePhoto'),
         ),
         ReactionSender(emoji: '👍', userId: '@sam:matrix.example'),
         ReactionSender(
@@ -222,6 +224,15 @@ void main() {
     await _runAction(tester, backend, entry, 'Reactions');
     expect(find.text('Alice'), findsOneWidget);
     expect(find.text('@sam:matrix.example (you)'), findsOneWidget);
+    // Each person's photo, not just an initial.
+    final alice = tester.widget<UserAvatar>(
+      find.descendant(
+        of: find.byKey(const ValueKey('reaction-sender-@alice:matrix.example')),
+        matching: find.byType(UserAvatar),
+      ),
+    );
+    expect(alice.url, Uri.parse('mxc://matrix.example/alicePhoto'));
+    expect(alice.backend, same(backend));
     expect(find.text('Bob'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('reaction-tab-🎉')));
     await tester.pumpAndSettle();

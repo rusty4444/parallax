@@ -6,6 +6,7 @@ import '../../feature_settings_scope.dart';
 import '../../widgets.dart';
 import 'message_action_features.dart';
 import '../packs/pack_image.dart' show reactionKeyLabel;
+import '../../room_avatar.dart';
 
 /// Element X ReactionSummary: who reacted with each emoji.
 Future<void> showReactionSummary(
@@ -228,8 +229,10 @@ class _ReactionSummarySheetState extends State<ReactionSummarySheet> {
                         final time = sender.time;
                         return ListTile(
                           key: ValueKey('reaction-sender-${sender.userId}'),
-                          leading: InitialAvatar(
+                          leading: UserAvatar(
                             name: sender.label,
+                            url: sender.avatarUrl,
+                            backend: widget.backend,
                             palette: p,
                             size: 40,
                           ),

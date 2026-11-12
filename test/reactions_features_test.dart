@@ -244,7 +244,11 @@ void main() {
           'sender': '@alice:matrix.example',
           'event_id': r'$m',
           'origin_server_ts': 1,
-          'content': {'membership': 'join', 'displayname': 'Alice'},
+          'content': {
+            'membership': 'join',
+            'displayname': 'Alice',
+            'avatar_url': 'mxc://matrix.example/alicePhoto',
+          },
         }, h.room),
       );
       Map<String, Object?> reaction(
@@ -313,6 +317,12 @@ void main() {
         '👍 Alice',
         '👍 @bob:matrix.example',
         '🎉 @carol:matrix.example',
+      ]);
+      // Photos come from the same cached membership (no extra requests).
+      expect(senders.map((s) => s.avatarUrl?.toString()), [
+        'mxc://matrix.example/alicePhoto',
+        null,
+        null,
       ]);
       expect(h.requests, hasLength(2));
     });

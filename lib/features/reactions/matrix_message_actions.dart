@@ -182,6 +182,7 @@ class MatrixMessageActions implements MessageActionFeatures {
             emoji: key,
             userId: event.senderId,
             displayName: _cachedName(room, event.senderId),
+            avatarUrl: _cachedAvatar(room, event.senderId),
             time: event.originServerTs,
           ),
         );
@@ -203,6 +204,18 @@ class MatrixMessageActions implements MessageActionFeatures {
         .getState(matrix.EventTypes.RoomMember, userId)
         ?.content['displayname'];
     return name is String && name.trim().isNotEmpty ? name : null;
+  }
+
+  /// The member's photo from the same cached membership event.
+  Uri? _cachedAvatar(matrix.Room room, String userId) {
+    final url = room
+        .getState(matrix.EventTypes.RoomMember, userId)
+        ?.content['avatar_url'];
+    if (url is! String || !url.startsWith('mxc://')) return null;
+    final uri = Uri.tryParse(url);
+    return uri != null && uri.host.isNotEmpty && uri.pathSegments.length == 1
+        ? uri
+        : null;
   }
 
   @override
