@@ -8,6 +8,22 @@ import 'notification_model.dart';
 
 /// The event could not be described (still encrypted, unsupported type …):
 /// the caller shows the generic notification.
+/// Event types that never produce a notification (live-location beacons
+/// and MatrixRTC call membership), even when the push rules notify.
+const silentPushEventTypes = {
+  'm.beacon',
+  'org.matrix.msc3672.beacon',
+  'm.call.member',
+  'org.matrix.msc3401.call.member',
+};
+
+/// The decrypted event is one Parallax deliberately doesn't notify for.
+class SilentPushEvent implements Exception {
+  const SilentPushEvent();
+  @override
+  String toString() => 'Event does not notify';
+}
+
 class UndescribablePushEvent implements Exception {
   const UndescribablePushEvent();
   @override
@@ -38,6 +54,9 @@ Future<ResolvedPushEvent> projectPushEvent({
   bool loadMediaPreview = true,
   DateTime? now,
 }) async {
+  if (silentPushEventTypes.contains(event.type)) {
+    throw const SilentPushEvent();
+  }
   final sender = event.senderFromMemoryOrFallback;
   final senderName =
       sanitiseNotificationName(sender.calcDisplayname()) ??

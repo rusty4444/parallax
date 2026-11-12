@@ -22,6 +22,7 @@ Widget buildMessageText(
 }) {
   final features = richTimelineFeaturesOf(ctx.backend);
   return MessageContentView(
+    backend: ctx.backend,
     entry: ctx.entry,
     style: style,
     palette: ctx.palette,

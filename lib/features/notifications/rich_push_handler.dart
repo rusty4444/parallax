@@ -10,6 +10,7 @@ import 'notification_content.dart';
 import 'notification_model.dart';
 import 'notification_renderer.dart';
 import 'notification_store.dart';
+import 'matrix_push_projection.dart' show SilentPushEvent;
 
 /// Fetches and decrypts the envelope's event. Returns null when the event
 /// was already read (nothing to show); throws when it cannot be resolved.
@@ -131,6 +132,9 @@ class RichPushHandler {
       );
       await _refreshSummary(fallback: [thread]);
       return RichPushOutcome.rich;
+    } on SilentPushEvent {
+      // Live-location beacons and call membership never notify.
+      return RichPushOutcome.skipped;
     } catch (_) {
       if (!_isCurrent()) return RichPushOutcome.skipped;
       return _generic(envelope);

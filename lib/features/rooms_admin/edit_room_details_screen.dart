@@ -218,7 +218,9 @@ class _EditRoomDetailsScreenState extends State<EditRoomDetailsScreen> {
             controller: _name,
             enabled: details.can(RoomAction.name) && !_saving,
             maxLength: 255,
-            decoration: const InputDecoration(labelText: 'Room name'),
+            decoration: InputDecoration(
+              labelText: details.isSpace ? 'Space name' : 'Room name',
+            ),
           ),
           const SizedBox(height: 12),
           TextField(

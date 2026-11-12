@@ -17,6 +17,8 @@ import 'push_notifications.dart';
 import 'room_screen.dart';
 import 'security_overlay.dart';
 import 'widgets.dart';
+import 'features/live_location/live_location_hooks.dart'
+    show liveLocationBeforeLogout;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -109,7 +111,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                 sendReadReceipts: () => _preferences.sendReadReceipts,
               )
             : MatrixBackend(
-                beforeLogout: _notifications.logout,
+                beforeLogout: _beforeLogout,
                 sendReadReceipts: () => _preferences.sendReadReceipts,
                 sendTypingNotifications: () =>
                     _preferences.sendTypingNotifications,
@@ -447,6 +449,18 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     } catch (_) {
       debugPrint('Parallax theme preference could not be saved.');
     }
+  }
+
+  /// Runs before the Matrix session ends: end live-location shares on the
+  /// server while writes still work, then remove pushers. A share that can't
+  /// be ended in time expires at its own timeout.
+  Future<void> _beforeLogout() async {
+    try {
+      await liveLocationBeforeLogout(
+        _backend,
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+    await _notifications.logout();
   }
 
   @override

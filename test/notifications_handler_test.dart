@@ -12,6 +12,8 @@ import 'package:parallax/features/notifications/rich_push_handler.dart';
 import 'package:parallax/push_notifications.dart';
 
 import 'notifications_fakes.dart';
+import 'package:parallax/features/notifications/matrix_push_projection.dart'
+    show SilentPushEvent, silentPushEventTypes;
 
 const registration = 'RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR';
 const room = '!room:example.org';
@@ -252,6 +254,17 @@ void main() {
       ).handle(envelope());
       expect(outcome, RichPushOutcome.generic);
       expect(surface.generic, hasLength(1));
+    });
+
+    test('live-location beacons and call membership never notify', () async {
+      expect(silentPushEventTypes, contains('org.matrix.msc3672.beacon'));
+      expect(silentPushEventTypes, contains('m.call.member'));
+      final outcome = await handler(
+        (_, _) async => throw const SilentPushEvent(),
+      ).handle(envelope());
+      expect(outcome, RichPushOutcome.skipped);
+      expect(surface.generic, isEmpty);
+      expect(surface.shown, isEmpty);
     });
 
     test('a slow fetch times out into the generic notification', () async {

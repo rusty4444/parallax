@@ -5,6 +5,7 @@ import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../widgets.dart';
 import 'message_action_features.dart';
+import '../packs/pack_image.dart' show reactionKeyLabel;
 
 /// Element X ReactionSummary: who reacted with each emoji.
 Future<void> showReactionSummary(
@@ -178,7 +179,8 @@ class _ReactionSummarySheetState extends State<ReactionSummarySheet> {
                           borderRadius: BorderRadius.circular(18),
                         ),
                         label: Text(
-                          '${tab.emoji}  ${tab.count}',
+                          // Custom (MSC4027) reactions show their shortcode.
+                          '${reactionKeyLabel(widget.backend, widget.roomId, tab.emoji)}  ${tab.count}',
                           style: TextStyle(
                             color: p.foreground,
                             fontWeight: FontWeight.w600,

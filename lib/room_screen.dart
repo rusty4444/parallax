@@ -24,6 +24,7 @@ import 'room_details_screen.dart';
 import 'room_draft_owner.dart';
 import 'timeline/timeline_view.dart';
 import 'widgets.dart';
+import 'features/composer/edit_markdown.dart';
 
 class RoomScreen extends StatelessWidget {
   const RoomScreen({
@@ -775,7 +776,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         _advanceComposerContext();
         _editing = entry;
         _replyingTo = null;
-        _setDraft(entry.body);
+        // Element X formatting survives editing (HTML → composer markdown).
+        _setDraft(composerTextForEdit(entry));
       });
     } else if (choice == 'delete') {
       final confirmed = await showDialog<bool>(

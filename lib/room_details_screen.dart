@@ -24,6 +24,7 @@ import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'room_avatar.dart';
 import 'room_details.dart';
+import 'features/packs/packs_hooks.dart' show packsRoomDetailsSections;
 
 /// Element X style "Room info": header, quick actions and the room's
 /// settings sections. Everything permission-related comes from a fresh server
@@ -302,9 +303,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 ..._sections(details, idle),
                 // Timeline features (pins, threads, media, polls) do not
                 // apply to a Space; only Space management does.
-                if (space)
-                  ...spacesAdminRoomDetailsSections(context, _hookContext)
-                else
+                if (space) ...[
+                  ...spacesAdminRoomDetailsSections(context, _hookContext),
+                  // Space-wide emoji and sticker packs (MSC2545).
+                  ...packsRoomDetailsSections(context, _hookContext),
+                ] else
                   ...roomDetailsSectionsFor(context, _hookContext),
               ],
             ),
