@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'message_image.dart';
+import 'timeline/double_tap_react.dart';
 
 class GalleryBubble extends StatelessWidget {
   const GalleryBubble({
@@ -26,21 +27,20 @@ class GalleryBubble extends StatelessWidget {
   final ValueChanged<ChatEntry> onAction;
   final void Function(ChatEntry, String) onReaction;
 
-  Widget _photo(ChatEntry entry, double width, double height) =>
-      GestureDetector(
-        onDoubleTap: () => onHeart(entry),
-        onLongPress: () => onAction(entry),
-        child: MessageImage(
-          key: ValueKey(entry.id),
-          backend: backend,
-          palette: palette,
-          roomId: roomId,
-          eventId: entry.id,
-          entry: entry,
-          width: width,
-          height: height,
-        ),
-      );
+  Widget _photo(ChatEntry entry, double width, double height) => DoubleTapReact(
+    onDoubleTap: () => onHeart(entry),
+    onLongPress: () => onAction(entry),
+    child: MessageImage(
+      key: ValueKey(entry.id),
+      backend: backend,
+      palette: palette,
+      roomId: roomId,
+      eventId: entry.id,
+      entry: entry,
+      width: width,
+      height: height,
+    ),
+  );
 
   Widget _layout(double width) {
     final half = (width - 4) / 2;

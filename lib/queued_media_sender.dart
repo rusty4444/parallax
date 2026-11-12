@@ -12,6 +12,7 @@ import 'features/media/voice_waveform.dart';
 import 'homeserver_security.dart';
 import 'messaging_features.dart';
 import 'send_cancellation.dart';
+import 'features/media/video_prep.dart';
 
 /// Uploads only after preparation/encryption, then uses the stable outbox txid.
 ///
@@ -36,6 +37,7 @@ Future<void> sendQueuedAttachment({
   Timer Function(Duration, void Function())? createUploadTimer,
   MediaUploadOptions? uploadOptions,
   ImagePreparer? prepareImage,
+  Future<VideoInfo?> Function(Uint8List bytes)? probeVideo,
 }) async {
   final encryptedRoom = room.encrypted;
   void check() {
@@ -90,6 +92,17 @@ Future<void> sendQueuedAttachment({
     throw ArgumentError('Attachment exceeds the homeserver upload limit');
   }
   final voice = _voiceMetadata(media);
+  // Videos: dimensions, duration and a poster frame, read natively. A video
+  // that can't be read is still sent (players show it without a poster).
+  VideoInfo? video;
+  if (isVideoMime(media.mimeType)) {
+    try {
+      video = await (probeVideo ?? probeVideoBytes)(media.bytes);
+    } catch (_) {
+      video = null;
+    }
+    check();
+  }
   final file = prepared != null
       ? matrix.MatrixImageFile(
           bytes: prepared.bytes,
@@ -104,6 +117,15 @@ Future<void> sendQueuedAttachment({
           name: media.name,
           mimeType: media.mimeType,
           duration: media.durationMs,
+        )
+      : isVideoMime(media.mimeType)
+      ? matrix.MatrixVideoFile(
+          bytes: media.bytes,
+          name: media.name,
+          mimeType: media.mimeType,
+          width: video?.width,
+          height: video?.height,
+          duration: video?.durationMs ?? media.durationMs,
         )
       : matrix.MatrixFile.fromMimeType(
           bytes: media.bytes,
@@ -123,9 +145,9 @@ Future<void> sendQueuedAttachment({
     '$base/_matrix/media/v3/upload',
   ).replace(queryParameters: {'filename': filename});
   final info = Map<String, dynamic>.of(file.info);
-  final thumbnail = prepared?.thumbnail;
-  if (prepared != null && thumbnail != null) {
-    final thumbMime = prepared.thumbnailMimeType ?? 'image/jpeg';
+  final thumbnail = prepared?.thumbnail ?? video?.thumbnail;
+  if (thumbnail != null) {
+    final thumbMime = prepared?.thumbnailMimeType ?? 'image/jpeg';
     final thumbFile = matrix.MatrixFile(
       bytes: thumbnail,
       name: thumbMime == 'image/png' ? 'thumbnail.png' : 'thumbnail.jpg',
@@ -148,8 +170,8 @@ Future<void> sendQueuedAttachment({
       createTimer: createUploadTimer ?? Timer.new,
     );
     info['thumbnail_info'] = {
-      'w': prepared.thumbnailWidth,
-      'h': prepared.thumbnailHeight,
+      'w': prepared?.thumbnailWidth ?? video?.thumbnailWidth,
+      'h': prepared?.thumbnailHeight ?? video?.thumbnailHeight,
       'mimetype': thumbMime,
       'size': thumbnail.length,
     };

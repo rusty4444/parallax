@@ -16,10 +16,11 @@ import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
 import 'haptics.dart';
+import 'features/media/video_prep.dart';
 
 typedef MediaPicker = Future<MediaSelection?> Function();
 
-enum _MediaSource { gallery, camera, file }
+enum _MediaSource { gallery, camera, video, file }
 
 enum _VoiceMode { idle, requesting, recording, stopping }
 
@@ -41,6 +42,7 @@ class RichMessageComposer extends StatefulWidget {
     this.onChanged,
     this.pickGallery,
     this.pickCamera,
+    this.pickVideo,
     this.pickFile,
     this.recorder,
     this.extraAttachments = const [],
@@ -68,6 +70,9 @@ class RichMessageComposer extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final MediaPicker? pickGallery;
   final MediaPicker? pickCamera;
+
+  /// Records a video with the camera (default: system camera app).
+  final MediaPicker? pickVideo;
   final MediaPicker? pickFile;
   final VoiceRecorder? recorder;
 
@@ -114,6 +119,9 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   bool _background = false;
   bool _sendOwned = false;
   bool _pickOwned = false;
+
+  /// A picked video is being read or compressed.
+  bool _preparingVideo = false;
   bool _sourceSheetOpen = false;
   bool _emojiSheetOpen = false;
   bool _playing = false;
@@ -416,21 +424,53 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     return _fromFile(image);
   }
 
-  Future<MediaSelection> _fromFile(XFile file) async => MediaSelection(
-    bytes: await readComposerMedia(
-      file.openRead(),
-      length: await file.length(),
-    ),
-    name: file.name,
-    mimeType: file.mimeType ?? _mimeFor(file.name),
-  );
+  /// Gallery: photos and videos.
+  Future<MediaSelection?> _pickGalleryMedia() async {
+    final picked = await ImagePicker().pickMedia();
+    if (picked == null) return null;
+    return _fromFile(picked);
+  }
+
+  Future<MediaSelection?> _recordVideo() async {
+    final video = await ImagePicker().pickVideo(
+      source: ImageSource.camera,
+      maxDuration: const Duration(minutes: 4),
+    );
+    if (video == null) return null;
+    return _fromFile(video);
+  }
+
+  Future<MediaSelection> _fromFile(XFile file) async {
+    final mimeType = file.mimeType ?? _mimeFor(file.name);
+    if (isVideoMime(mimeType)) {
+      // Large or high-resolution videos are compressed to fit (native).
+      if (_alive) setState(() => _preparingVideo = true);
+      try {
+        return await prepareVideoForSending(file, mimeType: mimeType);
+      } finally {
+        if (_alive) setState(() => _preparingVideo = false);
+      }
+    }
+    return MediaSelection(
+      bytes: await readComposerMedia(
+        file.openRead(),
+        length: await file.length(),
+      ),
+      name: file.name,
+      mimeType: mimeType,
+    );
+  }
 
   Future<MediaSelection?> _pickFile() async {
     final file = await FilePicker.pickFile(dialogTitle: 'Attach a file');
     if (file == null) return null;
     // xFile handles Android SAF content and provider-backed cached files.
     final length = await file.length();
-    if (length != null && length > RichMessageComposer.maxMediaBytes) {
+    final video = isVideoMime(_mimeFor(file.name));
+    // Videos are compressed to fit; other files must already fit.
+    if (!video &&
+        length != null &&
+        length > RichMessageComposer.maxMediaBytes) {
       throw const FormatException('Attachments must be 20 MB or smaller.');
     }
     return _fromFile(file.xFile);
@@ -484,11 +524,23 @@ class _RichMessageComposerState extends State<RichMessageComposer>
             children: [
               const ListTile(
                 title: Text('Attach media'),
-                subtitle: Text('One attachment · up to 20 MB'),
+                subtitle: Text(
+                  'One attachment · up to 20 MB · longer videos are '
+                  'compressed to fit',
+                ),
               ),
               for (final item in [
-                (_MediaSource.gallery, Icons.photo_library_outlined, 'Gallery'),
-                (_MediaSource.camera, Icons.photo_camera_outlined, 'Camera'),
+                (
+                  _MediaSource.gallery,
+                  Icons.photo_library_outlined,
+                  'Photo or video',
+                ),
+                (
+                  _MediaSource.camera,
+                  Icons.photo_camera_outlined,
+                  'Take photo',
+                ),
+                (_MediaSource.video, Icons.videocam_outlined, 'Record video'),
                 (_MediaSource.file, Icons.insert_drive_file_outlined, 'File'),
               ])
                 ListTile(
@@ -536,10 +588,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       _error = null;
     });
     final picker = switch (source) {
-      _MediaSource.gallery =>
-        widget.pickGallery ?? () => _pickImage(ImageSource.gallery),
+      _MediaSource.gallery => widget.pickGallery ?? _pickGalleryMedia,
       _MediaSource.camera =>
         widget.pickCamera ?? () => _pickImage(ImageSource.camera),
+      _MediaSource.video => widget.pickVideo ?? _recordVideo,
       _MediaSource.file => widget.pickFile ?? _pickFile,
     };
     unawaited(() async {
@@ -1272,6 +1324,22 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                     ),
                   ],
                 ),
+              ),
+            ),
+          if (_preparingVideo)
+            const Padding(
+              key: ValueKey('composer-preparing-video'),
+              padding: EdgeInsets.only(left: 12, bottom: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 10),
+                  Text('Preparing video…'),
+                ],
               ),
             ),
           if (_media != null) _attachmentPreview(_media!),

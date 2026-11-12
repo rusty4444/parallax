@@ -192,7 +192,7 @@ void main() {
       backend.transport.acknowledge();
       await tester.pumpAndSettle();
       expect(find.text(createdId), findsOneWidget);
-      backend.roomList.add(createdRoom);
+      backend.roomList = [...backend.roomList, createdRoom];
       backend.notifyListeners();
       await tester.pumpAndSettle();
       expect(backend.activeRoomId, createdId);
@@ -217,7 +217,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(createdId), findsOneWidget);
       expect(_createButton(tester).onPressed, isNull);
-      backend.roomList.add(createdRoom);
+      backend.roomList = [...backend.roomList, createdRoom];
       backend.notifyListeners();
       await tester.pumpAndSettle();
       expect(backend.activeRoomId, createdId);
@@ -243,7 +243,7 @@ void main() {
         backend.notifyListeners();
       }
       backend.transport.acknowledge();
-      backend.roomList.add(createdRoom);
+      backend.roomList = [...backend.roomList, createdRoom];
       backend.notifyListeners();
       await tester.pumpAndSettle();
       expect(backend.activeRoomId, isNull);
@@ -446,7 +446,7 @@ void main() {
       isCurrent: () => current,
     );
     current = false;
-    backend.roomList.add(createdRoom);
+    backend.roomList = [...backend.roomList, createdRoom];
     backend.notifyListeners();
     expect(await first.result, isFalse);
     expect(backend.hasActiveListeners, isFalse);
@@ -484,7 +484,7 @@ void main() {
       await tester.ensureVisible(find.text('Open created room'));
       await tester.tap(find.text('Open created room'));
       await tester.pump();
-      backend.roomList.add(createdRoom);
+      backend.roomList = [...backend.roomList, createdRoom];
       backend.notifyListeners();
       await tester.pumpAndSettle();
       expect(backend.creates, 1);
@@ -502,7 +502,7 @@ void main() {
     await tester.pump();
     // Only the session-owned create record remains, not the route/sync wait.
     expect(backend.listenerCount, 1);
-    backend.roomList.add(createdRoom);
+    backend.roomList = [...backend.roomList, createdRoom];
     backend.notifyListeners();
     await tester.pump();
     expect(backend.activeRoomId, isNull);
@@ -515,7 +515,7 @@ void main() {
     final backend = _DelayedBackend()..currentUserId = '@alice:example.org';
     await _startCreation(tester, backend);
     backend.currentUserId = '@bob:example.org';
-    backend.roomList.add(createdRoom);
+    backend.roomList = [...backend.roomList, createdRoom];
     backend.notifyListeners();
     await tester.pumpAndSettle();
     expect(backend.activeRoomId, isNull);

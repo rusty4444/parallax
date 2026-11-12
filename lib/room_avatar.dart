@@ -129,6 +129,7 @@ class _AvatarFace extends StatefulWidget {
 
 class _AvatarFaceState extends State<_AvatarFace> {
   Future<Uint8List?>? _image;
+  Uint8List? _cached;
 
   @override
   void initState() {
@@ -138,7 +139,12 @@ class _AvatarFaceState extends State<_AvatarFace> {
 
   void _load() {
     final url = widget.url;
-    _image = url == null ? null : widget.backend.loadAvatar(url);
+    _cached = url == null ? null : widget.backend.cachedAvatar(url);
+    _image = url == null
+        ? null
+        : _cached != null
+        ? Future.value(_cached)
+        : widget.backend.loadAvatar(url);
   }
 
   @override
@@ -162,6 +168,8 @@ class _AvatarFaceState extends State<_AvatarFace> {
       label: widget.name,
       child: FutureBuilder<Uint8List?>(
         future: image,
+        // Cached avatars draw on the first frame (no initial flash).
+        initialData: _cached,
         builder: (context, snapshot) => snapshot.data == null
             ? fallback
             : ClipOval(

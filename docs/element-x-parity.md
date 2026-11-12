@@ -52,7 +52,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Sharing and viewing a static location | Built | OpenStreetMap tiles. |
 | Voice messages with waveforms; audio, video, files, stickers, captions | Built | `lib/features/media/`. If the app restarts before a voice message sends, the waveform is lost. |
 | Media viewer (swipe, share, save, info) and room media gallery | Built | |
-| Optimised image uploads | Built | No video compression. Per-upload quality is **off in Element X**. |
+| Optimised image uploads | Built | Videos over 20 MB or above 1080p are compressed to 720p on the device (Media3 Transformer) and sent with a poster frame, size and duration. Per-upload quality is **off in Element X**. |
 | Copy text, copy link, view source, report content | Built | |
 | Jump to a message (search results, permalinks) | Partial | The room opens on the message and marks it, but doesn't scroll or animate to it. |
 | @-mention suggestions, markdown, `/me` | Built | |

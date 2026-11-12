@@ -92,6 +92,7 @@ Future<void> mount(
   required Future<void> Function(String, MediaSelection?) onSend,
   MediaPicker? pickGallery,
   MediaPicker? pickCamera,
+  MediaPicker? pickVideo,
   MediaPicker? pickFile,
   VoiceRecorder? recorder,
   ValueChanged<String>? onChanged,
@@ -110,6 +111,7 @@ Future<void> mount(
           onCancel: onCancel,
           pickGallery: pickGallery,
           pickCamera: pickCamera,
+          pickVideo: pickVideo,
           pickFile: pickFile,
           recorder: recorder,
         ),
@@ -162,6 +164,27 @@ Future<void> flushCleanup(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('Record video attaches the recorded clip', (tester) async {
+    final clip = MediaSelection(
+      bytes: Uint8List.fromList(List.filled(64, 1)),
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+      durationMs: 3000,
+    );
+    MediaSelection? sent;
+    await mount(
+      tester,
+      controller: TextEditingController(),
+      onSend: (_, media) async => sent = media,
+      pickVideo: () async => clip,
+    );
+    await choose(tester, 'Record video');
+    expect(find.text('clip.mp4'), findsWidgets);
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(sent, same(clip));
+  });
+
   testWidgets('message box sits above the composer buttons at full width', (
     tester,
   ) async {
@@ -344,8 +367,8 @@ void main() {
       onSend: (_, _) async {},
       pickGallery: () async => picks++ == 0 ? attachment('photo.jpg') : null,
     );
-    await choose(tester, 'Gallery');
-    await choose(tester, 'Gallery', replace: true);
+    await choose(tester, 'Photo or video');
+    await choose(tester, 'Photo or video', replace: true);
     expect(find.text('photo.jpg'), findsOneWidget);
     await tester.tap(find.byTooltip('Remove attachment'));
     await tester.pumpAndSettle();
@@ -363,7 +386,7 @@ void main() {
         pickCamera: () async => attachment('camera.jpg'),
         pickFile: () async => throw StateError('permission denied'),
       );
-      await choose(tester, 'Camera');
+      await choose(tester, 'Take photo');
       expect(find.text('camera.jpg'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField)).decoration!.hintText,
@@ -615,7 +638,7 @@ void main() {
     attach();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Gallery'), findsOneWidget);
+    expect(find.text('Photo or video'), findsOneWidget);
     final tile = tester.widget<ListTile>(
       find.ancestor(of: find.text('File'), matching: find.byType(ListTile)),
     );

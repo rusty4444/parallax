@@ -1,12 +1,100 @@
 import 'package:flutter/material.dart';
 
 import 'appearance_preferences.dart';
+import 'app_theme.dart';
+import 'features/reactions/emoji_picker_sheet.dart';
 
 /// Edits an app-owned model; this route never disposes [preferences].
 class AppearanceSettingsScreen extends StatelessWidget {
-  const AppearanceSettingsScreen({super.key, required this.preferences});
+  const AppearanceSettingsScreen({
+    super.key,
+    required this.preferences,
+    this.palette,
+  });
 
   final AppearancePreferences preferences;
+
+  /// Colours for the full emoji picker (defaults to the Parallax palette).
+  final AppPalette? palette;
+
+  /// Offered first when choosing the double-tap reaction.
+  static const quickReactionChoices = [
+    '❤️',
+    '👍',
+    '😂',
+    '😮',
+    '😢',
+    '🙏',
+    '🔥',
+    '🎉',
+    '👏',
+    '😍',
+    '💯',
+    '✅',
+  ];
+
+  Future<void> _chooseQuickReaction(BuildContext context) async {
+    final current = preferences.quickReaction;
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Double-tap reaction',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final emoji in quickReactionChoices)
+                    ChoiceChip(
+                      key: ValueKey('quick-reaction-$emoji'),
+                      label: Text(emoji, style: const TextStyle(fontSize: 22)),
+                      selected: emoji == current,
+                      showCheckmark: false,
+                      onSelected: (_) => Navigator.pop(sheetContext, emoji),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                key: const ValueKey('quick-reaction-more'),
+                onPressed: () async {
+                  final emoji = await showEmojiPickerSheet(
+                    sheetContext,
+                    palette: palette ?? paletteFor(VisualTheme.parallax),
+                    forReaction: true,
+                  );
+                  if (emoji != null && sheetContext.mounted) {
+                    Navigator.pop(sheetContext, emoji);
+                  }
+                },
+                icon: const Icon(Icons.add_reaction_outlined),
+                label: const Text('More emoji…'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (chosen == null || !context.mounted) return;
+    if (!AppearancePreferences.isQuickReaction(chosen)) {
+      // Custom pack emoji (mxc) and multi-emoji picks can't be a quick reaction.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose a single standard emoji.')),
+      );
+      return;
+    }
+    await _save(context, () => preferences.setQuickReaction(chosen));
+  }
 
   Future<void> _save(
     BuildContext context,
@@ -89,18 +177,33 @@ class AppearanceSettingsScreen extends StatelessWidget {
           ),
           _heading(context, 'Touch'),
           Card(
-            child: SwitchListTile(
-              key: const ValueKey('appearance.haptics'),
-              secondary: const Icon(Icons.vibration_rounded),
-              title: const Text('Haptic feedback'),
-              subtitle: const Text(
-                'Vibrate when you long-press a message, send, react or '
-                'pick a filter. Also follows your phone’s touch feedback '
-                'setting.',
-              ),
-              value: preferences.haptics,
-              onChanged: (value) =>
-                  _save(context, () => preferences.setHaptics(value)),
+            child: Column(
+              children: [
+                ListTile(
+                  key: const ValueKey('appearance.quick_reaction'),
+                  leading: const Icon(Icons.touch_app_outlined),
+                  title: const Text('Double-tap reaction'),
+                  subtitle: const Text('Double-tap any message to react.'),
+                  trailing: Text(
+                    preferences.quickReaction,
+                    style: const TextStyle(fontSize: 26),
+                  ),
+                  onTap: () => _chooseQuickReaction(context),
+                ),
+                SwitchListTile(
+                  key: const ValueKey('appearance.haptics'),
+                  secondary: const Icon(Icons.vibration_rounded),
+                  title: const Text('Haptic feedback'),
+                  subtitle: const Text(
+                    'Vibrate when you long-press a message, send, react or '
+                    'pick a filter. Also follows your phone’s touch feedback '
+                    'setting.',
+                  ),
+                  value: preferences.haptics,
+                  onChanged: (value) =>
+                      _save(context, () => preferences.setHaptics(value)),
+                ),
+              ],
             ),
           ),
           _heading(context, 'Media & privacy'),

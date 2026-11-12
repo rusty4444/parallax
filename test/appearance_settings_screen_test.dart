@@ -115,6 +115,33 @@ void main() {
     expect(restored.sendTypingNotifications, isFalse);
   });
 
+  testWidgets('the double-tap reaction can be changed', (tester) async {
+    await showScreen(tester);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('appearance.quick_reaction')),
+        matching: find.text('❤️'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('appearance.quick_reaction')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('quick-reaction-🔥')));
+    await tester.pumpAndSettle();
+    expect(preferences.quickReaction, '🔥');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('appearance.quick_reaction')),
+        matching: find.text('🔥'),
+      ),
+      findsOneWidget,
+    );
+    final restored = AppearancePreferences(prefs: prefs);
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.quickReaction, '🔥');
+  });
+
   testWidgets('slider changes text size and saves it', (tester) async {
     await showScreen(tester);
     await tester.drag(find.byType(Slider), const Offset(150, 0));

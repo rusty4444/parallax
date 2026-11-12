@@ -55,6 +55,28 @@ void main() {
     expect(preferences.sendReadReceipts, isTrue);
     expect(preferences.expandedHome, isFalse);
     expect(preferences.haptics, isTrue);
+    expect(preferences.quickReaction, '❤️');
+  });
+
+  test('the double-tap reaction is one emoji, saved and restored', () async {
+    await preferences.load();
+    await preferences.setQuickReaction('👍🏽');
+    expect(preferences.quickReaction, '👍🏽');
+    for (final bad in ['', '👍👍', 'ok', ' 👍', 'mxc://x/y']) {
+      await expectLater(
+        preferences.setQuickReaction(bad),
+        throwsArgumentError,
+        reason: bad,
+      );
+    }
+    final restored = AppearancePreferences(prefs: prefs);
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.quickReaction, '👍🏽');
+    // A corrupt stored value falls back to the heart.
+    await prefs.setString('parallax.appearance.v1.quick_reaction', 'nope');
+    await restored.load();
+    expect(restored.quickReaction, '❤️');
   });
 
   test(

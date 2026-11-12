@@ -552,13 +552,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       leading: const Icon(Icons.text_fields_rounded),
                       title: const Text('Reading and media preferences'),
                       subtitle: const Text(
-                        'Text size, media previews, read receipts and typing',
+                        'Text size, home layout, double-tap reaction, haptics, '
+                        'media previews and privacy',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => AppearanceSettingsScreen(
                             preferences: preferences,
+                            palette: p,
                           ),
                         ),
                       ),

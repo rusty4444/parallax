@@ -26,6 +26,7 @@ import 'timeline/timeline_view.dart';
 import 'widgets.dart';
 import 'features/composer/edit_markdown.dart';
 import 'haptics.dart';
+import 'timeline/double_tap_react.dart';
 
 class RoomScreen extends StatelessWidget {
   const RoomScreen({
@@ -553,8 +554,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         : const [],
   );
 
+  /// Double tap: react with the chosen quick reaction (Settings →
+  /// Appearance → Double-tap reaction; ❤️ by default).
   Future<void> _heart(ChatEntry entry) async {
-    await _react(entry, '❤️');
+    await _react(entry, quickReactionOf(context));
   }
 
   Future<void> _react(ChatEntry entry, String emoji) async {

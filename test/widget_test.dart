@@ -22,6 +22,10 @@ import 'package:parallax/room_avatar.dart';
 import 'package:parallax/settings_screen.dart';
 import 'package:parallax/security_overlay.dart';
 import 'home_options.dart';
+import 'package:parallax/appearance_preferences.dart';
+import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/message_draft_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets('login validates homeserver and sends credentials', (
@@ -541,6 +545,112 @@ void main() {
     await tester.tap(find.byTooltip('React 👍'));
     await tester.pumpAndSettle();
     expect(backend.lastReaction, '👍');
+  });
+
+  testWidgets('double tap reacts to anyone\'s message with the chosen emoji', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = AppearancePreferences();
+    addTearDown(preferences.dispose);
+    await preferences.setQuickReaction('👍');
+    final backend = FakeBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'theirs',
+          sender: '@friend:example.org',
+          senderName: 'Friend',
+          body: 'From a friend',
+          time: DateTime(2026, 1, 1, 10),
+          mine: false,
+        ),
+        ChatEntry(
+          id: 'mine',
+          sender: '@me:example.org',
+          body: 'From me',
+          time: DateTime(2026, 1, 1, 9),
+          mine: true,
+        ),
+      ];
+    await tester.pumpWidget(
+      FeatureSettingsScope(
+        preferences: preferences,
+        draftStore: MessageDraftStore(),
+        child: MaterialApp(
+          home: RoomScreen(
+            backend: backend,
+            palette: paletteFor(VisualTheme.parallax),
+            roomId: '!r:example.org',
+            backgroundStore: FakeBackgroundStore(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final text in ['From a friend', 'From me']) {
+      backend.lastReaction = null;
+      await tester.tap(find.text(text));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text(text));
+      await tester.pump(const Duration(milliseconds: 100));
+      // The reaction pops over the message before the server answers.
+      expect(find.byKey(const ValueKey('double-tap-pop')), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(backend.lastReaction, '👍', reason: text);
+      expect(find.byKey(const ValueKey('double-tap-pop')), findsNothing);
+    }
+  });
+
+  testWidgets('people\'s pictures show beside their messages in DMs too', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..roomList = [
+        ChatRoom(
+          id: '!r:example.org',
+          name: 'Friend',
+          preview: '',
+          lastActivity: null,
+          isDirect: true,
+        ),
+      ]
+      // Oldest first, as the backend projects them.
+      ..entries = [
+        ChatEntry(
+          id: 'first',
+          sender: '@friend:example.org',
+          senderName: 'Friend',
+          body: 'First',
+          time: DateTime(2026, 1, 1, 10),
+          mine: false,
+        ),
+        ChatEntry(
+          id: 'second',
+          sender: '@friend:example.org',
+          senderName: 'Friend',
+          body: 'Second',
+          time: DateTime(2026, 1, 1, 10, 1),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.parallax),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // One picture starts the run of messages; the name stays hidden in DMs.
+    expect(find.byKey(const ValueKey('avatar-first')), findsOneWidget);
+    expect(find.byKey(const ValueKey('avatar-second')), findsNothing);
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('avatar-first'))).dx,
+      lessThan(tester.getTopLeft(find.text('First')).dx),
+    );
   });
 
   testWidgets('reaction count is visible and can be toggled', (tester) async {
@@ -1500,7 +1610,8 @@ class FakeBackend extends ChatBackend {
   Future<String> createRoom(String name, {required bool encrypted}) async {
     createdRoomName = name;
     createdRoomEncrypted = encrypted;
-    roomList.add(
+    roomList = [
+      ...roomList,
       ChatRoom(
         id: '!created:example.org',
         name: name,
@@ -1508,7 +1619,7 @@ class FakeBackend extends ChatBackend {
         lastActivity: null,
         encrypted: encrypted,
       ),
-    );
+    ];
     notifyListeners();
     return '!created:example.org';
   }
@@ -1519,7 +1630,10 @@ class FakeBackend extends ChatBackend {
   @override
   Future<void> declineInvite(String roomId) async {
     declined = roomId;
-    roomList.removeWhere((room) => room.id == roomId);
+    roomList = [
+      for (final room in roomList)
+        if (room.id != roomId) room,
+    ];
     notifyListeners();
   }
 
@@ -1551,7 +1665,10 @@ class FakeBackend extends ChatBackend {
   @override
   Future<void> leaveRoom(String roomId) async {
     lastLeftRoom = roomId;
-    roomList.removeWhere((room) => room.id == roomId);
+    roomList = [
+      for (final room in roomList)
+        if (room.id != roomId) room,
+    ];
     notifyListeners();
   }
 

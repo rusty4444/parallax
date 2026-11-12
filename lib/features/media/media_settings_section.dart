@@ -106,8 +106,9 @@ class _MediaSettingsSectionState extends State<MediaSettingsSection> {
                 leading: Icon(Icons.videocam_outlined, color: p.secondary),
                 title: const Text('Video upload quality'),
                 subtitle: const Text(
-                  'Original. Parallax can’t compress videos on this device '
-                  'yet, so videos are sent as recorded (up to 20 MB).',
+                  'Videos up to 20 MB and 1080p are sent as recorded. Larger '
+                  'ones are compressed to 720p so they fit (up to about '
+                  '4 minutes).',
                 ),
               ),
             ],

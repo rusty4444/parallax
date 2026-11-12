@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/widgets.dart' show StringCharacters;
 
 /// Element X "Show media in timeline" (TimelineProtection) choices.
 enum MediaPreviewMode {
@@ -34,6 +35,10 @@ class AppearancePreferences extends ChangeNotifier {
       'parallax.appearance.v1.hide_invite_avatars';
   static const _expandedHomeKey = 'parallax.appearance.v1.expanded_home';
   static const _hapticsKey = 'parallax.appearance.v1.haptics';
+  static const _quickReactionKey = 'parallax.appearance.v1.quick_reaction';
+
+  /// Double-tap reaction until the user picks another.
+  static const defaultQuickReaction = '❤️';
 
   SharedPreferences? _prefs;
   Future<void> _tail = Future<void>.value();
@@ -46,6 +51,7 @@ class AppearancePreferences extends ChangeNotifier {
   bool _hideInviteAvatars = false;
   bool _expandedHome = false;
   bool _haptics = true;
+  String _quickReaction = defaultQuickReaction;
 
   double get textScale => _textScale;
   bool get compact => _compact;
@@ -67,6 +73,16 @@ class AppearancePreferences extends ChangeNotifier {
 
   /// Vibrate on long presses, sends and selections (on by default).
   bool get haptics => _haptics;
+
+  /// The emoji a double tap on a message reacts with.
+  String get quickReaction => _quickReaction;
+
+  /// One emoji (a single grapheme of at most 32 UTF-16 units, no spaces).
+  static bool isQuickReaction(String value) =>
+      value.isNotEmpty &&
+      value.length <= 32 &&
+      value.trim() == value &&
+      value.characters.length == 1;
 
   /// Whether media previews load automatically in a room.
   bool autoLoadMediaIn({required bool publicRoom}) =>
@@ -97,6 +113,10 @@ class AppearancePreferences extends ChangeNotifier {
     final hideInviteAvatars = _boolOr(prefs.get(_hideInviteAvatarsKey), false);
     final expandedHome = _boolOr(prefs.get(_expandedHomeKey), false);
     final haptics = _boolOr(prefs.get(_hapticsKey), true);
+    final rawReaction = prefs.get(_quickReactionKey);
+    final quickReaction = rawReaction is String && isQuickReaction(rawReaction)
+        ? rawReaction
+        : defaultQuickReaction;
     final changed =
         scale != _textScale ||
         compact != _compact ||
@@ -105,7 +125,8 @@ class AppearancePreferences extends ChangeNotifier {
         sendTyping != _sendTypingNotifications ||
         hideInviteAvatars != _hideInviteAvatars ||
         expandedHome != _expandedHome ||
-        haptics != _haptics;
+        haptics != _haptics ||
+        quickReaction != _quickReaction;
     _textScale = scale;
     _compact = compact;
     _mediaPreviewMode = mode;
@@ -114,6 +135,7 @@ class AppearancePreferences extends ChangeNotifier {
     _hideInviteAvatars = hideInviteAvatars;
     _expandedHome = expandedHome;
     _haptics = haptics;
+    _quickReaction = quickReaction;
     if (changed) _notifyIfActive();
   });
 
@@ -192,6 +214,17 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setBool(_hapticsKey, value));
     if (_haptics == value) return;
     _haptics = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setQuickReaction(String value) => _ordered(() async {
+    if (!isQuickReaction(value)) {
+      throw ArgumentError.value(value, 'value', 'Choose one emoji');
+    }
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setString(_quickReactionKey, value));
+    if (_quickReaction == value) return;
+    _quickReaction = value;
     _notifyIfActive();
   });
 

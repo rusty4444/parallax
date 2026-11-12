@@ -11,6 +11,7 @@ import 'package:parallax/features/media/voice_waveform.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/queued_media_sender.dart';
 import 'package:parallax/send_cancellation.dart';
+import 'package:parallax/features/media/video_prep.dart';
 
 void main() {
   late _UploadClient transport;
@@ -230,6 +231,7 @@ void main() {
     MediaSelection media, {
     String? caption,
     ImagePreparer? prepareImage,
+    Future<VideoInfo?> Function(Uint8List bytes)? probeVideo,
     bool optimise = true,
   }) => sendQueuedAttachment(
     client: client,
@@ -242,6 +244,7 @@ void main() {
     caption: caption,
     uploadOptions: MediaUploadOptions(optimiseImages: optimise),
     prepareImage: prepareImage,
+    probeVideo: probeVideo,
   );
 
   group('voice messages', () {
@@ -301,6 +304,72 @@ void main() {
       expect(content.containsKey('org.matrix.msc3245.voice'), isFalse);
       expect(content['body'], 'voice-1731400000002.m4a');
     });
+  });
+
+  group('videos', () {
+    test('are m.video with size, duration and a poster frame', () async {
+      final poster = Uint8List.fromList(List.filled(64, 3));
+      final video = Uint8List.fromList(List.filled(4096, 9));
+      await sendMedia(
+        MediaSelection(
+          bytes: video,
+          name: 'clip.mp4',
+          mimeType: 'video/mp4',
+          durationMs: 20000,
+        ),
+        probeVideo: (bytes) async {
+          expect(bytes, video);
+          return VideoInfo(
+            width: 1280,
+            height: 720,
+            durationMs: 20033,
+            thumbnail: poster,
+            thumbnailWidth: 800,
+            thumbnailHeight: 450,
+          );
+        },
+      );
+      expect(transport.requests, hasLength(2));
+      expect(transport.bodies.first, poster);
+      expect(transport.requests.first.headers['content-type'], 'image/jpeg');
+      expect(transport.bodies.last, video);
+      final content = room.contents.single;
+      expect(content['msgtype'], 'm.video');
+      expect(content['body'], 'clip.mp4');
+      final info = content['info'] as Map;
+      expect(info['w'], 1280);
+      expect(info['h'], 720);
+      expect(info['duration'], 20033);
+      expect(info['mimetype'], 'video/mp4');
+      expect(info['thumbnail_url'], 'mxc://matrix.example/media');
+      expect(info['thumbnail_info'], {
+        'w': 800,
+        'h': 450,
+        'mimetype': 'image/jpeg',
+        'size': 64,
+      });
+    });
+
+    test(
+      'a video that can\'t be read is still sent, without a poster',
+      () async {
+        await sendMedia(
+          MediaSelection(
+            bytes: Uint8List(2048),
+            name: 'clip.mov',
+            mimeType: 'video/quicktime',
+            durationMs: 4000,
+          ),
+          probeVideo: (_) async => throw StateError('no decoder'),
+        );
+        expect(transport.requests, hasLength(1));
+        final content = room.contents.single;
+        expect(content['msgtype'], 'm.video');
+        final info = content['info'] as Map;
+        expect(info['duration'], 4000);
+        expect(info.containsKey('thumbnail_info'), isFalse);
+      },
+    );
   });
 
   group('image preparation', () {

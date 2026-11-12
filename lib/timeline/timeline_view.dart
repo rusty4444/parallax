@@ -217,7 +217,8 @@ class _TimelineViewState extends State<TimelineView> {
       palette: palette,
       group: group,
       showSender: showSender,
-      showAvatars: !isDirect,
+      // Pictures beside others' messages in every room, DMs included.
+      showAvatars: true,
       room: widget.room,
       entries: entries,
       receipts: receipts[entry.id] ?? const [],

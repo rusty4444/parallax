@@ -697,6 +697,32 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
+  final _memos = <Symbol, (Object?, Object?)>{};
+  Set<String>? _failedSet;
+  Set<String>? _favouriteSet;
+  Set<String>? _spaceSet;
+
+  static Set<String>? _stableNullableSet(
+    Set<String>? next,
+    Set<String>? previous,
+  ) => next == null ? null : _stableSet(next, previous);
+
+  /// [compute] again only when [key] differs (==) from the last call's.
+  T _memo<T>(Symbol slot, Object? key, T Function() compute) {
+    final last = _memos[slot];
+    if (last != null && last.$1 == key) return last.$2 as T;
+    final value = compute();
+    _memos[slot] = (key, value);
+    return value;
+  }
+
+  static Set<String> _stableSet(Set<String> next, Set<String>? previous) =>
+      previous != null &&
+          previous.length == next.length &&
+          previous.containsAll(next)
+      ? previous
+      : next;
+
   /// What narrows the room list, for the collapsed options summary.
   List<String> _narrowing(HomeSpace? space, ChatFolder? folder) => [
     if (_query.trim().isNotEmpty) '“${_query.trim()}”',
@@ -727,8 +753,12 @@ class _InboxScreenState extends State<InboxScreen> {
     return AnimatedBuilder(
       animation: _changes,
       builder: (context, _) {
-        final chats = widget.backend.rooms.where((room) => !room.isSpace);
-        final chatCount = chats.length;
+        final source = widget.backend.rooms;
+        final chatCount = _memo(
+          #chatCount,
+          source,
+          () => source.where((room) => !room.isSpace).length,
+        );
         final roomCountLabel = chatCount > 0
             ? '$chatCount ROOMS'
             : switch (widget.backend.roomSyncState) {
@@ -736,11 +766,13 @@ class _InboxScreenState extends State<InboxScreen> {
                 RoomSyncState.error => 'SYNC ERROR',
                 RoomSyncState.ready => '0 ROOMS',
               };
-        final failedRooms = _failedRooms();
-        final favourites = {
-          for (final room in widget.backend.rooms)
+        // Reuse equal sets so the memoised list below can compare inputs by
+        // identity.
+        final failedRooms = _failedSet = _stableSet(_failedRooms(), _failedSet);
+        final favourites = _favouriteSet = _stableSet({
+          for (final room in source)
             if (_favourite(room)) room.id,
-        };
+        }, _favouriteSet);
         final spaces = _spaces();
         final spaceId = spaces.any((space) => space.id == _spaceId)
             ? _spaceId
@@ -751,35 +783,62 @@ class _InboxScreenState extends State<InboxScreen> {
         final noteId = saved?.noteToSelfRoomId;
         final folderList = saved?.folders.folders ?? const <ChatFolder>[];
         final folder = folderList.where((f) => f.id == _folderId).firstOrNull;
-        final allRooms = [
-          for (final room in widget.backend.rooms)
-            room.id == noteId && !room.invited ? presentNoteToSelf(room) : room,
-        ];
-        FolderRoomFacts facts(ChatRoom room) =>
-            _facts(room, favourites, failedRooms);
-        final unreadByFolder = {
-          for (final f in folderList)
-            f.id: folderUnreadCount(f, allRooms, facts),
-        };
-        final filtered = filterRoomList(
-          folder == null
-              ? allRooms
-              : [
-                  for (final room in allRooms)
-                    if (folderContainsRoom(folder, room, facts(room))) room,
-                ],
-          _filters,
-          RoomListContext(
-            favourites: favourites,
-            failedRooms: failedRooms,
-            spaceRooms: _spaceRooms(spaceId),
-            query: _query,
-          ),
+        final spaceRooms = _spaceSet = _stableNullableSet(
+          _spaceRooms(spaceId),
+          _spaceSet,
         );
-        final rooms = [
-          ...filtered.where((room) => room.id == noteId),
-          ...filtered.where((room) => room.id != noteId),
-        ];
+        // The inbox rebuilds on every backend notification (including each
+        // timeline update of a room open above it). Filtering, sorting and
+        // folder counts over every room only rerun when an input changed.
+        final (:unreadByFolder, :rooms) = _memo(
+          #roomList,
+          (
+            source,
+            favourites,
+            failedRooms,
+            noteId,
+            folderList,
+            folder,
+            _filters,
+            _query,
+            spaceRooms,
+          ),
+          () {
+            final allRooms = [
+              for (final room in source)
+                room.id == noteId && !room.invited
+                    ? presentNoteToSelf(room)
+                    : room,
+            ];
+            FolderRoomFacts facts(ChatRoom room) =>
+                _facts(room, favourites, failedRooms);
+            final filtered = filterRoomList(
+              folder == null
+                  ? allRooms
+                  : [
+                      for (final room in allRooms)
+                        if (folderContainsRoom(folder, room, facts(room))) room,
+                    ],
+              _filters,
+              RoomListContext(
+                favourites: favourites,
+                failedRooms: failedRooms,
+                spaceRooms: spaceRooms,
+                query: _query,
+              ),
+            );
+            return (
+              unreadByFolder: {
+                for (final f in folderList)
+                  f.id: folderUnreadCount(f, allRooms, facts),
+              },
+              rooms: [
+                ...filtered.where((room) => room.id == noteId),
+                ...filtered.where((room) => room.id != noteId),
+              ],
+            );
+          },
+        );
         final showNotePrompt =
             saved != null &&
             noteId == null &&

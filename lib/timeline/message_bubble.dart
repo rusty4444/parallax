@@ -15,6 +15,7 @@ import '../media_viewer.dart';
 import '../message_image.dart';
 import '../room_avatar.dart';
 import '../haptics.dart';
+import 'double_tap_react.dart';
 
 /// Width of the sender-avatar column beside others' messages.
 const senderAvatarSize = 32.0;
@@ -61,8 +62,7 @@ class MessageBubble extends StatelessWidget {
   /// group from someone else.
   final bool? showSender;
 
-  /// Reserve an avatar column for others' messages. Defaults to true except
-  /// in direct chats (Element X hides sender details there).
+  /// Reserve an avatar column for others' messages (default true).
   final bool? showAvatars;
 
   /// Users whose latest read receipt is on this event.
@@ -98,7 +98,7 @@ class MessageBubble extends StatelessWidget {
     final special = entryBodyFor(context, hook);
     final footers = entryFootersFor(context, hook);
     final textColor = mine ? palette.bubbleText : palette.foreground;
-    final avatars = !mine && (showAvatars ?? !(room?.isDirect ?? false));
+    final avatars = !mine && (showAvatars ?? true);
     final sender = showSender ?? (!mine && !group);
     final highlighted = entry.highlight && !mine && !entry.redacted;
     final maxWidth =
@@ -143,152 +143,169 @@ class MessageBubble extends StatelessWidget {
                       ),
               ),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  14,
-                  compact ? 6 : 10,
-                  14,
-                  compact ? 5 : 8,
-                ),
+                padding: EdgeInsets.only(bottom: compact ? 5 : 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
+                    // The bubble's top and side padding are part of the
+                    // double-tap target too (short messages are small).
+                    DoubleTapReact(
                       onDoubleTap: onHeart,
                       onLongPress: onAction,
-                      behavior: HitTestBehavior.opaque,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (!mine && sender) ...[
-                            Text(
-                              entry.senderLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: palette.secondary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          14,
+                          compact ? 6 : 10,
+                          14,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (!mine && sender) ...[
+                              Text(
+                                entry.senderLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: palette.secondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 5),
-                          ],
-                          if (entry.replyToId != null) ...[
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  left: BorderSide(
-                                    color: palette.secondary,
-                                    width: 3,
+                              const SizedBox(height: 5),
+                            ],
+                            if (entry.replyToId != null) ...[
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: palette.secondary,
+                                      width: 3,
+                                    ),
+                                  ),
+                                ),
+                                child: Text(
+                                  replyPreview == null
+                                      ? 'In reply to an earlier message'
+                                      : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: mine
+                                        ? palette.bubbleText
+                                        : palette.muted,
+                                    fontSize: 12,
                                   ),
                                 ),
                               ),
-                              child: Text(
-                                replyPreview == null
-                                    ? 'In reply to an earlier message'
-                                    : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: mine
-                                      ? palette.bubbleText
-                                      : palette.muted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                          ],
-                          if (special != null)
-                            special
-                          else ...[
-                            if (entry.isImage) ...[
-                              MessageImage(
-                                backend: backend,
-                                palette: palette,
-                                roomId: roomId,
-                                eventId: entry.id,
-                              ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 5),
                             ],
-                            if (entry.isAttachment)
-                              _AttachmentRow(
-                                entry: entry,
-                                backend: backend,
-                                roomId: roomId,
-                                palette: palette,
-                              )
-                            else if (entry.body.isNotEmpty)
-                              buildMessageText(
-                                context,
-                                hook,
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontSize: 15,
-                                  height: 1.35,
+                            if (special != null)
+                              special
+                            else ...[
+                              if (entry.isImage) ...[
+                                MessageImage(
+                                  backend: backend,
+                                  palette: palette,
+                                  roomId: roomId,
+                                  eventId: entry.id,
                                 ),
-                              ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (entry.reactions.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 3,
-                        children: [
-                          for (final reaction in entry.reactions)
-                            GestureDetector(
-                              // Element X: long-press a reaction to see who reacted.
-                              onLongPress: () {
-                                Haptics.longPress();
-                                showReactionSummaryForEntry(
+                                const SizedBox(height: 4),
+                              ],
+                              if (entry.isAttachment)
+                                _AttachmentRow(
+                                  entry: entry,
+                                  backend: backend,
+                                  roomId: roomId,
+                                  palette: palette,
+                                )
+                              else if (entry.body.isNotEmpty)
+                                buildMessageText(
                                   context,
                                   hook,
-                                  emoji: reaction.emoji,
-                                );
-                              },
-                              child: ActionChip(
-                                tooltip: reaction.mine
-                                    ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
-                                    : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
-                                // Custom emoji reactions (MSC4027) show the
-                                // pack image; others keep the emoji text.
-                                label:
-                                    customReactionChipLabel(
-                                      backend: backend,
-                                      roomId: roomId,
-                                      reactionKey: reaction.emoji,
-                                      count: reaction.count,
-                                    ) ??
-                                    Text('${reaction.emoji} ${reaction.count}'),
-                                backgroundColor: reaction.mine
-                                    ? palette.accent.withValues(alpha: 0.25)
-                                    : palette.background,
-                                onPressed: () => onReaction(reaction.emoji),
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 15,
+                                    height: 1.35,
+                                  ),
+                                ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (entry.reactions.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 5,
+                              runSpacing: 3,
+                              children: [
+                                for (final reaction in entry.reactions)
+                                  GestureDetector(
+                                    // Element X: long-press a reaction to see who reacted.
+                                    onLongPress: () {
+                                      Haptics.longPress();
+                                      showReactionSummaryForEntry(
+                                        context,
+                                        hook,
+                                        emoji: reaction.emoji,
+                                      );
+                                    },
+                                    child: ActionChip(
+                                      tooltip: reaction.mine
+                                          ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
+                                          : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
+                                      // Custom emoji reactions (MSC4027) show the
+                                      // pack image; others keep the emoji text.
+                                      label:
+                                          customReactionChipLabel(
+                                            backend: backend,
+                                            roomId: roomId,
+                                            reactionKey: reaction.emoji,
+                                            count: reaction.count,
+                                          ) ??
+                                          Text(
+                                            '${reaction.emoji} ${reaction.count}',
+                                          ),
+                                      backgroundColor: reaction.mine
+                                          ? palette.accent.withValues(
+                                              alpha: 0.25,
+                                            )
+                                          : palette.background,
+                                      onPressed: () =>
+                                          onReaction(reaction.emoji),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                          ...footers,
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.bottomRight,
+                            child: Text(
+                              [
+                                if (entry.edited && !entry.redacted) '(edited)',
+                                TimeOfDay.fromDateTime(
+                                  entry.time.toLocal(),
+                                ).format(context),
+                              ].join('  '),
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: mine
+                                    ? palette.bubbleText.withValues(alpha: 0.77)
+                                    : palette.muted,
                               ),
                             ),
+                          ),
                         ],
-                      ),
-                    ],
-                    ...footers,
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.bottomRight,
-                      child: Text(
-                        [
-                          if (entry.edited && !entry.redacted) '(edited)',
-                          TimeOfDay.fromDateTime(
-                            entry.time.toLocal(),
-                          ).format(context),
-                        ].join('  '),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: mine
-                              ? palette.bubbleText.withValues(alpha: 0.77)
-                              : palette.muted,
-                        ),
                       ),
                     ),
                   ],
@@ -303,7 +320,9 @@ class MessageBubble extends StatelessWidget {
             children: [
               SizedBox(
                 width: senderAvatarSize,
-                child: sender
+                // The sender's picture starts each run of their messages,
+                // in direct chats too (where the name stays hidden).
+                child: !group
                     ? GestureDetector(
                         onTap: () => openUserProfile(
                           context,

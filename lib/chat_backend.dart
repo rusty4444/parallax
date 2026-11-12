@@ -424,6 +424,9 @@ abstract class ChatBackend extends ChangeNotifier {
   RoomSyncIssue? get roomSyncIssue;
   String? get userId;
   String? get error;
+
+  /// Replaced by a new list whenever any room changes (never edited in
+  /// place), so screens can skip work while the identity is unchanged.
   List<ChatRoom> get rooms;
   String? get activeRoomId;
   List<ChatEntry> get messages;
@@ -467,6 +470,10 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<Uint8List?> loadImage(String roomId, String eventId);
   Future<DownloadedAttachment> loadAttachment(String roomId, String eventId);
   Future<Uint8List?> loadAvatar(Uri url);
+
+  /// An already downloaded avatar, so rows can show it on their first frame
+  /// instead of flashing the initial while [loadAvatar] completes.
+  Uint8List? cachedAvatar(Uri url) => null;
   Future<void> react(String roomId, String eventId, {String emoji = '❤️'});
   Future<void> redactMessage(String roomId, String eventId);
   Future<void> setTyping(String roomId, bool typing);
