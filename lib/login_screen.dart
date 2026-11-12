@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'features/qr_login/qr_login_features.dart';
+import 'features/qr_login/qr_login_screen.dart';
 import 'matrix_auth_service.dart';
 import 'messaging_features.dart';
 import 'widgets.dart';
@@ -112,6 +114,16 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (_current(generation, backend)) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _qrLogin() async {
+    if (_busy) return;
+    setState(() => _error = null);
+    await showQrLogin(
+      context,
+      backend: widget.backend,
+      palette: widget.palette,
+    );
   }
 
   void _chooseProvider(AccountProviderChoice choice) {
@@ -474,6 +486,21 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                       ),
+                      if (qrLoginFeaturesOf(
+                            widget.backend,
+                          )?.canSignInWithQrCode ==
+                          true) ...[
+                        const SizedBox(height: 14),
+                        // Element X onboarding: "Sign in with QR code".
+                        SizedBox(
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            onPressed: _busy ? null : _qrLogin,
+                            icon: const Icon(Icons.qr_code_scanner_rounded),
+                            label: const Text('Sign in with QR code'),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       Text(
                         features
