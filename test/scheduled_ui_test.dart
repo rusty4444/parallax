@@ -11,6 +11,8 @@ import 'package:parallax/hooks/hook_types.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'widget_test.dart' show FakeBackend;
+import 'package:parallax/appearance_settings_screen.dart';
+import 'package:parallax/appearance_preferences.dart';
 
 const _roomId = '!room:matrix.example';
 final _palette = paletteFor(VisualTheme.parallax);
@@ -111,13 +113,6 @@ class _ScheduledBackend extends FakeBackend implements ScheduledFeatures {
     notifyListeners();
     return copy;
   }
-}
-
-class _UndoOnlyBackend extends FakeBackend implements UndoSendFeatures {
-  @override
-  DateTime? undoDeadline(String pendingId) => null;
-  @override
-  Future<UndoneSend?> undoSend(String pendingId) async => null;
 }
 
 ScheduledMessage _message(
@@ -333,13 +328,6 @@ void main() {
       final context = await _host(tester);
       expect(scheduledSendOptions(context, _ctx(backend)), isEmpty);
       expect(scheduledRoomBanners(context, _ctx(backend)), isEmpty);
-      expect(
-        scheduledSettingsSections(
-          context,
-          SettingsHookContext(backend: backend, palette: _palette),
-        ),
-        isEmpty,
-      );
     });
   });
 
@@ -504,20 +492,28 @@ void main() {
       expect(() => prefs.setSeconds(7), throwsArgumentError);
     });
 
-    testWidgets('settings section appears for undo-capable backends', (
-      tester,
-    ) async {
+    testWidgets('Settings → Appearance can turn undo send off', (tester) async {
       SharedPreferences.setMockInitialValues({});
-      await _host(
-        tester,
-        children: (context) => scheduledSettingsSections(
-          context,
-          SettingsHookContext(backend: _UndoOnlyBackend(), palette: _palette),
+      tester.view.physicalSize = const Size(900, 3200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AppearanceSettingsScreen(preferences: AppearancePreferences()),
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('SENDING'), findsOneWidget);
+      expect(find.text('Undo send'), findsOneWidget);
       expect(find.text('5 s'), findsOneWidget);
+      await tester.tap(find.text('Off'));
+      await tester.pumpAndSettle();
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(UndoSendPreferences.secondsKey), 0);
+      expect(find.text('Messages are sent straight away.'), findsOneWidget);
+      // Back to the default for other tests sharing the instance.
+      await UndoSendPreferences.shared.setSeconds(
+        UndoSendPreferences.defaultSeconds,
+      );
     });
   });
 }

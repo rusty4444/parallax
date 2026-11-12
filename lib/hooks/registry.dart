@@ -122,7 +122,6 @@ List<Widget> settingsSectionsFor(
   ...platformSettingsSections(context, ctx),
   ...messageSearchSettingsSections(context, ctx),
   ...notificationSettingsSections(context, ctx),
-  ...scheduledSettingsSections(context, ctx),
   ...savedSettingsSections(context, ctx),
   ...packsSettingsSections(context, ctx),
   ...qrLoginSettingsSections(context, ctx),

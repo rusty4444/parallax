@@ -9,8 +9,6 @@ import '../../hooks/hook_types.dart';
 import 'scheduled_features.dart';
 import 'scheduled_list.dart';
 import 'send_later_sheet.dart';
-import 'undo_send.dart';
-import 'undo_send_settings.dart';
 
 /// Long-press send option: "Send later…".
 List<ComposerSendOption> scheduledSendOptions(
@@ -42,11 +40,5 @@ List<Widget> scheduledRoomBanners(BuildContext context, RoomHookContext ctx) {
   ];
 }
 
-/// Settings → Sending → Undo send.
-List<Widget> scheduledSettingsSections(
-  BuildContext context,
-  SettingsHookContext ctx,
-) {
-  if (undoSendFeaturesOf(ctx.backend) == null) return const [];
-  return [UndoSendSettingsSection(palette: ctx.palette)];
-}
+// Undo send's setting lives in Settings → Appearance, next to the other
+// message behaviour toggles (lib/appearance_settings_screen.dart).

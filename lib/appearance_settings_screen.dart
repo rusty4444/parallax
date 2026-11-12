@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'appearance_preferences.dart';
 import 'app_theme.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
+import 'features/scheduled/undo_send_settings.dart';
 
 /// Edits an app-owned model; this route never disposes [preferences].
 class AppearanceSettingsScreen extends StatelessWidget {
@@ -286,6 +287,10 @@ class AppearanceSettingsScreen extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          // Sending → Undo send (Off, 5, 10 or 20 s).
+          UndoSendSettingsSection(
+            palette: palette ?? paletteFor(VisualTheme.parallax),
           ),
         ],
       ),

@@ -101,6 +101,10 @@ class MatrixBackend extends ChatBackend
   final bool Function() _sendReadReceipts;
   final bool Function() _sendTypingNotifications;
 
+  /// How long a queued send waits for another send to finish.
+  @visibleForTesting
+  static Duration queuedSendLockWait = const Duration(minutes: 2);
+
   /// Whether Parallax is on screen (messages arriving in the open room are
   /// only marked read while it is).
   final bool Function() _isAppVisible;
@@ -662,8 +666,19 @@ class MatrixBackend extends ChatBackend
     }
 
     check();
-    if (_sending || _cryptoSetupBusy) {
-      throw StateError('Another secure operation is running');
+    // Photo galleries, shares and notification replies send directly and
+    // hold the lock for their whole upload. A held message falling due then
+    // must wait its turn, not fail (and fail again on Retry).
+    final busyUntil = DateTime.now().add(queuedSendLockWait);
+    while (_sending || _cryptoSetupBusy) {
+      if (DateTime.now().isAfter(busyUntil)) {
+        throw StateError('Another secure operation is running');
+      }
+      await Future.any<void>([
+        Future<void>.delayed(const Duration(milliseconds: 200)),
+        cancellation.whenCancelled,
+      ]);
+      check();
     }
     final room = client.getRoomById(record.roomId);
     if (room == null || room.membership != matrix.Membership.join) {

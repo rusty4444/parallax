@@ -29,6 +29,8 @@ import 'haptics.dart';
 import 'timeline/double_tap_react.dart';
 import 'features/appearance/bubble_colours.dart';
 import 'features/appearance/bubble_colours_screen.dart';
+import 'pending_failure.dart';
+import 'package:flutter/services.dart';
 
 class RoomScreen extends StatelessWidget {
   const RoomScreen({
@@ -909,6 +911,39 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
+  /// The full error behind "Not sent", for reporting.
+  void _showSendError(PendingSend pending) {
+    final error = (pending.error ?? '').trim();
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Why it wasn’t sent'),
+          content: SelectableText(
+            error.isEmpty
+                ? 'No error was recorded.'
+                : error.length > 600
+                ? '${error.substring(0, 600)}…'
+                : error,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                unawaited(Clipboard.setData(ClipboardData(text: error)));
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Copy'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Undo send: withdraws a held send and puts its text back in the composer.
   Future<void> _undoPending(PendingSend pending) async {
     final undo = undoSendFeaturesOf(widget.backend);
@@ -1041,11 +1076,25 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                 ),
                               ],
                             )
+                          : item.state == DeliveryState.failed
+                          // Says why; tap for the full error.
+                          ? GestureDetector(
+                              key: ValueKey('pending-reason-${item.id}'),
+                              onTap: () => _showSendError(item),
+                              child: Text(
+                                'Not sent: '
+                                '${pendingFailureReason(item.error)}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: statusStyle.copyWith(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            )
                           : Text(switch (item.state) {
                               DeliveryState.queued => 'Queued',
                               DeliveryState.sending => 'Sending…',
-                              DeliveryState.failed =>
-                                'Not sent. Retry or discard.',
+                              DeliveryState.failed => 'Not sent',
                               DeliveryState.sent => 'Sent',
                             }, style: statusStyle),
                     ),
