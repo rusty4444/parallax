@@ -17,6 +17,7 @@ import 'package:vodozemac/vodozemac.dart' as vod;
 
 import 'chat_backend.dart';
 import 'crypto_setup_policy.dart';
+import 'features/scheduled/delayed_events.dart';
 import 'features/scheduled/undo_send.dart';
 import 'crypto_signature_validation.dart';
 import 'encrypted_media.dart';
@@ -52,6 +53,7 @@ class MatrixBackend extends ChatBackend
         RecoverableRoomJoining,
         RoomEventFeatures,
         MatrixSdkAccess,
+        DelayedRoomEventSender,
         UndoSendFeatures {
   MatrixBackend({
     bool Function()? sendReadReceipts,
@@ -3282,6 +3284,63 @@ class MatrixBackend extends ChatBackend
       );
       if (id == null) throw StateError('Event was not sent');
       return id;
+    });
+  }
+
+  /// Send later (MSC4140, lib/features/scheduled): the same guards as
+  /// [sendRoomEvent] — session ownership, recipient trust approval,
+  /// fail-closed encryption and the final HTTP guard — but the event is
+  /// encrypted now and handed to the homeserver with a delay. Returns the
+  /// server's `delay_id`. Members who join after scheduling don't receive the
+  /// room key, so they can't read it.
+  @override
+  Future<String> sendRoomEventDelayed(
+    String roomId,
+    String type,
+    Map<String, Object?> content,
+    Duration delay,
+  ) async {
+    if (type.isEmpty || type == matrix.EventTypes.Encrypted) {
+      throw ArgumentError.value(type, 'type', 'Invalid event type');
+    }
+    if (delay <= Duration.zero || delay > maxScheduleDelay) {
+      throw ArgumentError.value(delay, 'delay', 'Invalid schedule delay');
+    }
+    final client = _requireClient();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    final owner = _sendOwnership(client, room, _securityGeneration);
+    return MatrixSendGuard.owned(owner, () async {
+      await _ensureTrusted(room);
+      _checkSendOwner(owner);
+      _requireEncryptedTransport(room);
+      return _protectSend(room, () {
+        final crypto = client.encryption;
+        return putDelayedRoomEvent(
+          client,
+          roomId: room.id,
+          type: type,
+          content: content,
+          delay: delay,
+          encrypted: room.encrypted,
+          encrypt: crypto == null
+              ? null
+              : (payload) async {
+                  _checkSendOwner(owner);
+                  _requireEncryptedTransport(room);
+                  final sealed = await crypto.encryptGroupMessagePayload(
+                    room.id,
+                    payload,
+                    type: type,
+                  );
+                  _checkSendOwner(owner);
+                  _requireEncryptedTransport(room);
+                  return sealed;
+                },
+        );
+      }, ownerCurrent: owner);
     });
   }
 
