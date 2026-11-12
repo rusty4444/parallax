@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — Parallax
+
+### Renamed and rethemed
+
+- MatriXpress is now **Parallax**, with a new logo: three offset message bubbles in crimson, vermilion and amber, used for the launcher, adaptive and themed icons, splash screen and notification icon.
+- The new default **Parallax** theme is red and orange on dark ink, with a light **Parallax Day** version. The theme can follow the system's light/dark setting.
+- The app ID is now `net.samrussell.parallax`, so it installs as a separate app from the MatriXpress preview.
+- OIDC sign-in now uses a redirect URI and client URI that matching authentication servers (MAS) accept.
+
+### Element X v26.11.0 parity
+
+Each area is built as its own feature module on a shared set of extension points ([architecture](docs/parity/architecture.md)):
+
+- **Timeline:** formatted messages, pills, avatars and sender names, day separators, room-change summaries, read receipts, and @-mentions in the composer.
+- **Reactions and message actions:** reactions work in encrypted rooms, with a full emoji picker, a "who reacted" view, forwarding, pinned messages, content reporting and moderator removal.
+- **Polls and location:** polls (create, vote, end, edit, history) and static location sharing.
+- **Element Call:** embedded calls, banners, call items in the timeline and in-app ringing.
+- **Room administration:** start chat, create and join rooms, room info, per-room notifications, security and privacy, roles and permissions, members, join requests, and user profiles.
+- **Home and settings:** room list filters and menu, a Spaces switcher, profile, notification settings, sessions, blocked users, app lock, and sign-out/deactivation.
+- **Platform:** sharing into Parallax, matrix.to and `matrix:` links, UnifiedPush, and a "Mark as read" notification action.
+- **Media:** voice waveforms, audio and video bubbles, stickers, animated images, the viewer and gallery, and optimised image uploads.
+- **Threads and search:** a thread list and summaries, jumping to a specific message, and on-device search of encrypted history.
+- **Security:** a post-sign-in identity check, identity-change warnings, key storage, recovery key change and identity reset.
+
+### Other changes
+
+- The repository moved to private Gitea; CI is now a Gitea Actions workflow.
+- This preview has not been tested live. See the parity ledger for the acceptance tests still needed.
+
+## 0.3.1 — room creation, search and Spaces fixes (folded in from PRs #12–#14)
 
 - Private room creation with an explicit encryption choice, enabled by default.
 - Definite pre-dispatch failures and recognised Matrix rejection codes release room-creation admission and show an accurate retriable error. Unknown/server/transport errors and post-create session changes retain the original uncertain request; no automatic retry or encryption downgrade occurs.

@@ -340,7 +340,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               decoration: InputDecoration(
                                 labelText:
                                     _choice == AccountProviderChoice.matrixOrg
-                                    ? 'Account provider'
+                                    ? 'Homeserver'
                                     : features
                                     ? 'Homeserver URL or Matrix ID'
                                     : 'Homeserver URL',

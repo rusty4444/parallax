@@ -1,23 +1,110 @@
 # Parallax / Element X parity ledger
 
-Parallax is an independent Flutter client using Matrix Dart SDK 14.1.0, not a port of the Element X Rust-SDK app. The comparison baseline is [official Element X Android v26.10.0](https://github.com/element-hq/element-x-android/releases/tag/v26.10.0). This is a **gap ledger**, not a parity claim: SDK API availability and widget tests are not evidence of cross-client interoperability. Update each row only after exercising the acceptance gate against a disposable account and another client.
+Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-android/releases/tag/v26.11.0) (6 November 2026). I checked it against that release's source tree and against the features its `FeatureFlags.kt` turns on by default. Parallax is an independent Flutter client built on Matrix Dart SDK 14.1.0, not a port of Element X.
 
-| Area | Status | Evidence / acceptance gate |
+**Status key**
+- **Built:** implemented in Parallax with automated tests.
+- **Partial:** some of Element X's behaviour is there; the gap is noted in the row.
+- **Missing:** not implemented.
+- **Off in Element X:** behind a flag that is off by default in v26.11.0, so not needed for parity.
+
+**Nothing below has been checked against a live homeserver, a second Matrix client or a physical phone.** Every row still needs that acceptance test before you rely on it, so read "Built" as "ready to test". The module boundaries are described in [parity/architecture.md](parity/architecture.md).
+
+## Sign-in and security
+
+| Area | Status | Notes |
 |---|---|---|
-| Password login, persistent session and foreground room sync | Code present; live test pending | `lib/matrix_backend.dart`, `lib/room_sync_panel.dart`; verify first login, relaunch, offline/reconnect, soft logout and account switch. Discovered homeserver URLs must remain HTTPS. Element X also supports OAuth/SSO. |
-| OIDC/MAS and legacy SSO | Code present; live provider test pending | `lib/matrix_auth_service.dart`, `lib/login_screen.dart`; dedicated Android callback, SSO nonce, OIDC PKCE/state/issuer checks and non-destructive refresh/reauthentication have injected transport tests. Test real provider registration policy, browser redirect, token expiry, restart and device preservation. [Element X login mode](https://github.com/element-hq/element-x-android/blob/v26.10.0/features/login/impl/src/main/kotlin/io/element/android/features/login/impl/login/LoginModePresenter.kt). |
-| Joined rooms, invites, public directory, DM-by-ID, mark unread and leave | Code present; live test pending | `lib/inbox_screen.dart`, `lib/directory_screen.dart`; public-directory pagination is query-generation owned, with controlled held-request success/error/finally and disposal regressions in `test/directory_pagination_test.dart`. Widget coverage is not server/device acceptance; verify directory paging, invite/join/leave and server-authoritative unread state on two clients. |
-| Timeline, pagination, replies, edits and redactions | Code present; live test pending | `lib/room_screen.dart`, `lib/matrix_backend.dart`; test encrypted two-client round trips, offline send, history gaps, reply fallback and redaction. Reactions and typing sends are restricted to **unencrypted** rooms until privacy-preserving SDK paths exist. |
-| New-account identity setup, partial repair, SAS verification, recovery and backed-up keys | UI/API present; live test pending | `lib/crypto_setup_screen.dart`, `lib/crypto_setup_policy.dart`, `lib/security_overlay.dart`, `lib/settings_screen.dart`; setup requires a saved phrase before writing and only permits single-device greenfield creation after server-side checks. Partial repair unlocks the existing key, compares derived public signing/backup keys to fresh server values and verifies retained subkey signatures under the current master; missing-secret rotation and stale default pointers are blocked. One orphaned valid storage key with no public components can be unlocked and adopted. Every wipe is disabled and account switching is blocked while bootstrap runs, but server checks cannot make cross-device setup atomic. Test new-account setup on a disposable account, partial failures, concurrent setup, both SAS directions, emoji mismatch, recovery and verified trust after restart. Unlike [Element X sign-in verification](https://docs.element.io/latest/element-support/device-verification/how-to-verify-devices/), verification is not required during this app's sign-in. |
-| Encrypted-send recipient trust, session and media safety | Partial; live test pending | `lib/recipient_trust.dart`, `lib/matrix_send_guard.dart`, `lib/safe_matrix_database.dart`, `lib/encrypted_media.dart`; reject missing/stale keys, changed recipients at key distribution, disabled encryption and insecure media origins. Failed encrypted to-device requests are intentionally not replayed, so test reconnect/retry and missing-room-key recovery. Android backup is disabled; SQLite is **not** SQLCipher-encrypted. |
-| Background push and notification settings | Opt-in configuration code present; disabled without owned infrastructure | `lib/push_notifications.dart`, `lib/push_settings_screen.dart`; explicit consent, data-only FCM, registration nonce, token rotation, generic alerts and joined logout cleanup. Requires the user's Firebase project and compatible gateway; live/terminated-app delivery is unverified. Per-room push policies remain missing. [Setup](push-notifications.md). |
-| Threads and in-room search-result navigation | Threads code present; search navigation limited | `lib/thread_screen.dart`, `lib/matrix_room_features.dart`; `m.thread` relation sending and decrypted paginated replies. Test cross-client relations, history gaps, redactions and receipt semantics. Server-search results and pagination are fenced by query generation and account session, with deterministic stale-response/logout tests; this is not encrypted-history search. Main-thread unread parity, encrypted history search and precise search jump-to-event are not claimed. [Element X thread list](https://github.com/element-hq/element-x-android/blob/v26.10.0/features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/threads/list/ThreadsListPresenter.kt). |
-| Spaces | Browse/join code present; administration missing | `lib/space_browser_screen.dart`, `lib/room_join.dart`, `lib/room_join_dialog.dart`; nested browsing and generation-safe pagination. Child-room/directory joins have bounded cancellable local waits and in-memory session-owned recovery without repeating uncertain delivery; stopping does not undo a server join. Restart reconciliation and invitation-acceptance controls remain separate work. No live two-client validation is claimed. Issue #5 remains open for membership, child-link administration, ordering and permissions, plus real Element X round trips. [Element X spaces](https://github.com/element-hq/element-x-android/blob/v26.10.0/features/space/impl/src/main/kotlin/io/element/android/features/space/impl/root/SpacePresenter.kt). |
-| Room creation, details and moderation | Partial; live test pending | `lib/inbox_screen.dart` creates private rooms with an explicit encryption choice. `lib/room_creation_request.dart` shows an uncertain outcome after ten seconds without response headers/acknowledgement, retaining the original request and blocking duplicate creation across inbox disposal. Ambiguous transport, unknown server and post-create session-change errors remain uncertain. Typed pre-dispatch failures and recognised Matrix refusal codes show a definite non-creation error and permit a corrected explicit submission without restarting or silently disabling encryption. Late acknowledgement retains the ID under the original session owner; a separate bounded sync wait can be retried without another POST. Request/ID ownership is in memory only: after process restart, check ordinary sync before creating again. Held-header SDK transport and lifecycle widget tests do **not** establish cross-client outcomes. `lib/room_details_screen.dart` shows current server name, topic and member states. The backend fetches fresh state and checks permissions before name/topic edits, invites and kick/ban/unban; the homeserver makes the final authorisation decision. Avatar upload, roles/power-level editing and reporting remain unimplemented. Verify creation, each action, permission changes and sync on two clients. [Element X room edit](https://github.com/element-hq/element-x-android/blob/v26.10.0/features/roomdetailsedit/impl/src/main/kotlin/io/element/android/features/roomdetailsedit/impl/RoomDetailsEditPresenter.kt). |
-| Photos, attachments and rich media | Code present; device/cross-client testing pending | Staged composer media/captions, bounded full-screen image zoom and local audio/video play/pause/seek. Native resources are joined before deleting temporary plaintext. Images remain separate events, not an atomic gallery; animation currently shows its first frame. Test encrypted transfers, hardware pickers, playback, malformed content and interrupted batches. [Element X gallery](https://github.com/element-hq/element-x-android/blob/v26.10.0/libraries/mediaviewer/impl/src/main/kotlin/io/element/android/libraries/mediaviewer/impl/gallery/MediaGalleryPresenter.kt). |
-| Element Call interoperability | **Missing** | Dart SDK legacy VoIP signaling is not Element Call. Requires compatible call stack, 1:1/group lifecycle, permissions, background ringing and reconnect. [Element X call screen](https://github.com/element-hq/element-x-android/blob/v26.10.0/features/call/impl/src/main/kotlin/io/element/android/features/call/impl/ui/CallScreenPresenter.kt). |
-| Voice messages, drafts, outbox and appearance | Code present; live acceptance pending | Permission-triggered voice capture/preview, encrypted account/room drafts, device-scoped durable composer/thread sends with stable transaction IDs and explicit retry/cancel/discard, favourites, text scale/compact/media/receipt preferences. Exercise actual microphone, restart, ambiguous sends and account replacement on device. |
-| Polls, location and other message types | **Missing or limited** | Each event type and composer/player remains an independent cross-client feature; plain text and file sends are not substitutes. |
+| Account provider choice, password, OIDC/MAS, legacy SSO | Built | `lib/login_screen.dart`, `lib/matrix_auth_service.dart`. The OIDC redirect is now `net.samrusselltech.parallax:/auth` with an `https://samrusselltech.net/` client URI. The old redirect had a host part, which MAS refuses. |
+| Confirm identity after sign-in (another device, recovery key, reset) | Built | `lib/features/security/security_gate.dart`. Element X has no skip; Parallax offers "Later", with a warning, for one app session. |
+| SAS emoji verification, both directions | Built | `lib/security_overlay.dart` |
+| Identity-change warnings (reset, verified-user violation) | Partial | Only resets this device has observed are detected. Anything else falls back to the existing prompt before sending. |
+| Key storage on/off, recovery setup and change, reset identity | Built | Changing the recovery key needs the current key, because SDK 14.1.0 doesn't keep the master key on the device. Turning key storage off keeps recovery. |
+| Export/import room keys | Missing | SDK 14.1.0 has no Megolm export. |
+| Sign in by scanning a QR code (MSC4108) | Missing | Showing a QR code to sign in *another* device is **off in Element X**. |
+| App lock (PIN, biometrics) | Built | `lib/features/home/app_lock/`. Also covers incoming verification prompts. |
+| Multiple accounts | Off in Element X | |
+
+## Room list and Spaces
+
+| Area | Status | Notes |
+|---|---|---|
+| Filters: unread, people, rooms, favourites, low priority, invites | Built | `lib/features/home/room_list_filters.dart` |
+| Unread and mention badges, muted indicator, sender in the preview | Built | |
+| Room menu: read/unread, favourite, low priority, mute, copy link, leave | Built | `room_list_menu.dart` |
+| Invites: accept, decline, decline and block (with optional report) | Built | |
+| Spaces filter and browser, join and leave | Built | `space_switcher.dart`, `lib/space_browser_screen.dart` |
+| Space administration (add rooms, space settings) | Missing | Element X has AddRoomToSpace and SpaceSettings. |
+| Message search (on-device index of encrypted history) | Built | `lib/features/threads/`. An FTS5 index kept in app storage and deleted on sign-out. Unencrypted rooms are searched on the server. |
+
+## Timeline and composer
+
+| Area | Status | Notes |
+|---|---|---|
+| Formatted HTML, links, user/room pills, emotes, notices | Built | `lib/features/rich_timeline/`. The HTML renderer uses an allow-list. |
+| Sender avatars and names, day separators, readable room changes | Built | Room changes collapse into "N room changes", as in Element X. |
+| Read receipts under messages; typing indicators | Built | In encrypted rooms only the typing notification is sent, without starting the key sharing the SDK normally does. |
+| Reactions (including encrypted rooms), emoji picker, who reacted | Built | SDK 14.1.0 sends reactions unencrypted. Parallax adds a marker so they go through the guarded encrypted path. Not yet tested with Element X. |
+| Replies, edits, deleting, moderator removal with a reason | Built | |
+| Threads: list, summaries, thread view | Built | Element X's thread timeline is **off by default**; Parallax has it. A new thread's summary count only updates when the room reloads. |
+| Forwarding, including choosing several messages | Built | Up to 10 rooms (Element X allows 5). |
+| Pinned messages: banner, list, pin/unpin | Built | Opening a pinned message shows it in a sheet instead of scrolling to it. |
+| Polls: create, vote, end, edit, history | Built | `lib/features/polls/` |
+| Sharing and viewing a static location | Built | OpenStreetMap tiles. |
+| Voice messages with waveforms; audio, video, files, stickers, captions | Built | `lib/features/media/`. If the app restarts before a voice message sends, the waveform is lost. |
+| Media viewer (swipe, share, save, info) and room media gallery | Built | |
+| Optimised image uploads | Built | No video compression. Per-upload quality is **off in Element X**. |
+| Copy text, copy link, view source, report content | Built | |
+| Jump to a message (search results, permalinks) | Partial | The room opens on the message and marks it, but doesn't scroll or animate to it. |
+| @-mention suggestions, markdown, `/me` | Built | |
+| Rich-text (WYSIWYG) editor | Partial | Markdown only, with no formatting toolbar. |
+| Drafts, and an outbox with retry | Built | Parallax extra. |
+| Jump to first unread, slash commands, multi-image gallery messages | Off in Element X | |
+
+## Room details and administration
+
+| Area | Status | Notes |
+|---|---|---|
+| Start chat; create a room (private, ask to join or public); join by address; request to join | Built | `lib/features/rooms_admin/` |
+| Room info: edit name, topic and avatar; share; favourite | Built | |
+| Per-room notifications (all, mentions, mute) | Built | Stored as push rules, the way Element X does it. |
+| Security and privacy: join rule, address, directory listing, encryption, history visibility | Partial | Managing which Spaces can join is missing. |
+| Roles and permissions, members, bans, join requests | Built | |
+| Report room; leave room (with a last-admin warning) | Built | |
+| User profile: message, verify, block/unblock, moderation | Built | |
+
+## Calls
+
+| Area | Status | Notes |
+|---|---|---|
+| Element Call (embedded widget): start/join, banners, timeline items | Built | `lib/features/call/`. Loads the hosted call.element.io, where Element X bundles its own copy; the URL can be overridden. **Needs a MatrixRTC/LiveKit homeserver and a live two-device test.** |
+| Ringing for direct-chat calls | Built | Only rings while Parallax is open. |
+| Background ringing, Android call integration, picture-in-picture, audio routing | Missing | |
+| Native MatrixRTC calls | Off in Element X | |
+
+## Notifications and platform
+
+| Area | Status | Notes |
+|---|---|---|
+| Push through your own Firebase project or UnifiedPush (for example ntfy) | Built | Opt-in, and must be re-enabled after each restart (existing design). |
+| Global notification settings (direct chats, groups, @room, invites, calls) | Built | |
+| Sender and message text in notifications; inline reply | Missing | Parallax notifications are deliberately generic. "Mark as read" works while the app is still running. |
+| Notification troubleshooting screen | Missing | |
+| Sharing into Parallax; matrix.to and `matrix:` links | Built | Direct-share shortcuts are missing. |
+
+## Account and settings
+
+| Area | Status | Notes |
+|---|---|---|
+| Profile, devices and sessions, blocked users, manage account / change password | Built | Uses the MAS account page when the homeserver advertises one. |
+| Sign out with a backup warning; deactivate account | Built | |
+| Theme (match system, light, dark), media previews, read receipts, typing | Built | Parallax palettes, red and orange by default. |
+| About, licences, report a problem | Partial | Reporting a problem opens a Gitea issue; there's no in-app bug report with logs (rageshake). |
+| User status | Missing | Element X shows it only when the server supports it. |
+| Analytics opt-in | Not applicable | Parallax has no analytics. |
+
+## Parallax extras (not in Element X)
+
+Room backgrounds, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry/cancel, server message search, a choice of palettes, and "Ask to join" room creation plus the thread timeline (both off by default in Element X).
 
 ## Room-creation failure contract
 
@@ -27,8 +114,13 @@ Only app-owned `RoomCreationFailure` outcomes release create admission:
 - `rejected`: the SDK create operation returns a recognised refusal code: `M_FORBIDDEN`, `M_UNAUTHORIZED`, `M_UNKNOWN_TOKEN`, `M_MISSING_TOKEN`, `M_USER_DEACTIVATED`, `M_GUEST_ACCESS_FORBIDDEN`, `M_LIMIT_EXCEEDED`, `M_RESOURCE_LIMIT_EXCEEDED`, `M_BAD_JSON`, `M_NOT_JSON`, `M_MISSING_PARAM`, `M_INVALID_PARAM`, `M_UNSUPPORTED_ROOM_VERSION`, `M_ROOM_IN_USE`, or `M_EXCLUSIVE`. Show a sanitised error and permit another explicit submission, never automatic resend. The SDK does not preserve HTTP status on generated API exceptions, so other codes are deliberately not assumed safe.
 - Every other error, including arbitrary `StateError`/`ArgumentError`, `M_UNKNOWN`, generic server errors, malformed acknowledgements and transport loss, retains the original future and admission lock as uncertain. In particular, the session-change check **after** a successful create is not evidence of rejection. A pending-header deadline is presentation only, not cancellation or permission to resend.
 
-## Release gates
+## Acceptance tests before claiming parity
 
-1. Every pushed `main` commit must pass CI formatting, analysis, tests, arm64 APK build and signature/version/ABI checks. Before promoting a build, also test install/update and cold launch on Android. CI builds a per-commit **test** prerelease; that is not feature parity.
-2. On disposable accounts, test fresh/restarted inbox, invitation/join/leave, encrypted two-device text/media, SAS match/mismatch, recovery/history, changed keys, failed key queries, network loss and account switch. Never put recovery keys or access tokens in automation logs.
-3. Finish OIDC/SSO, background push, threads, Spaces, room management, encrypted search, rich media and Element Call in separate verified increments. Do not describe the app as an Element X replacement or migrate a critical account until all relevant rows have passed their cross-client gates.
+1. On disposable accounts, with Parallax and Element X side by side, test:
+   - sign-in by password, OIDC/MAS and SSO;
+   - confirming identity on a new device, recovery and reset;
+   - encrypted messages, reactions, polls, location, voice and media;
+   - pins, threads, forwarding and search.
+2. Element Call against a MatrixRTC homeserver: 1:1 and group calls, with ringing in both directions (Parallax to Element X and back).
+3. UnifiedPush through ntfy with the app killed, and Firebase push.
+4. Install, update and cold start on a physical arm64 phone.
