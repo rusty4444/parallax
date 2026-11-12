@@ -126,6 +126,24 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- Rich notifications: the inline Reply action runs in a background
+             isolate through the plugin's (non-exported) action receiver. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false" />
+        <!-- Decrypted notification image previews (cache/notification_media)
+             for MessagingStyle; Android grants the system UI read access to
+             each notification's URIs. Keep the authority in sync with
+             lib/features/notifications/notification_media.dart. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.notifications.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/notification_provider_paths" />
+        </provider>
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <!-- Don't delete the meta-data below.

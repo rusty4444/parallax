@@ -21,6 +21,8 @@ import 'features/scheduled/delayed_events.dart';
 import 'features/scheduled/undo_send.dart';
 import 'crypto_signature_validation.dart';
 import 'encrypted_media.dart';
+import 'features/notifications/background_push.dart'
+    show waitForBackgroundPushClient;
 import 'features/rich_timeline/message_composition.dart';
 import 'homeserver_security.dart';
 import 'key_query_validation.dart';
@@ -714,6 +716,10 @@ class MatrixBackend extends ChatBackend
       await vodozemac.init();
       checkStartup();
       final directory = await getApplicationSupportDirectory();
+      checkStartup();
+      // A background push isolate may briefly hold a read-only connection
+      // (rich notifications); let it finish before startup migrations.
+      await waitForBackgroundPushClient(directory.path);
       checkStartup();
       openedDatabase = await sqlite.openDatabase(
         path.join(directory.path, 'parallax.db'),
