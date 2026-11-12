@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -14,6 +16,7 @@ import '../hooks/registry.dart';
 import '../media_viewer.dart';
 import '../message_image.dart';
 import '../room_avatar.dart';
+import 'bubble_column.dart';
 import 'double_tap_react.dart';
 import 'reaction_pills.dart';
 import '../features/appearance/bubble_colours.dart';
@@ -21,6 +24,21 @@ import '../features/appearance/bubble_colours.dart';
 /// Width of the sender-avatar column beside others' messages.
 const senderAvatarSize = 32.0;
 const _avatarGap = 8.0;
+
+/// Widest a message bubble gets, so lines stay readable on tablets.
+const _maxBubbleWidth = 520.0;
+
+/// Widest bubble for a screen [screenWidth] wide. Own messages are capped
+/// like others' messages next to an avatar, so a long message of yours
+/// never reaches further left than theirs reach right.
+double bubbleMaxWidth(
+  double screenWidth, {
+  required bool mine,
+  required bool avatars,
+}) => math.min(
+  _maxBubbleWidth,
+  screenWidth * 0.83 - (mine || avatars ? senderAvatarSize + _avatarGap : 0),
+);
 
 /// One timeline entry. State events render as a centred line; everything
 /// else is a bubble whose body comes from a feature hook when one claims the
@@ -104,9 +122,11 @@ class MessageBubble extends StatelessWidget {
     final avatars = !mine && (showAvatars ?? true);
     final sender = showSender ?? (!mine && !group);
     final highlighted = entry.highlight && !mine && !entry.redacted;
-    final maxWidth =
-        MediaQuery.sizeOf(context).width * 0.83 -
-        (avatars ? senderAvatarSize + _avatarGap : 0);
+    final maxWidth = bubbleMaxWidth(
+      MediaQuery.sizeOf(context).width,
+      mine: mine,
+      avatars: avatars,
+    );
     // Stickers render without bubble chrome, as in Element X.
     final standalone = mediaEntryStandalone(
       context,
@@ -147,126 +167,127 @@ class MessageBubble extends StatelessWidget {
               ),
               child: Padding(
                 padding: EdgeInsets.only(bottom: compact ? 5 : 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // The bubble's top and side padding are part of the
-                    // double-tap target too (short messages are small).
-                    DoubleTapReact(
-                      onDoubleTap: onHeart,
-                      onLongPress: onAction,
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          14,
-                          compact ? 6 : 10,
-                          14,
-                          0,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (!mine && sender) ...[
-                              Text(
-                                entry.senderLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: palette.secondary,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
+                // Wrapped lines hug the longest one, and the bubble is as
+                // wide as its content (short messages, short bubbles).
+                child: DefaultTextStyle.merge(
+                  textWidthBasis: TextWidthBasis.longestLine,
+                  child: BubbleColumn(
+                    children: [
+                      // The bubble's top and side padding are part of the
+                      // double-tap target too (short messages are small).
+                      DoubleTapReact(
+                        onDoubleTap: onHeart,
+                        onLongPress: onAction,
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            14,
+                            compact ? 6 : 10,
+                            14,
+                            0,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (!mine && sender) ...[
+                                Text(
+                                  entry.senderLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: palette.secondary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 5),
-                            ],
-                            if (entry.replyToId != null) ...[
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    left: BorderSide(
-                                      color: palette.secondary,
-                                      width: 3,
+                                const SizedBox(height: 5),
+                              ],
+                              if (entry.replyToId != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: palette.secondary,
+                                        width: 3,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    replyPreview == null
+                                        ? 'In reply to an earlier message'
+                                        : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: mine
+                                          ? palette.bubbleText
+                                          : palette.muted,
+                                      fontSize: 12,
                                     ),
                                   ),
                                 ),
-                                child: Text(
-                                  replyPreview == null
-                                      ? 'In reply to an earlier message'
-                                      : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: mine
-                                        ? palette.bubbleText
-                                        : palette.muted,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                            ],
-                            if (special != null)
-                              special
-                            else ...[
-                              if (entry.isImage) ...[
-                                MessageImage(
-                                  backend: backend,
-                                  palette: palette,
-                                  roomId: roomId,
-                                  eventId: entry.id,
-                                ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 5),
                               ],
-                              if (entry.isAttachment)
-                                _AttachmentRow(
-                                  entry: entry,
-                                  backend: backend,
-                                  roomId: roomId,
-                                  palette: palette,
-                                )
-                              else if (entry.body.isNotEmpty)
-                                buildMessageText(
-                                  context,
-                                  hook,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 15,
-                                    height: 1.35,
+                              if (special != null)
+                                special
+                              else ...[
+                                if (entry.isImage) ...[
+                                  MessageImage(
+                                    backend: backend,
+                                    palette: palette,
+                                    roomId: roomId,
+                                    eventId: entry.id,
                                   ),
-                                ),
+                                  const SizedBox(height: 4),
+                                ],
+                                if (entry.isAttachment)
+                                  _AttachmentRow(
+                                    entry: entry,
+                                    backend: backend,
+                                    roomId: roomId,
+                                    palette: palette,
+                                  )
+                                else if (entry.body.isNotEmpty)
+                                  buildMessageText(
+                                    context,
+                                    hook,
+                                    style: TextStyle(
+                                      color: textColor,
+                                      fontSize: 15,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ...footers,
-                          const SizedBox(height: 4),
-                          Align(
-                            alignment: Alignment.bottomRight,
-                            child: Text(
-                              [
-                                if (entry.edited && !entry.redacted) '(edited)',
-                                TimeOfDay.fromDateTime(
-                                  entry.time.toLocal(),
-                                ).format(context),
-                              ].join('  '),
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: mine
-                                    ? palette.bubbleText.withValues(alpha: 0.77)
-                                    : palette.muted,
-                              ),
+                      for (final footer in footers)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: footer,
+                        ),
+                      BubbleEnd(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+                          child: Text(
+                            [
+                              if (entry.edited && !entry.redacted) '(edited)',
+                              TimeOfDay.fromDateTime(
+                                entry.time.toLocal(),
+                              ).format(context),
+                            ].join('  '),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: mine
+                                  ? palette.bubbleText.withValues(alpha: 0.77)
+                                  : palette.muted,
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

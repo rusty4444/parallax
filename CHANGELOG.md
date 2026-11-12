@@ -12,6 +12,11 @@
 - Device search reads each room's stored history once instead of on every launch, and writes in batches.
 - More profile pictures and animated stickers stay cached, and room backgrounds are decoded at screen size.
 
+### Message bubbles
+
+- Bubbles are as wide as their message: a short message gets a short bubble, on the right for your own messages and after the sender's picture for others. Before, every bubble stretched to its widest because the time's right alignment took the full width.
+- Your long messages stop about a quarter of the way in from the left, mirroring other people's bubbles on the right, and wrapped lines hug the longest line. On tablets bubbles are at most 520 points wide.
+
 ### Thumbnails saved on the device
 
 - Chat and profile pictures and photo, sticker and video previews are now saved on the phone, so they show straight away after a restart and without a connection. Before, they were only kept in memory, and a picture that failed to load stayed as initials until the screen was rebuilt.
