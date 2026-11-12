@@ -11,6 +11,12 @@ import '../../hooks/hook_types.dart';
 List<Widget> composerRoomOverlays(BuildContext context, RoomHookContext ctx) =>
     const [];
 
+/// Settings sections (for example "Show chat effects").
+List<Widget> composerSettingsSections(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => const [];
+
 /// Outgoing text transform (for example `/confetti` → effect msgtype).
 Map<String, Object?> composerTransformOutgoing(
   OutgoingTextContext ctx,

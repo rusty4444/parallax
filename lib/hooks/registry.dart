@@ -126,6 +126,7 @@ List<Widget> settingsSectionsFor(
   ...savedSettingsSections(context, ctx),
   ...packsSettingsSections(context, ctx),
   ...qrLoginSettingsSections(context, ctx),
+  ...composerSettingsSections(context, ctx),
 ];
 
 /// Wraps the signed-in app (inside the verification overlay). The app lock
