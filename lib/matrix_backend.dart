@@ -40,6 +40,8 @@ import 'queued_media_sender.dart';
 import 'push_notifications.dart';
 import 'secure_store.dart';
 import 'send_cancellation.dart';
+import 'hooks/registry.dart' show transformOutgoingText;
+import 'hooks/hook_types.dart' show OutgoingTextContext;
 
 /// One SDK client and one active timeline for the lifetime of the app.
 class MatrixBackend extends ChatBackend
@@ -576,12 +578,20 @@ class MatrixBackend extends ChatBackend
               // are derived deterministically here (rich_timeline module).
               final isEdit = record.editEventId != null;
               final eventId = await room.sendEvent(
-                composeTextMessage(
-                  record.body,
-                  ownUserId: client.userID,
-                  replyToSender: reply?.senderId,
-                  editEventId: record.editEventId,
-                  previousMentions: mentionedUserIds(edited?.content),
+                transformOutgoingText(
+                  OutgoingTextContext(
+                    backend: this,
+                    roomId: room.id,
+                    text: record.body,
+                    editing: isEdit,
+                  ),
+                  composeTextMessage(
+                    record.body,
+                    ownUserId: client.userID,
+                    replyToSender: reply?.senderId,
+                    editEventId: record.editEventId,
+                    previousMentions: mentionedUserIds(edited?.content),
+                  ),
                 ),
                 txid: record.id,
                 inReplyTo: isEdit ? null : reply,
@@ -1089,12 +1099,20 @@ class MatrixBackend extends ChatBackend
         _requireEncryptedTransport(room);
         // Markdown, /me and m.mentions are derived from the plain text here
         // (rich_timeline module); the guards above are unchanged.
-        final content = composeTextMessage(
-          text.trim(),
-          ownUserId: client.userID,
-          replyToSender: reply?.senderId,
-          editEventId: editEventId,
-          previousMentions: mentionedUserIds(edited?.content),
+        final content = transformOutgoingText(
+          OutgoingTextContext(
+            backend: this,
+            roomId: roomId,
+            text: text.trim(),
+            editing: editEventId != null,
+          ),
+          composeTextMessage(
+            text.trim(),
+            ownUserId: client.userID,
+            replyToSender: reply?.senderId,
+            editEventId: editEventId,
+            previousMentions: mentionedUserIds(edited?.content),
+          ),
         );
         final sentId = await _protectSend(
           room,

@@ -39,6 +39,9 @@ class RichMessageComposer extends StatefulWidget {
     this.recorder,
     this.extraAttachments = const [],
     this.mentionSource,
+    this.hookContext,
+    this.replyToId,
+    this.editing = false,
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
@@ -67,6 +70,18 @@ class RichMessageComposer extends StatefulWidget {
   /// Room members offered after typing `@`. When null, the room shown by the
   /// timeline on the same route is used (see `bindTimelineRoute`).
   final MentionSource? mentionSource;
+
+  /// The room this composer belongs to, for feature hooks: long-press send
+  /// options ([composerSendOptionsFor]), extra autocomplete sources
+  /// ([composerSuggestionSourcesFor]) and toolbar features. Null in contexts
+  /// without a room hook (tests, threads that opt out).
+  final RoomHookContext? hookContext;
+
+  /// Reply target for send options that consume the draft (Send later).
+  final String? replyToId;
+
+  /// Whether the draft is an edit of an existing message.
+  final bool editing;
 
   @override
   State<RichMessageComposer> createState() => _RichMessageComposerState();

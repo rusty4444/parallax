@@ -19,6 +19,11 @@ const timelineStateTypes = {
   'm.room.server_acl',
 };
 
+/// Live location share (MSC3672 beacon_info state). Individual beacons
+/// (MSC3672 `beacon`) are references and are aggregated, not shown.
+const beaconInfoTypes = {'m.beacon_info', 'org.matrix.msc3672.beacon_info'};
+const beaconTypes = {'m.beacon', 'org.matrix.msc3672.beacon'};
+
 const pollStartTypes = {'m.poll.start', 'org.matrix.msc3381.poll.start'};
 const pollResponseTypes = {
   'm.poll.response',
@@ -39,6 +44,7 @@ bool isTimelineVisibleType(String type) =>
     type == 'm.room.encrypted' ||
     type == 'm.sticker' ||
     pollStartTypes.contains(type) ||
+    beaconInfoTypes.contains(type) ||
     callTimelineTypes.contains(type) ||
     timelineStateTypes.contains(type);
 
@@ -57,6 +63,7 @@ EntryKind entryKindFor({
   if (type == 'm.room.encrypted') return EntryKind.undecryptable;
   if (type == 'm.sticker') return EntryKind.sticker;
   if (pollStartTypes.contains(type)) return EntryKind.poll;
+  if (beaconInfoTypes.contains(type)) return EntryKind.liveLocation;
   if (callTimelineTypes.contains(type)) return EntryKind.call;
   if (timelineStateTypes.contains(type)) return EntryKind.state;
   if (type != 'm.room.message') return EntryKind.unknown;

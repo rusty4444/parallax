@@ -279,6 +279,7 @@ enum EntryKind {
   file,
   sticker,
   location,
+  liveLocation,
   poll,
   state,
   call,

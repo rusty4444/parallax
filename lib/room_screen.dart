@@ -1095,7 +1095,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                   ),
                   ...roomBannersFor(context, roomCtx),
                   Expanded(
-                    child: _opening
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _opening
                         ? Center(
                             child: CircularProgressIndicator(color: p.accent),
                           )
@@ -1150,6 +1153,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                             onReaction: _react,
                             onLoadOlder: _loadOlder,
                           ),
+                        // Chat effects and other full-screen overlays.
+                        ...roomOverlaysFor(context, roomCtx),
+                      ],
+                    ),
                   ),
                   if (_features != null) _pendingPanel(p),
                   if (_draftReadFailed)
@@ -1240,6 +1247,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         roomCtx,
                       ),
                       mentionSource: richTimelineMentionSource(roomCtx),
+                      hookContext: roomCtx,
+                      replyToId: _replyingTo?.id,
+                      editing: _editing != null,
                       controller: _draft,
                       sendContext: _sendContext,
                       onAcknowledged: (textCleared) =>
