@@ -705,7 +705,7 @@ class MatrixBackend extends ChatBackend
           _requiresReauthentication = false;
         }
         _setStatus(
-          client.isLogged() && !_requiresReauthentication
+          client.isLogged() && !_requiresReauthentication && !_holdSignedInUi
               ? SessionStatus.ready
               : SessionStatus.signedOut,
         );
@@ -802,11 +802,76 @@ class MatrixBackend extends ChatBackend
     }
   }
 
+  // --- QR code sign-in (lib/features/qr_login) ----------------------------
+
+  bool _deviceGrantBusy = false;
+
+  /// While true the client may already be logged in, but the app keeps the
+  /// sign-in UI (status signedOut) until the QR flow has imported the other
+  /// device's secrets, so the new device never flashes the identity gate.
+  bool _holdSignedInUi = false;
+
+  /// MSC4108 "Sign in with QR code" on this new device: OAuth 2.0 device
+  /// authorization against [serverNameOrUrl] (from the QR code), committed
+  /// through the same owner-pinned [MatrixAuthService] path as browser
+  /// sign-in. [onGrant] forwards the grant to the other device; [afterCommit]
+  /// runs with the signed-in UI held back (secrets import). The UI is
+  /// released when this returns or throws, even after a partial failure.
+  Future<void> loginWithDeviceAuthorization(
+    String serverNameOrUrl, {
+    required Future<void> Function(DeviceAuthorizationGrant grant) onGrant,
+    required Future<void> Function() afterCommit,
+    Future<void>? cancelled,
+  }) async {
+    final client = _requireClient();
+    _requireAuthenticationAvailable(client);
+    if (client.isLogged() || client.userID != null) {
+      throw StateError('Sign out before signing in with a QR code');
+    }
+    final generation = _securityGeneration;
+    bool current() =>
+        !_disposed &&
+        !_loggingOut &&
+        identical(_client, client) &&
+        generation == _securityGeneration;
+    _deviceGrantBusy = true;
+    _holdSignedInUi = true;
+    var committed = false;
+    try {
+      _firstSyncCompleted = false;
+      _roomSyncState = RoomSyncState.loading;
+      _roomSyncIssue = null;
+      await _authService(client).deviceAuthorizationLogin(
+        serverNameOrUrl,
+        onGrant: onGrant,
+        cancelled: cancelled,
+      );
+      committed = true;
+      if (!current()) throw StateError('Authentication session changed');
+      await afterCommit();
+    } finally {
+      _holdSignedInUi = false;
+      _deviceGrantBusy = false;
+      if (committed && current() && client.isLogged()) {
+        _requiresReauthentication = false;
+        _setStatus(SessionStatus.ready);
+        _scheduleRoomUpdate();
+        _restoreOutboxQuietly();
+      } else if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  /// True while a QR sign-in is running on this device.
+  bool get deviceAuthorizationLoginBusy => _deviceGrantBusy;
+
   void _requireAuthenticationAvailable(matrix.Client client) {
     if (_disposed ||
         _loggingOut ||
         _cryptoSetupBusy ||
         _passwordLoginBusy ||
+        _deviceGrantBusy ||
         _authService(client).busy ||
         MatrixAuthService.isApplyingSession(client)) {
       throw StateError('Wait for the current account operation to finish');
@@ -819,6 +884,7 @@ class MatrixBackend extends ChatBackend
     if (_loggingOut ||
         _cryptoSetupBusy ||
         _passwordLoginBusy ||
+        _deviceGrantBusy ||
         MatrixAuthService.isApplyingSession(client)) {
       throw StateError(
         'Wait for the current account operation before signing out',
