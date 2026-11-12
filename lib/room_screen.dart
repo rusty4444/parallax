@@ -576,10 +576,25 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
-  ChatRoom? get _currentRoom => [
-    for (final r in widget.backend.rooms)
-      if (r.id == widget.roomId) r,
-  ].firstOrNull;
+  /// This room's projection, looked up once per room list (the list keeps
+  /// its identity until a room changes; the screen rebuilds far more often).
+  ChatRoom? get _currentRoom {
+    final rooms = widget.backend.rooms;
+    final cached = _roomLookup;
+    if (cached != null &&
+        identical(cached.rooms, rooms) &&
+        cached.id == widget.roomId) {
+      return cached.room;
+    }
+    final room = [
+      for (final r in rooms)
+        if (r.id == widget.roomId) r,
+    ].firstOrNull;
+    _roomLookup = (rooms: rooms, id: widget.roomId, room: room);
+    return room;
+  }
+
+  ({List<ChatRoom> rooms, String id, ChatRoom? room})? _roomLookup;
 
   RoomHookContext _roomContext(ChatRoom? room) => RoomHookContext(
     backend: widget.backend,
@@ -1125,6 +1140,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     );
   }
 
+  static int _backgroundDecodeSize(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final longest = size.width > size.height ? size.width : size.height;
+    return (longest * MediaQuery.devicePixelRatioOf(context)).ceil();
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
@@ -1134,10 +1155,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     return AnimatedBuilder(
       animation: widget.backend,
       builder: (context, _) {
-        final room = [
-          for (final r in widget.backend.rooms)
-            if (r.id == widget.roomId) r,
-        ].firstOrNull;
+        final room = _currentRoom;
         final entries = widget.backend.activeRoomId == widget.roomId
             ? widget.backend.messages
             : const <ChatEntry>[];
@@ -1153,8 +1171,18 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                   : Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.file(
-                          _background!,
+                        Image(
+                          // Decoded no larger than the screen's longer side
+                          // (still enough to cover it): the stored picture
+                          // is the gallery original, and a 12 MP photo is
+                          // ~48 MB decoded, pushing avatars and thumbnails
+                          // out of the image cache.
+                          image: ResizeImage(
+                            FileImage(_background!),
+                            width: _backgroundDecodeSize(context),
+                            height: _backgroundDecodeSize(context),
+                            policy: ResizeImagePolicy.fit,
+                          ),
                           key: ValueKey(_backgroundVersion),
                           fit: BoxFit.cover,
                           errorBuilder: (_, _, _) =>

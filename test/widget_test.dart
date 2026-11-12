@@ -927,6 +927,57 @@ void main() {
     expect(find.text('Identity connected on this device'), findsOneWidget);
   });
 
+  testWidgets('the other-devices list is collapsed until opened', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..currentUserId = '@me:example.org'
+      ..devices = const [
+        VerificationDevice(id: 'PHONE', name: 'Pixel', verified: false),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.parallax),
+          style: VisualTheme.parallax,
+          onThemeChanged: (_) {},
+          setSecureWindow: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('devices-toggle'));
+    await tester.scrollUntilVisible(
+      toggle,
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    // Collapsed: no device rows, and nothing fetched yet.
+    expect(find.text('Pixel'), findsNothing);
+    expect(find.text('Refresh devices'), findsNothing);
+    expect(backend.deviceLoads, 0);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Pixel'), findsOneWidget);
+    expect(backend.deviceLoads, 1);
+
+    await tester.tap(find.text('Pixel'));
+    await tester.pumpAndSettle();
+    expect(backend.verificationAction, 'start:@me:example.org:PHONE');
+
+    // Closing and reopening keeps the loaded list.
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Pixel'), findsNothing);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Pixel'), findsOneWidget);
+    expect(backend.deviceLoads, 1);
+  });
+
   testWidgets('secure flag remains through recovery dialog exit animation', (
     tester,
   ) async {
@@ -949,6 +1000,8 @@ void main() {
       220,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Enter recovery key'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Enter recovery key'));
     await tester.pumpAndSettle();
     expect(calls, [true]);
@@ -985,6 +1038,8 @@ void main() {
       220,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Enter recovery key'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Enter recovery key'));
     await tester.pump();
     await tester.tap(find.text('Enter recovery key'));
@@ -1021,6 +1076,8 @@ void main() {
       220,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Set up encryption'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Set up encryption'));
     await tester.pumpAndSettle();
     expect(find.byType(CryptoSetupScreen), findsOneWidget);
@@ -1147,6 +1204,8 @@ void main() {
       220,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Repair with existing key'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Repair with existing key'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -1467,8 +1526,15 @@ class FakeBackend extends ChatBackend {
     notifyListeners();
   }
 
+  List<VerificationDevice> devices = const [];
+  int deviceLoads = 0;
+
   @override
-  Future<List<VerificationDevice>> ownDevices() async => const [];
+  Future<List<VerificationDevice>> ownDevices() async {
+    deviceLoads++;
+    return devices;
+  }
+
   @override
   Future<void> startVerification(String userId, {String? deviceId}) async {
     verificationAction = 'start:$userId:$deviceId';

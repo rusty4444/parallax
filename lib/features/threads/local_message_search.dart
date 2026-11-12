@@ -159,7 +159,9 @@ class SharedMessageSearchPreference implements MessageSearchPreference {
 }
 
 /// [LocalMessageSearch] fed by the SDK's decrypted timeline and history
-/// streams, plus a bounded backfill from the SDK's local event store.
+/// streams, plus a bounded backfill from the SDK's local event store. Each
+/// room's stored history is read once per index (progress is kept in the
+/// index itself); after that the live streams keep it current.
 class MatrixMessageSearchIndex implements LocalMessageSearch {
   MatrixMessageSearchIndex(
     this._access, {
@@ -167,6 +169,8 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
     this._preference = const SharedMessageSearchPreference(),
     this.backfillRooms = 100,
     this.backfillEventsPerRoom = 300,
+    this.firstSyncTimeout = const Duration(seconds: 30),
+    this.liveBatchDelay = const Duration(milliseconds: 250),
   });
 
   final MatrixSdkAccess _access;
@@ -174,6 +178,14 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
   final MessageSearchPreference _preference;
   final int backfillRooms;
   final int backfillEventsPerRoom;
+
+  /// Backfill waits for the first sync after start (the SDK stores it on the
+  /// same sqflite worker thread), or this long when there is none (offline).
+  final Duration firstSyncTimeout;
+
+  /// Live events arrive one at a time while the SDK stores a sync; they are
+  /// written together this long after the first one.
+  final Duration liveBatchDelay;
 
   matrix.Client? _client;
   String? _session;
@@ -186,7 +198,15 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
   int _epoch = 0;
   final _pending = <({String account, int epoch, IndexOp op})>[];
   Future<void>? _draining;
+  Timer? _flushTimer;
   final _backfilled = <String>{};
+
+  // [accountHash] of the session it was computed for (it is needed for
+  // every live event, and SHA-256 per event adds up during a big sync).
+  Uri? _hashedHomeserver;
+  String? _hashedUser;
+  String? _hashedDevice;
+  String? _hashed;
 
   /// Stable, non-reversible index file name for one signed-in session
   /// (homeserver, user and device). A new sign-in gets a new device and so a
@@ -201,10 +221,29 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
       .toString()
       .substring(0, 32);
 
-  /// Completes when queued index writes have been applied (for tests).
+  String _accountOf(matrix.Client client) {
+    final homeserver = client.homeserver;
+    final user = client.userID;
+    final device = client.deviceID;
+    final hashed = _hashed;
+    if (hashed != null &&
+        homeserver == _hashedHomeserver &&
+        user == _hashedUser &&
+        device == _hashedDevice) {
+      return hashed;
+    }
+    _hashedHomeserver = homeserver;
+    _hashedUser = user;
+    _hashedDevice = device;
+    return _hashed = accountHash(client);
+  }
+
+  /// Completes when queued index writes, including live events still
+  /// waiting for [liveBatchDelay], have been applied (for tests).
   @visibleForTesting
   Future<void> get idle async {
-    while (_draining != null) {
+    while (_draining != null || _flushTimer != null) {
+      if (_flushTimer != null) _drain();
       await _draining;
     }
     await _io;
@@ -248,6 +287,27 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
       ..clear()
       ..add(client.onTimelineEvent.stream.listen((e) => _onEvent(client, e)))
       ..add(client.onHistoryEvent.stream.listen((e) => _onEvent(client, e)))
+      // Messages whose keys arrive after their sync are stored decrypted
+      // later and announced only on the deprecated onEvent stream (SDK 14.1
+      // has no replacement). The per-launch backfill used to pick these up;
+      // it now reads each room once, so index them as they are decrypted.
+      ..add(
+        // ignore: deprecated_member_use
+        client.onEvent.stream.listen((update) {
+          if (update.type != matrix.EventUpdateType.decryptedTimelineQueue) {
+            return;
+          }
+          final room = client.getRoomById(update.roomID);
+          if (room == null) return;
+          final matrix.Event event;
+          try {
+            event = matrix.Event.fromJson(update.content, room);
+          } catch (_) {
+            return;
+          }
+          _onEvent(client, event);
+        }),
+      )
       ..add(
         client.onSessionCleared.stream.listen((_) {
           // Sign-out or remote session invalidation: delete the plaintext.
@@ -261,7 +321,7 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
   Future<void> _prepare(matrix.Client client) async {
     if (!await isEnabled()) return;
     if (!_access.isSessionCurrent(client) || client.userID == null) return;
-    final account = accountHash(client);
+    final account = _accountOf(client);
     final store = await _storeFor(account);
     if (store == null || !_access.isSessionCurrent(client)) return;
     if (_backfilled.add(account)) await _backfill(client, account);
@@ -312,14 +372,21 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
       return;
     }
     if (ops.isEmpty) return;
-    final account = accountHash(client);
+    final account = _accountOf(client);
     for (final op in ops) {
       _pending.add((account: account, epoch: _epoch, op: op));
     }
-    _drain();
+    // Coalesce a sync's events into one write. A drain in progress picks
+    // them up when its current batch is written.
+    if (_draining == null) {
+      _flushTimer ??= Timer(liveBatchDelay, _drain);
+    }
   }
 
+  /// Writes queued ops now.
   void _drain() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
     if (_draining != null) return;
     _draining = _drainPending().whenComplete(() {
       _draining = null;
@@ -353,20 +420,36 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
     }
   }
 
+  /// Indexes the stored history of the first [backfillRooms] joined
+  /// encrypted rooms, skipping rooms this index already holds. Each room
+  /// costs a database read and JSON decoding on this isolate, so it waits
+  /// for the first sync and yields between rooms.
   Future<void> _backfill(matrix.Client client, String account) async {
     final epoch = _epoch;
+    bool current() =>
+        epoch == _epoch && _enabled == true && _access.isSessionCurrent(client);
+    await _firstSync(client);
+    if (!current()) return;
+    final store = await _storeFor(account);
+    if (store == null || !current()) return;
+    final Set<String> done;
+    try {
+      done = await store.backfilledRooms();
+    } catch (_) {
+      return;
+    }
+    if (!current()) return;
     final rooms = client.rooms
         .where(
           (room) => room.membership == matrix.Membership.join && room.encrypted,
         )
         .take(backfillRooms)
+        .where((room) => !done.contains(room.id))
         .toList();
     for (final room in rooms) {
-      if (epoch != _epoch ||
-          _enabled != true ||
-          !_access.isSessionCurrent(client)) {
-        return;
-      }
+      // Let frames, input and sync work run between rooms.
+      await Future<void>.delayed(Duration.zero);
+      if (!current()) return;
       List<matrix.Event> events;
       try {
         events = await client.database.getEventList(
@@ -376,7 +459,7 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
       } catch (_) {
         continue;
       }
-      if (epoch != _epoch || !_access.isSessionCurrent(client)) return;
+      if (!current()) return;
       // Oldest first, so edits and redactions apply after their targets.
       for (final event in events.reversed) {
         try {
@@ -385,13 +468,41 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
           }
         } catch (_) {}
       }
+      // Same batch as the room's messages: if the write fails, the room is
+      // read again on a later launch.
+      _pending.add((
+        account: account,
+        epoch: epoch,
+        op: IndexRoomBackfilled(room.id),
+      ));
       _drain();
       await _draining;
     }
   }
 
+  /// Completes once [client] has synced since it started, or after
+  /// [firstSyncTimeout] (offline), whichever is first.
+  Future<void> _firstSync(matrix.Client client) async {
+    if (client.onSync.value != null) return;
+    final synced = Completer<void>();
+    void done([Object? _]) {
+      if (!synced.isCompleted) synced.complete();
+    }
+
+    final subscription = client.onSync.stream.listen(done, onError: done);
+    final timer = Timer(firstSyncTimeout, done);
+    try {
+      await synced.future;
+    } finally {
+      timer.cancel();
+      unawaited(subscription.cancel());
+    }
+  }
+
   Future<void> _wipe() async {
     _epoch++;
+    _flushTimer?.cancel();
+    _flushTimer = null;
     _pending.clear();
     final store = _store;
     _store = null;
@@ -448,7 +559,7 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
     if (!await isEnabled()) return const LocalSearchPage(hits: []);
     final tokens = searchTokens(query);
     if (tokens.isEmpty) return const LocalSearchPage(hits: []);
-    final store = await _storeFor(accountHash(client));
+    final store = await _storeFor(_accountOf(client));
     if (store == null) throw StateError('Search index unavailable');
     final rows = await store.search(tokens, limit: limit + 1, offset: offset);
     if (!_access.isSessionCurrent(client)) {

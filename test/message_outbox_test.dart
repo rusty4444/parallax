@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -115,6 +116,39 @@ class _HoldTimers {
   }
 }
 
+/// The snapshot format as it was written before sizes were computed
+/// arithmetically and media was spliced in: plain `jsonEncode`.
+String _referenceSnapshot(String accountKey, Iterable<OutboxRecord> records) =>
+    jsonEncode({
+      'version': 1,
+      'accountKey': accountKey,
+      'records': [
+        for (final record in records)
+          {
+            'id': record.id,
+            'accountKey': record.accountKey,
+            'roomId': record.roomId,
+            'body': record.body,
+            'createdAt': record.createdAt.toUtc().toIso8601String(),
+            'state': record.state.name,
+            if (record.caption != null) 'caption': record.caption,
+            if (record.replyToId != null) 'replyToId': record.replyToId,
+            if (record.editEventId != null) 'editEventId': record.editEventId,
+            if (record.threadRootId != null)
+              'threadRootId': record.threadRootId,
+            if (record.error != null) 'error': record.error,
+            if (record.progress != null) 'progress': record.progress,
+            if (record.media case final media?)
+              'media': {
+                'bytes': base64.encode(media.bytes),
+                'name': media.name,
+                'mimeType': media.mimeType,
+                if (media.durationMs != null) 'durationMs': media.durationMs,
+              },
+          },
+      ],
+    });
+
 void main() {
   late _Store store;
   late _Transport transport;
@@ -125,13 +159,18 @@ void main() {
   late _HoldTimers timers;
   final now = DateTime.utc(2026, 11, 12, 9);
 
-  MessageOutbox makeBox({int storedByteLimit = MessageOutbox.maxStoredBytes}) {
+  MessageOutbox makeBox({
+    int storedByteLimit = MessageOutbox.maxStoredBytes,
+    DateTime Function()? clock,
+    OutboxBackgroundRunner? background,
+  }) {
     final box = MessageOutbox(
       storage: store,
       storedByteLimit: storedByteLimit,
       currentAccount: () => account,
       holdTimer: timers.create,
-      clock: () => now,
+      clock: clock ?? () => now,
+      background: background ?? <T>(work) => Isolate.run(work),
       transmit: transport.send,
       onChanged: () {
         emissions++;
@@ -1205,6 +1244,242 @@ void main() {
       expect(store.values, isEmpty);
     },
   );
+
+  group('snapshot codec', () {
+    test('sizes are exact without encoding media', () {
+      OutboxRecord record(
+        int index, {
+        String body = 'plain',
+        MediaSelection? media,
+        String? error,
+        double? progress,
+        bool relations = false,
+      }) => OutboxRecord(
+        id: 'mx_${base64Url.encode(Uint8List(32)..[0] = index).replaceAll('=', '')}',
+        accountKey: 'älice',
+        roomId: '!r:example',
+        body: body,
+        createdAt: DateTime.utc(2026, 1, 2, 3, 4, 5, index, index * 3),
+        state: DeliveryState.values[index % DeliveryState.values.length],
+        media: media,
+        caption: relations ? 'Caption “quoted” 🎉' : null,
+        replyToId: relations ? r'$reply' : null,
+        editEventId: relations ? r'$edit' : null,
+        threadRootId: relations ? r'$root' : null,
+        error: error,
+        progress: progress,
+      );
+      final records = [
+        record(0),
+        record(
+          1,
+          body:
+              'quote " backslash \\ / newline \n tab \t nul \u0000 é 中 🎉 '
+              'lone \uD800 and \uDC00 end',
+          error: 'Bad state: 💥 \u0007',
+          progress: 0.12345678901234568,
+          relations: true,
+        ),
+        // Every base64 padding case, with and without a duration.
+        for (var length = 1; length <= 6; length++)
+          record(
+            length + 1,
+            media: MediaSelection(
+              bytes: Uint8List(length)..fillRange(0, length, 0xFB),
+              name: 'ñame $length "x".bin',
+              mimeType: 'application/octet-stream',
+              durationMs: length.isEven ? length * 100 : null,
+            ),
+            relations: length == 3,
+            progress: length == 4 ? 1 : null,
+          ),
+      ];
+      int reference(Iterable<OutboxRecord> subset) =>
+          utf8.encode(_referenceSnapshot('älice', subset)).length;
+      expect(MessageOutbox.encodedSnapshotBytes('älice', []), reference([]));
+      for (final one in records) {
+        expect(
+          MessageOutbox.encodedSnapshotBytes('älice', [one]),
+          reference([one]),
+          reason: one.body,
+        );
+      }
+      expect(
+        MessageOutbox.encodedSnapshotBytes('älice', records),
+        reference(records),
+      );
+    });
+
+    test(
+      'large media is coded off the UI isolate in the same format',
+      () async {
+        var workers = 0;
+        Future<T> counting<T>(T Function() work) {
+          workers++;
+          return Isolate.run(work);
+        }
+
+        final box = makeBox(background: counting);
+        final text = await box.enqueueText('alice', '!r', 'small');
+        (await transport.at(0)).fail();
+        await stateIs(box, text, DeliveryState.failed);
+        final tiny = await box.enqueueMedia(
+          'alice',
+          '!r',
+          MediaSelection(
+            bytes: Uint8List.fromList([1, 2, 3]),
+            name: 'tiny.ogg',
+            mimeType: 'audio/ogg',
+          ),
+        );
+        (await transport.at(1)).fail();
+        await stateIs(box, tiny, DeliveryState.failed);
+        expect(workers, 0, reason: 'small snapshots stay inline');
+
+        final bytes = Uint8List.fromList(
+          List.generate(200 * 1024 + 1, (index) => index * 7 % 256),
+        );
+        final id = await box.enqueueMedia(
+          'alice',
+          '!r',
+          MediaSelection(
+            bytes: bytes,
+            name: 'café.jpg',
+            mimeType: 'image/jpeg',
+            durationMs: 5,
+          ),
+          caption: 'Look 🎉',
+          replyToId: r'$reply',
+          threadRootId: r'$root',
+        );
+        expect(workers, greaterThan(0));
+        final attempt = await transport.at(2);
+        attempt.progress(0.5);
+        attempt.fail(StateError('offline'));
+        await stateIs(box, id, DeliveryState.failed);
+        expect(
+          store.values.values.single,
+          _referenceSnapshot('alice', box.records),
+        );
+        await box.closeAccount();
+
+        final encodes = workers;
+        final next = makeBox(background: counting);
+        await next.restore('alice');
+        expect(workers, encodes + 1, reason: 'one background decode');
+        expect(next.records.map((r) => r.id), [text, tiny, id]);
+        final restored = next.records.last;
+        expect(restored.state, DeliveryState.failed);
+        expect(restored.error, contains('offline'));
+        expect(restored.media!.bytes, bytes);
+        expect(restored.media!.name, 'café.jpg');
+        expect(restored.media!.mimeType, 'image/jpeg');
+        expect(restored.media!.durationMs, 5);
+        expect(restored.caption, 'Look 🎉');
+        expect(restored.replyToId, r'$reply');
+        expect(restored.threadRootId, r'$root');
+        expect(() => restored.media!.bytes[0] = 1, throwsUnsupportedError);
+      },
+    );
+
+    test('a slow background encode keeps durable writes in order', () async {
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      Future<T> holding<T>(T Function() work) async {
+        if (!entered.isCompleted) {
+          entered.complete();
+          await release.future;
+        }
+        return work();
+      }
+
+      final first = makeBox(background: holding);
+      await first.restore('alice');
+      final pending = first.enqueueMedia(
+        'alice',
+        '!r',
+        MediaSelection(
+          bytes: Uint8List(100 * 1024),
+          name: 'big.bin',
+          mimeType: 'application/octet-stream',
+        ),
+      );
+      final assertion = expectLater(pending, throwsA(isA<SendCancelled>()));
+      await entered.future;
+      final closing = first.closeAccount();
+      final second = makeBox(background: holding);
+      final newer = second.enqueueText('alice', '!r', 'newer');
+      await pumpEventQueue();
+      expect(store.writes, isEmpty, reason: 'newer write waits its turn');
+      release.complete();
+      await assertion;
+      await closing;
+      final nextId = await newer;
+      await transport.at(0);
+      expect(store.writes.first, contains('big.bin'));
+      expect(store.writes.first, isNot(contains(nextId)));
+      expect(
+        second.records.map((r) => r.body),
+        containsAll(['big.bin', 'newer']),
+      );
+      expect(store.values.values.single, contains(nextId));
+      expect(store.values.values.single, contains('big.bin'));
+      expect(transport.attempts, hasLength(1));
+    });
+  });
+
+  test(
+    'upload progress notifies in visible steps; the value stays exact',
+    () async {
+      var clock = now;
+      final box = makeBox(clock: () => clock);
+      final id = await box.enqueueText('alice', '!r', 'x');
+      final attempt = await transport.at(0);
+      var seen = emissions;
+      int published() {
+        final count = emissions - seen;
+        seen = emissions;
+        return count;
+      }
+
+      attempt.progress(0);
+      expect(published(), 1, reason: 'a start is always shown');
+      attempt.progress(0.004);
+      attempt.progress(0.009);
+      expect(published(), 0);
+      expect(box.records.single.progress, 0.009);
+      attempt.progress(0.0101);
+      expect(published(), 1, reason: 'a 1% step is shown');
+      attempt.progress(0.015);
+      expect(published(), 0);
+      expect(box.records.single.progress, 0.015);
+      clock = clock.add(const Duration(milliseconds: 100));
+      attempt.progress(0.016);
+      expect(published(), 1, reason: '100 ms later any change is shown');
+      attempt.progress(0.016);
+      expect(published(), 0);
+      attempt.progress(1);
+      expect(published(), 1, reason: 'completion is always shown');
+      expect(box.records.single.progress, 1);
+      attempt.succeed();
+      await retired(box, id);
+      expect(published(), greaterThan(0), reason: 'state changes are shown');
+    },
+  );
+
+  test('a 20 MB upload notifies about once per percent', () async {
+    final box = makeBox();
+    await box.enqueueText('alice', '!r', 'x');
+    final attempt = await transport.at(0);
+    final before = emissions;
+    // queued_media_sender reports every 64 KiB, scaled into 0..0.9.
+    const chunks = 20 * 1024 * 1024 ~/ (64 * 1024);
+    for (var chunk = 1; chunk <= chunks; chunk++) {
+      attempt.progress(chunk / chunks * 0.9);
+    }
+    expect(emissions - before, inInclusiveRange(80, 91));
+    expect(box.records.single.progress, 0.9);
+  });
 
   group('undo send hold', () {
     test('a held send waits for its deadline, then transmits', () async {

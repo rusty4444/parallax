@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -10,6 +11,9 @@ import 'package:flutter/foundation.dart'
 import 'messaging_features.dart';
 import 'secure_store.dart';
 import 'send_cancellation.dart';
+
+/// Runs a snapshot encode/decode away from the calling (UI) isolate.
+typedef OutboxBackgroundRunner = Future<T> Function<T>(T Function() work);
 
 /// An immutable, durably accepted send. [id] is also its Matrix transaction ID.
 class OutboxRecord {
@@ -80,6 +84,13 @@ class OutboxRecord {
 /// are process-local: after a restart a held record is restored like any other
 /// interrupted send (failed, explicit retry, same transaction ID), never
 /// replayed automatically. Retries never wait for a hold.
+///
+/// Every durable change rewrites the whole snapshot, media included. Sizes and
+/// capacity are therefore computed arithmetically (base64 is ASCII and needs
+/// no JSON escaping), and a snapshot over 64 KiB is base64/JSON coded on a
+/// background isolate, so a queued photo or video doesn't freeze the UI on
+/// each enqueue/sending/done/failed write. The worker runs inside the durable
+/// write fence, so writes keep their order.
 class MessageOutbox {
   MessageOutbox({
     SecureValueStore? storage,
@@ -95,12 +106,15 @@ class MessageOutbox {
     @visibleForTesting
     Timer Function(Duration, void Function()) holdTimer = _defaultHoldTimer,
     @visibleForTesting DateTime Function() clock = DateTime.now,
+    @visibleForTesting OutboxBackgroundRunner background = _runInIsolate,
   }) : _storage = storage ?? const PlatformSecureValueStore(),
        _storedByteLimit = storedByteLimit,
        // ignore: prefer_initializing_formals
        _holdTimer = holdTimer,
        // ignore: prefer_initializing_formals
        _clock = clock,
+       // ignore: prefer_initializing_formals
+       _background = background,
        // Public callback names intentionally differ from private fields.
        // ignore: prefer_initializing_formals
        _currentAccount = currentAccount,
@@ -124,6 +138,14 @@ class MessageOutbox {
   // JSON escapes one UTF-16 code unit to at most six bytes. This covers a
   // bounded error (4096 * 6), state, progress, keys and punctuation per record.
   static const _lifecycleReserveBytes = 32 * 1024;
+  // Snapshots up to this size are coded inline: an isolate hop costs more
+  // than they do. Anything carrying a real photo, video or voice clip goes to
+  // a worker.
+  static const _inlineSnapshotBytes = 64 * 1024;
+  // Upload progress arrives every 64 KiB and each notification rebuilds the
+  // app; publish only visible steps (the record itself stays exact).
+  static const _progressStep = 0.01;
+  static const _progressInterval = Duration(milliseconds: 100);
   static final _transactionId = RegExp(r'^mx_[A-Za-z0-9_-]{43}$');
   static final _random = Random.secure();
   static final _durable = _SerialQueue();
@@ -141,6 +163,7 @@ class MessageOutbox {
   final VoidCallback? _onChanged;
   final Timer Function(Duration, void Function()) _holdTimer;
   final DateTime Function() _clock;
+  final OutboxBackgroundRunner _background;
   final _commands = _SerialQueue();
   final _retiring = <_Session, Future<void>>{};
   _Session? _session;
@@ -156,6 +179,9 @@ class MessageOutbox {
 
   static Timer _defaultHoldTimer(Duration delay, void Function() callback) =>
       Timer(delay, callback);
+
+  static Future<T> _runInIsolate<T>(T Function() work) =>
+      Isolate.run(work, debugName: 'parallax.outbox.snapshot');
 
   /// When [id] is held for undo send, the time its transmission starts.
   DateTime? heldUntil(String id) {
@@ -512,7 +538,8 @@ class MessageOutbox {
       _check(session);
       final restored = raw == null
           ? <String, OutboxRecord>{}
-          : _decode(raw, session.accountKey);
+          : await _decodeSnapshot(raw, session.accountKey);
+      _check(session);
       var retiredSent = false;
       for (final record in restored.values.toList()) {
         if (record.state == DeliveryState.sent) {
@@ -594,11 +621,13 @@ class MessageOutbox {
         if (!active() || !progress.isFinite) return;
         final record = session.records[id];
         if (record == null || record.state != DeliveryState.sending) return;
+        final value = progress.clamp(0.0, 1.0);
+        if (record.progress == value) return;
         session.records[id] = record._status(
           DeliveryState.sending,
-          progress: progress.clamp(0.0, 1.0),
+          progress: value,
         );
-        _notify(session);
+        if (_publishProgress(job, value)) _notify(session);
       });
       if (!active()) return;
       await _update(session, (next) => next.remove(id), allowed: active);
@@ -651,87 +680,161 @@ class MessageOutbox {
     }
   }
 
-  Future<void> _persist(_Session session, Map<String, OutboxRecord> records) =>
-      records.isEmpty
-      ? _storage.delete(session.storageKey)
-      : _storage.write(
-          session.storageKey,
-          _encode(session.accountKey, records),
-        );
+  /// Whether a progress change is worth a listener notification: 0 and
+  /// complete always are, otherwise a 1% step or 100 ms since the last one.
+  bool _publishProgress(_SendJob job, double progress) {
+    final now = _clock();
+    final shown = job.shownProgress;
+    final shownAt = job.shownAt;
+    if (shown != null &&
+        shownAt != null &&
+        progress != 0 &&
+        progress != 1 &&
+        (progress - shown).abs() < _progressStep &&
+        now.difference(shownAt) < _progressInterval) {
+      return false;
+    }
+    job
+      ..shownProgress = progress
+      ..shownAt = now;
+    return true;
+  }
+
+  Future<void> _persist(
+    _Session session,
+    Map<String, OutboxRecord> records,
+  ) async {
+    if (records.isEmpty) {
+      await _storage.delete(session.storageKey);
+      return;
+    }
+    // Encoding runs inside the durable fence, so a slow worker can't let an
+    // older snapshot land after a newer one.
+    final encoded = await _encode(session.accountKey, records);
+    await _storage.write(session.storageKey, encoded);
+  }
 
   void _checkAcceptanceCapacity(
     String accountKey,
     Map<String, OutboxRecord> records,
   ) {
     if (records.length > maxRecords) throw StateError('Outbox is full');
-    final payloads = records.values.map((record) {
-      final entry = _recordJson(record)
-        ..remove('error')
-        ..remove('progress');
-      entry['state'] = 'sending'; // Longest pending state name.
-      return entry;
-    }).toList();
-    final bytes = utf8.encode(_snapshot(accountKey, payloads)).length;
+    // Every record in its longest pending form, measured without encoding
+    // any payload.
+    final bytes = _snapshotBytes(_snapshotPrefix(accountKey), [
+      for (final record in records.values)
+        _RecordJson.of(
+          record,
+          diagnostics: false,
+          state: DeliveryState.sending, // Longest pending state name.
+        ),
+    ]);
     if (bytes + records.length * _lifecycleReserveBytes > _storedByteLimit) {
       throw StateError('Outbox exceeds $_storedByteLimit stored bytes');
     }
   }
 
-  String _encode(String accountKey, Map<String, OutboxRecord> records) {
+  Future<String> _encode(String accountKey, Map<String, OutboxRecord> records) {
     if (records.length > maxRecords) throw StateError('Outbox is full');
-    final entries = records.values.map(_recordJson).toList();
-    var encoded = _snapshot(accountKey, entries);
-    if (_exceedsLimit(encoded)) {
+    final prefix = _snapshotPrefix(accountKey);
+    var entries = [for (final record in records.values) _RecordJson.of(record)];
+    var bytes = _snapshotBytes(prefix, entries);
+    if (bytes > _storedByteLimit) {
       // Old valid snapshots did not reserve lifecycle headroom. Diagnostics are
       // optional; never let their expansion strand accepted payloads or prevent
       // deleting one record while recovering the others. Identity/payload and
       // failed state are retained, so explicit retries remain idempotent.
-      for (final entry in entries) {
-        entry.remove('error');
-        entry.remove('progress');
-      }
-      encoded = _snapshot(accountKey, entries);
+      entries = [
+        for (final record in records.values)
+          _RecordJson.of(record, diagnostics: false),
+      ];
+      bytes = _snapshotBytes(prefix, entries);
     }
-    if (_exceedsLimit(encoded)) {
+    if (bytes > _storedByteLimit) {
       throw StateError('Outbox exceeds $_storedByteLimit stored bytes');
     }
-    return encoded;
+    return bytes <= _inlineSnapshotBytes
+        ? Future.value(_assemble(prefix, entries, bytes))
+        : _assembleInBackground(_background, prefix, entries, bytes);
   }
 
-  bool _exceedsLimit(String encoded) =>
-      encoded.length > _storedByteLimit ||
-      utf8.encode(encoded).length > _storedByteLimit;
-
-  static String _snapshot(
+  /// Exact UTF-8 size of the snapshot [records] are stored as (diagnostics
+  /// included), computed without encoding any media.
+  @visibleForTesting
+  static int encodedSnapshotBytes(
     String accountKey,
-    List<Map<String, Object?>> entries,
-  ) => jsonEncode({'version': 1, 'accountKey': accountKey, 'records': entries});
+    Iterable<OutboxRecord> records,
+  ) => _snapshotBytes(_snapshotPrefix(accountKey), [
+    for (final record in records) _RecordJson.of(record),
+  ]);
 
-  static Map<String, Object?> _recordJson(OutboxRecord record) => {
-    'id': record.id,
-    'accountKey': record.accountKey,
-    'roomId': record.roomId,
-    'body': record.body,
-    'createdAt': record.createdAt.toUtc().toIso8601String(),
-    'state': record.state.name,
-    if (record.caption != null) 'caption': record.caption,
-    if (record.replyToId != null) 'replyToId': record.replyToId,
-    if (record.editEventId != null) 'editEventId': record.editEventId,
-    if (record.threadRootId != null) 'threadRootId': record.threadRootId,
-    if (record.error != null) 'error': record.error,
-    if (record.progress != null) 'progress': record.progress,
-    if (record.media case final media?)
-      'media': {
-        'bytes': base64.encode(media.bytes),
-        'name': media.name,
-        'mimeType': media.mimeType,
-        if (media.durationMs != null) 'durationMs': media.durationMs,
-      },
-  };
+  // `jsonEncode({'version': 1, 'accountKey': …, 'records': […]})`, split
+  // around the records so they can be measured and spliced separately.
+  static String _snapshotPrefix(String accountKey) =>
+      '{"version":1,"accountKey":${jsonEncode(accountKey)},"records":[';
+  static const _snapshotSuffix = ']}';
 
-  Map<String, OutboxRecord> _decode(String raw, String accountKey) {
+  static int _snapshotBytes(String prefix, List<_RecordJson> entries) {
+    var bytes = _utf8Length(prefix) + _snapshotSuffix.length;
+    for (final entry in entries) {
+      bytes += entry.size;
+    }
+    return bytes + max(0, entries.length - 1); // Separating commas.
+  }
+
+  // Static so the worker closure captures only strings and byte lists, never
+  // this outbox, its session or its callbacks.
+  static Future<String> _assembleInBackground(
+    OutboxBackgroundRunner background,
+    String prefix,
+    List<_RecordJson> entries,
+    int bytes,
+  ) => background(() => _assemble(prefix, entries, bytes));
+
+  /// The snapshot text, identical to `jsonEncode` of the whole snapshot but
+  /// splicing each payload's base64 in rather than scanning it for escapes.
+  static String _assemble(String prefix, List<_RecordJson> entries, int bytes) {
+    final out = StringBuffer(prefix);
+    for (var index = 0; index < entries.length; index++) {
+      final entry = entries[index];
+      if (index > 0) out.write(',');
+      out.write(entry.head);
+      if (entry.media case final media?) out.write(base64.encode(media));
+      out.write(entry.tail);
+    }
+    out.write(_snapshotSuffix);
+    final snapshot = out.toString();
+    assert(
+      _utf8Length(snapshot) == bytes,
+      'Outbox snapshot size estimate differs from its encoding',
+    );
+    return snapshot;
+  }
+
+  Future<Map<String, OutboxRecord>> _decodeSnapshot(
+    String raw,
+    String accountKey,
+  ) => raw.length <= _inlineSnapshotBytes
+      ? Future.sync(() => _decode(raw, accountKey, _storedByteLimit))
+      : _decodeInBackground(_background, raw, accountKey, _storedByteLimit);
+
+  static Future<Map<String, OutboxRecord>> _decodeInBackground(
+    OutboxBackgroundRunner background,
+    String raw,
+    String accountKey,
+    int limit,
+  ) => background(() => _decode(raw, accountKey, limit));
+
+  static bool _exceedsLimit(String encoded, int limit) =>
+      encoded.length > limit || _utf8Length(encoded) > limit;
+
+  static Map<String, OutboxRecord> _decode(
+    String raw,
+    String accountKey,
+    int limit,
+  ) {
     try {
-      if (_exceedsLimit(raw)) {
+      if (_exceedsLimit(raw, limit)) {
         throw const FormatException('Oversized outbox snapshot');
       }
       final json = jsonDecode(raw) as Map<String, dynamic>;
@@ -876,9 +979,86 @@ class _SendJob {
   final cancellation = SendCancellation();
   final done = Completer<void>();
   bool stopped = false;
+  // Last progress published to listeners, for throttling.
+  double? shownProgress;
+  DateTime? shownAt;
 
   void stop() {
     stopped = true;
     cancellation.cancel();
   }
+}
+
+/// A record's snapshot JSON split around its base64 payload:
+/// `head + base64(media) + tail` is exactly what `jsonEncode` produces for the
+/// record, so its size is known without encoding the payload.
+final class _RecordJson {
+  _RecordJson._(this.head, this.tail, this.media)
+    : size =
+          _utf8Length(head) +
+          _utf8Length(tail) +
+          (media == null ? 0 : 4 * ((media.length + 2) ~/ 3));
+
+  factory _RecordJson.of(
+    OutboxRecord record, {
+    bool diagnostics = true,
+    DeliveryState? state,
+  }) {
+    final json = jsonEncode({
+      'id': record.id,
+      'accountKey': record.accountKey,
+      'roomId': record.roomId,
+      'body': record.body,
+      'createdAt': record.createdAt.toUtc().toIso8601String(),
+      'state': (state ?? record.state).name,
+      if (record.caption != null) 'caption': record.caption,
+      if (record.replyToId != null) 'replyToId': record.replyToId,
+      if (record.editEventId != null) 'editEventId': record.editEventId,
+      if (record.threadRootId != null) 'threadRootId': record.threadRootId,
+      if (diagnostics && record.error != null) 'error': record.error,
+      if (diagnostics && record.progress != null) 'progress': record.progress,
+    });
+    final media = record.media;
+    if (media == null) return _RecordJson._(json, '', null);
+    // As before, 'media' is the record's last key and 'bytes' its first.
+    final attachment = jsonEncode({
+      'name': media.name,
+      'mimeType': media.mimeType,
+      if (media.durationMs != null) 'durationMs': media.durationMs,
+    });
+    return _RecordJson._(
+      '${json.substring(0, json.length - 1)},"media":{"bytes":"',
+      '",${attachment.substring(1)}}',
+      media.bytes,
+    );
+  }
+
+  final String head;
+  final String tail;
+  final Uint8List? media;
+
+  /// UTF-8 bytes of the whole record JSON.
+  final int size;
+}
+
+/// `utf8.encode(text).length` (an unpaired surrogate becomes the three-byte
+/// U+FFFD) without allocating the encoding.
+int _utf8Length(String text) {
+  var bytes = 0;
+  for (var index = 0; index < text.length; index++) {
+    final unit = text.codeUnitAt(index);
+    if (unit < 0x80) {
+      bytes += 1;
+    } else if (unit < 0x800) {
+      bytes += 2;
+    } else if ((unit & 0xFC00) == 0xD800 &&
+        index + 1 < text.length &&
+        (text.codeUnitAt(index + 1) & 0xFC00) == 0xDC00) {
+      bytes += 4;
+      index++;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }

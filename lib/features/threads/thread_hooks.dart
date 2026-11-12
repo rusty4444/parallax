@@ -154,6 +154,7 @@ List<Widget> messageSearchSettingsSections(
   final search = localMessageSearchOf(ctx.backend);
   if (search == null) return const [];
   return [
+    const SizedBox(height: 28),
     DeviceSearchSettingsCard(
       key: const ValueKey('device-search-settings'),
       search: search,

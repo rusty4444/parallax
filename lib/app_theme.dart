@@ -199,7 +199,14 @@ AppPalette paletteFor(VisualTheme style) => switch (style) {
   ),
 };
 
-ThemeData themeFor(VisualTheme style) {
+final _themes = <VisualTheme, ThemeData>{};
+
+/// The app theme for [style], built once: `ColorScheme.fromSeed` is costly,
+/// and a new (equal) theme on each app rebuild made every route compare
+/// whole themes.
+ThemeData themeFor(VisualTheme style) => _themes[style] ??= _buildTheme(style);
+
+ThemeData _buildTheme(VisualTheme style) {
   final palette = paletteFor(style);
   final brightness = palette.isDark ? Brightness.dark : Brightness.light;
   final scheme =

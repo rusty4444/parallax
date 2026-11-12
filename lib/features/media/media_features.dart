@@ -80,6 +80,9 @@ class MatrixMediaFeatures implements MediaFeatures {
       _previews.clear();
       _inFlight.clear();
       _previewBytes = 0;
+      _originals.clear();
+      _originalsInFlight.clear();
+      _originalBytes = 0;
       _cacheOwner = client;
     }
     return client;
@@ -207,13 +210,65 @@ class MatrixMediaFeatures implements MediaFeatures {
     return bytes;
   });
 
+  /// Small originals (the animated GIF/WebP the timeline plays, at most
+  /// 4 MB) are kept like previews: a bubble built again (scrolling back to
+  /// it) would otherwise download, decrypt and decode the same file again.
+  static const _maxCachedOriginal = 4 * 1024 * 1024;
+  final _originals = <String, DownloadedAttachment>{};
+  final _originalsInFlight = <String, Future<DownloadedAttachment>>{};
+  int _originalBytes = 0;
+
   @override
   Future<DownloadedAttachment> loadOriginal(
     String roomId,
     String eventId, {
     int maxBytes = maxOriginalBytes,
-  }) async {
-    final client = _client();
+  }) {
+    final matrix.Client client;
+    try {
+      client = _client();
+    } catch (error, stack) {
+      return Future.error(error, stack);
+    }
+    if (maxBytes > _maxCachedOriginal) {
+      return _fetchOriginal(client, roomId, eventId, maxBytes);
+    }
+    final key = '$roomId/$eventId/$maxBytes';
+    final cached = _originals.remove(key);
+    if (cached != null) {
+      _originals[key] = cached;
+      return Future.value(cached);
+    }
+    return _originalsInFlight[key] ??=
+        _fetchOriginal(client, roomId, eventId, maxBytes)
+            .then((file) {
+              if (identical(client, _cacheOwner)) {
+                _originals[key] = file;
+                _originalBytes += file.bytes.lengthInBytes;
+                while (_originalBytes > 16 * 1024 * 1024 &&
+                    _originals.isNotEmpty) {
+                  final oldest = _originals.keys.first;
+                  _originalBytes -= _originals
+                      .remove(oldest)!
+                      .bytes
+                      .lengthInBytes;
+                }
+              }
+              return file;
+            })
+            .whenComplete(() {
+              if (identical(client, _cacheOwner)) {
+                _originalsInFlight.remove(key);
+              }
+            });
+  }
+
+  Future<DownloadedAttachment> _fetchOriginal(
+    matrix.Client client,
+    String roomId,
+    String eventId,
+    int maxBytes,
+  ) async {
     final event = await _event(client, roomId, eventId);
     if (event == null || !event.hasAttachment) {
       throw StateError('Attachment unavailable');

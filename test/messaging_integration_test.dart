@@ -787,7 +787,14 @@ void main() {
       );
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
+      // The settings list is built lazily; scroll the tile into existence.
+      await tester.scrollUntilVisible(
+        find.text('Reading and media preferences'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.ensureVisible(find.text('Reading and media preferences'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Reading and media preferences'));
       await tester.pumpAndSettle();
       expect(

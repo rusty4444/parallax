@@ -153,46 +153,56 @@ class _DeviceSearchSettingsCardState extends State<DeviceSearchSettingsCard> {
   Widget build(BuildContext context) {
     final p = widget.palette;
     final enabled = _enabled;
-    return Card(
-      color: p.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: BorderSide(color: p.stroke),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Eyebrow('Message search', palette: p),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'Search this device’s history',
-                style: TextStyle(color: p.foreground),
-              ),
-              subtitle: Text(
-                'Include encrypted rooms in message search',
-                style: TextStyle(color: p.muted, fontSize: 12),
-              ),
-              value: enabled ?? false,
-              onChanged: enabled == null || _busy ? null : _toggle,
+    // Heading above the card, like the other settings sections.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Eyebrow('Message search', palette: p),
+        const SizedBox(height: 10),
+        Material(
+          color: p.surface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: p.stroke),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _rows(p, enabled),
             ),
-            Text(
-              deviceSearchPrivacyNote,
-              style: TextStyle(color: p.muted, fontSize: 12, height: 1.4),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _busy || enabled != true ? null : _clear,
-                icon: const Icon(Icons.delete_sweep_outlined),
-                label: const Text('Clear search index'),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
+
+  List<Widget> _rows(AppPalette p, bool? enabled) => [
+    SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        'Search this device’s history',
+        style: TextStyle(color: p.foreground),
+      ),
+      subtitle: Text(
+        'Include encrypted rooms in message search',
+        style: TextStyle(color: p.muted, fontSize: 12),
+      ),
+      value: enabled ?? false,
+      onChanged: enabled == null || _busy ? null : _toggle,
+    ),
+    Text(
+      deviceSearchPrivacyNote,
+      style: TextStyle(color: p.muted, fontSize: 12, height: 1.4),
+    ),
+    Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        onPressed: _busy || enabled != true ? null : _clear,
+        icon: const Icon(Icons.delete_sweep_outlined),
+        label: const Text('Clear search index'),
+      ),
+    ),
+  ];
 }

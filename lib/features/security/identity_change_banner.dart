@@ -34,12 +34,89 @@ class _IdentityChangeBannerState extends State<IdentityChangeBanner> {
   final _busy = <String>{};
   final _gestures = <TapGestureRecognizer>[];
 
+  /// Checking a room walks its members' identities (up to 500 in a large
+  /// group). The backend notifies up to once a frame while a room is busy,
+  /// so its notifications re-check at most every [_backendInterval];
+  /// security changes and this banner's own actions re-check at once.
+  static const _backendInterval = Duration(milliseconds: 500);
+  List<IdentityChange> _changes = const [];
+  Timer? _cooldown;
+  bool _pending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribe(widget);
+    _changes = _read();
+  }
+
+  @override
+  void didUpdateWidget(IdentityChangeBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.backend, widget.backend) ||
+        !identical(oldWidget.security, widget.security)) {
+      _unsubscribe(oldWidget);
+      _subscribe(widget);
+    }
+    _changes = _read();
+  }
+
   @override
   void dispose() {
+    _cooldown?.cancel();
+    _unsubscribe(widget);
     for (final gesture in _gestures) {
       gesture.dispose();
     }
     super.dispose();
+  }
+
+  void _subscribe(IdentityChangeBanner w) {
+    w.backend.addListener(_backendChanged);
+    w.security.securityChanges.addListener(_refresh);
+  }
+
+  void _unsubscribe(IdentityChangeBanner w) {
+    w.backend.removeListener(_backendChanged);
+    w.security.securityChanges.removeListener(_refresh);
+  }
+
+  List<IdentityChange> _read() =>
+      widget.security.identityChanges(widget.roomId);
+
+  void _refresh() {
+    if (!mounted) return;
+    final next = _read();
+    if (_sameChanges(next, _changes)) return;
+    setState(() => _changes = next);
+  }
+
+  void _backendChanged() {
+    if (_cooldown?.isActive ?? false) {
+      _pending = true;
+      return;
+    }
+    _refresh();
+    _cooldown = Timer(_backendInterval, () {
+      if (_pending) {
+        _pending = false;
+        _refresh();
+      }
+    });
+  }
+
+  static bool _sameChanges(List<IdentityChange> a, List<IdentityChange> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].userId != b[i].userId ||
+          a[i].displayName != b[i].displayName ||
+          a[i].trust.level != b[i].trust.level ||
+          a[i].trust.masterKey != b[i].trust.masterKey) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _act(
@@ -55,22 +132,21 @@ class _IdentityChangeBannerState extends State<IdentityChangeBanner> {
     } catch (_) {
       messenger?.showSnackBar(SnackBar(content: Text(failure)));
     } finally {
-      if (mounted) setState(() => _busy.remove(change.userId));
+      if (mounted) {
+        setState(() {
+          _busy.remove(change.userId);
+          _changes = _read();
+        });
+      }
     }
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([
-      widget.backend,
-      widget.security.securityChanges,
-    ]),
-    builder: (context, _) {
-      final changes = widget.security.identityChanges(widget.roomId);
-      if (changes.isEmpty) return const SizedBox.shrink();
-      return _banner(context, changes.first, changes.length - 1);
-    },
-  );
+  Widget build(BuildContext context) {
+    final changes = _changes;
+    if (changes.isEmpty) return const SizedBox.shrink();
+    return _banner(context, changes.first, changes.length - 1);
+  }
 
   Widget _banner(BuildContext context, IdentityChange change, int others) {
     final p = widget.palette;

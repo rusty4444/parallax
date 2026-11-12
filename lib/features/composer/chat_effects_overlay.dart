@@ -89,6 +89,7 @@ class _ChatEffectsOverlayState extends State<ChatEffectsOverlay>
       oldWidget.backend.removeListener(_observe);
       widget.backend.addListener(_observe);
       _tracker = ChatEffectTracker(openedAt: widget.openedAt);
+      _lastMessages = null;
       _stopAll();
       _observe();
     }
@@ -122,15 +123,23 @@ class _ChatEffectsOverlayState extends State<ChatEffectsOverlay>
 
   bool get _allowed => _prefs.showChatEffects && !_reduceMotion;
 
+  /// Messages last given to the tracker.
+  List<ChatEntry>? _lastMessages;
+
   void _observe() {
     if (!mounted) return;
     final backend = widget.backend;
     // Only this room's timeline: another room's (or an empty) projection
     // must not prime the tracker.
     if (backend.activeRoomId != widget.roomId) return;
+    // Most notifications aren't new messages (sync, sending, progress);
+    // the projection keeps its identity until the timeline changes.
+    final messages = backend.messages;
+    if (identical(messages, _lastMessages)) return;
+    _lastMessages = messages;
     final List<ChatEffect> effects;
     try {
-      effects = _tracker.observe(backend.messages);
+      effects = _tracker.observe(messages);
     } catch (_) {
       return;
     }
@@ -246,10 +255,14 @@ class _ChatEffectsOverlayState extends State<ChatEffectsOverlay>
             }
           }
           if (_playing.isEmpty) return const SizedBox.expand();
-          return CustomPaint(
-            key: const ValueKey('chat-effects-canvas'),
-            size: Size.infinite,
-            painter: _EffectsPainter(this),
+          // Own layer: each animation frame repaints only the particles,
+          // not the room header, composer and background beneath.
+          return RepaintBoundary(
+            child: CustomPaint(
+              key: const ValueKey('chat-effects-canvas'),
+              size: Size.infinite,
+              painter: _EffectsPainter(this),
+            ),
           );
         },
       ),

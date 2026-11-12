@@ -115,6 +115,30 @@ void main() {
     expect(restored.sendTypingNotifications, isFalse);
   });
 
+  testWidgets('home row style and message preview are saved and restored', (
+    tester,
+  ) async {
+    await showScreen(tester);
+    expect(preferences.homeRowStyle, HomeRowStyle.cards);
+    expect(preferences.homePreview, HomePreview.long);
+    await tester.ensureVisible(find.text('Compact'));
+    await tester.tap(find.text('Compact'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('None'));
+    await tester.pumpAndSettle();
+    expect(preferences.homeRowStyle, HomeRowStyle.compact);
+    expect(preferences.homePreview, HomePreview.none);
+    await tester.tap(find.text('List'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Small'));
+    await tester.pumpAndSettle();
+    final restored = AppearancePreferences(prefs: prefs);
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.homeRowStyle, HomeRowStyle.list);
+    expect(restored.homePreview, HomePreview.small);
+  });
+
   testWidgets('the double-tap reaction can be changed', (tester) async {
     await showScreen(tester);
     expect(

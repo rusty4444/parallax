@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
+import 'appearance_preferences.dart';
 import 'chat_backend.dart';
 import 'created_room_wait.dart';
 import 'features/home/home_features.dart';
@@ -78,13 +79,29 @@ class _InboxScreenState extends State<InboxScreen> {
 
   /// Note to self, saved messages and chat folders (saved module).
   late final SavedFeatures? _saved = savedFeaturesOf(widget.backend);
-  late final Listenable _changes = Listenable.merge([
-    widget.backend,
-    if (_saved != null && !identical(_saved, widget.backend)) _saved,
-  ]);
+  late final _changes = _WhileCurrent(
+    Listenable.merge([
+      widget.backend,
+      if (_saved != null && !identical(_saved, widget.backend)) _saved,
+    ]),
+    isCurrent: () => _route?.isCurrent ?? true,
+  );
+
+  /// The inbox's route. While another screen covers it (an open room), the
+  /// inbox ignores backend notifications (every timeline update, up to one
+  /// a frame during a burst). Depending on the route rebuilds the inbox
+  /// when it is back on top, which catches up.
+  ModalRoute<Object?>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+  }
 
   @override
   void dispose() {
+    _changes.dispose();
     _createdRoomWait?.cancel();
     _creation.detach(_creationChanged);
     _owner.release();
@@ -473,6 +490,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (mounted && _owner.isCurrent) {
         setState(() {
           if (_spaceId == space.id) _spaceId = null;
+          _spacesRevision++;
         });
       }
     } catch (_) {
@@ -698,6 +716,9 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   final _memos = <Symbol, (Object?, Object?)>{};
+
+  /// Bumped when a Space is left here, before the sync drops it.
+  int _spacesRevision = 0;
   Set<String>? _failedSet;
   Set<String>? _favouriteSet;
   Set<String>? _spaceSet;
@@ -750,6 +771,8 @@ class _InboxScreenState extends State<InboxScreen> {
     final compact = settings?.compact ?? false;
     final expandedHome = settings?.expandedHome ?? false;
     final hideInviteAvatars = settings?.hideInviteAvatars ?? false;
+    final rowStyle = settings?.homeRowStyle ?? HomeRowStyle.cards;
+    final homePreview = settings?.homePreview ?? HomePreview.long;
     return AnimatedBuilder(
       animation: _changes,
       builder: (context, _) {
@@ -769,11 +792,18 @@ class _InboxScreenState extends State<InboxScreen> {
         // Reuse equal sets so the memoised list below can compare inputs by
         // identity.
         final failedRooms = _failedSet = _stableSet(_failedRooms(), _failedSet);
-        final favourites = _favouriteSet = _stableSet({
-          for (final room in source)
-            if (_favourite(room)) room.id,
-        }, _favouriteSet);
-        final spaces = _spaces();
+        // Live tags for every room (the SDK parses m.tag on each read) and
+        // the Spaces (a scan of every room) only change with the room list
+        // or after a favourite toggled from the room menu.
+        final favourites = _favouriteSet = _memo<Set<String>>(
+          #favourites,
+          (source, _pendingRoomAction),
+          () => _stableSet({
+            for (final room in source)
+              if (_favourite(room)) room.id,
+          }, _favouriteSet),
+        );
+        final spaces = _memo(#spaces, (source, _spacesRevision), _spaces);
         final spaceId = spaces.any((space) => space.id == _spaceId)
             ? _spaceId
             : null;
@@ -783,10 +813,11 @@ class _InboxScreenState extends State<InboxScreen> {
         final noteId = saved?.noteToSelfRoomId;
         final folderList = saved?.folders.folders ?? const <ChatFolder>[];
         final folder = folderList.where((f) => f.id == _folderId).firstOrNull;
-        final spaceRooms = _spaceSet = _stableNullableSet(
-          _spaceRooms(spaceId),
-          _spaceSet,
-        );
+        final spaceRooms = _spaceSet = _memo(#spaceRooms, (
+          source,
+          spaceId,
+          _spacesRevision,
+        ), () => _stableNullableSet(_spaceRooms(spaceId), _spaceSet));
         // The inbox rebuilds on every backend notification (including each
         // timeline update of a room open above it). Filtering, sorting and
         // folder counts over every room only rerun when an input changed.
@@ -848,6 +879,18 @@ class _InboxScreenState extends State<InboxScreen> {
             spaceId == null &&
             folder == null &&
             widget.backend.roomSyncState == RoomSyncState.ready;
+        // A room moving to the top shifts every row above its old place.
+        // With each row's index known by key, Flutter moves those rows
+        // instead of rebuilding them (and their avatars) from scratch.
+        final rowIndex = _memo(
+          #rowIndex,
+          (rooms, showNotePrompt),
+          () => <String, int>{
+            if (showNotePrompt) 'note-to-self-prompt': 0,
+            for (final (i, room) in rooms.indexed)
+              'room-${room.id}': i + (showNotePrompt ? 1 : 0),
+          },
+        );
         final emptyState = folder != null && _filters.isEmpty && spaceId == null
             ? (
                 title: 'No chats in this folder yet',
@@ -1243,6 +1286,10 @@ class _InboxScreenState extends State<InboxScreen> {
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                             itemCount: rooms.length + (showNotePrompt ? 1 : 0),
+                            findChildIndexCallback: (key) =>
+                                key is ValueKey<String>
+                                ? rowIndex[key.value]
+                                : null,
                             itemBuilder: (context, index) {
                               if (showNotePrompt) {
                                 if (index == 0) {
@@ -1262,7 +1309,10 @@ class _InboxScreenState extends State<InboxScreen> {
                                   key: ValueKey('room-${room.id}'),
                                   room: room,
                                   palette: p,
-                                  compact: compact,
+                                  compact:
+                                      compact ||
+                                      rowStyle == HomeRowStyle.compact,
+                                  previewLines: homePreview.maxLines,
                                   busy: _pendingRoomAction == room.id,
                                   onTap: () => _open(room.id),
                                   onLongPress: () => _showRoomActions(room),
@@ -1278,6 +1328,8 @@ class _InboxScreenState extends State<InboxScreen> {
                                 failedSend: failedRooms.contains(room.id),
                                 hideInviteAvatar: hideInviteAvatars,
                                 busy: _pendingRoomAction == room.id,
+                                style: rowStyle,
+                                preview: homePreview,
                                 onTap: room.invited
                                     ? () => _showInvitation(room)
                                     : () => _open(room.id),
@@ -1312,6 +1364,27 @@ class _InboxScreenState extends State<InboxScreen> {
         );
       },
     );
+  }
+}
+
+/// Forwards [source]'s notifications only while [isCurrent]. The owner
+/// rebuilds when its route becomes current again, which catches up.
+class _WhileCurrent extends ChangeNotifier {
+  _WhileCurrent(this.source, {required this.isCurrent}) {
+    source.addListener(_changed);
+  }
+
+  final Listenable source;
+  final bool Function() isCurrent;
+
+  void _changed() {
+    if (isCurrent()) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    source.removeListener(_changed);
+    super.dispose();
   }
 }
 

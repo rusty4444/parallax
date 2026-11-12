@@ -163,17 +163,74 @@ class AppearanceSettingsScreen extends StatelessWidget {
           ),
           _heading(context, 'Home screen'),
           Card(
-            child: SwitchListTile(
-              key: const ValueKey('appearance.expanded_home'),
-              secondary: const Icon(Icons.dashboard_customize_outlined),
-              title: const Text('Show all home options'),
-              subtitle: const Text(
-                'Keep search, filters, Spaces and folders above your chats. '
-                'When off, they’re in the options menu at the top.',
-              ),
-              value: preferences.expandedHome,
-              onChanged: (value) =>
-                  _save(context, () => preferences.setExpandedHome(value)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ListTile(
+                  leading: Icon(Icons.view_list_rounded),
+                  title: Text('Chat row style'),
+                  subtitle: Text(
+                    'Cards, a flat list, or compact rows that fit more chats.',
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: SegmentedButton<HomeRowStyle>(
+                    key: const ValueKey('appearance.home_row_style'),
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final style in HomeRowStyle.values)
+                        ButtonSegment(value: style, label: Text(style.label)),
+                    ],
+                    selected: {preferences.homeRowStyle},
+                    onSelectionChanged: (selection) => _save(
+                      context,
+                      () => preferences.setHomeRowStyle(selection.single),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                const ListTile(
+                  leading: Icon(Icons.short_text_rounded),
+                  title: Text('Message preview'),
+                  subtitle: Text(
+                    'How much of the last message each chat shows: none, '
+                    'one line or two.',
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: SegmentedButton<HomePreview>(
+                    key: const ValueKey('appearance.home_preview'),
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final preview in HomePreview.values)
+                        ButtonSegment(
+                          value: preview,
+                          label: Text(preview.label),
+                        ),
+                    ],
+                    selected: {preferences.homePreview},
+                    onSelectionChanged: (selection) => _save(
+                      context,
+                      () => preferences.setHomePreview(selection.single),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  key: const ValueKey('appearance.expanded_home'),
+                  secondary: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('Show all home options'),
+                  subtitle: const Text(
+                    'Keep search, filters, Spaces and folders above your '
+                    'chats. When off, they’re in the options menu at the top.',
+                  ),
+                  value: preferences.expandedHome,
+                  onChanged: (value) =>
+                      _save(context, () => preferences.setExpandedHome(value)),
+                ),
+              ],
             ),
           ),
           _heading(context, 'Touch'),

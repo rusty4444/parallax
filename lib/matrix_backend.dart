@@ -17,6 +17,7 @@ import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:vodozemac/vodozemac.dart' as vod;
 
 import 'chat_backend.dart';
+import 'client_caches.dart';
 import 'crypto_setup_policy.dart';
 import 'features/scheduled/delayed_events.dart';
 import 'features/scheduled/undo_send.dart';
@@ -181,7 +182,15 @@ class MatrixBackend extends ChatBackend
   /// Last projection of each room, reused until a sync or action touches it.
   final _projected = <String, ChatRoom>{};
   final _dirtyRoomIds = <String>{};
+
+  /// Rooms projected again only to retry an encrypted preview: unchanged
+  /// results keep the list (and listeners) as they are.
+  final _retryRoomIds = <String>{};
   bool _allRoomsDirty = true;
+
+  /// Account data that rooms aren't projected from arrived: listeners are
+  /// told without projecting any room.
+  bool _accountDataChanged = false;
   final _encryptedPreviewRooms = <String>{};
 
   /// Rooms by ID as of the last projection (the SDK's lookup is a scan).
@@ -206,6 +215,7 @@ class MatrixBackend extends ChatBackend
   final _imageCache = <String, Uint8List>{};
   int _imageCacheBytes = 0;
   final _avatarCache = <Uri, Uint8List>{};
+  static const _maxCachedAvatars = 400;
   final _avatarInFlight = <Uri, Future<Uint8List?>>{};
   final _avatarWaiters = Queue<Completer<void>>();
   int _avatarActive = 0;
@@ -816,7 +826,9 @@ class MatrixBackend extends ChatBackend
         isEncryptedRoom: (id) => _client?.getRoomById(id)?.encrypted == true,
       );
       _sendGuard = sendGuard;
-      openedClient = matrix.Client(
+      // Caches m.direct and push rules, which the SDK re-parses on every
+      // read (several times per room while projecting the room list).
+      openedClient = ParallaxClient(
         'Parallax',
         database: sdkDatabase,
         httpClient: sendGuard,
@@ -1706,7 +1718,10 @@ class MatrixBackend extends ChatBackend
       }
       if (bytes.isEmpty) return null;
       _avatarCache[url] = bytes;
-      if (_avatarCache.length > 24) {
+      // 96 px thumbnails (a few KB each). One inbox screen shows 10–20+
+      // faces, so a small cache made scrolling back download and decode
+      // them again behind initial-letter placeholders.
+      if (_avatarCache.length > _maxCachedAvatars) {
         _avatarCache.remove(_avatarCache.keys.first);
       }
       return bytes;
@@ -2918,7 +2933,9 @@ class MatrixBackend extends ChatBackend
     _rooms = const [];
     _projected.clear();
     _dirtyRoomIds.clear();
+    _retryRoomIds.clear();
     _allRoomsDirty = true;
+    _accountDataChanged = false;
     _encryptedPreviewRooms.clear();
     _roomIndex.clear();
     _messageRefreshTimer?.cancel();
@@ -3220,7 +3237,10 @@ class MatrixBackend extends ChatBackend
           _roomSyncIssue = null;
           notifyListeners();
         }
-        _scheduleRoomUpdate();
+        // Every sync ends here, empty long polls included. Once the list is
+        // ready, onSync has already queued the rooms this sync touched;
+        // projecting every room again after each sync stalled large accounts.
+        if (_roomSyncState != RoomSyncState.ready) _scheduleRoomUpdate();
       case matrix.SyncStatus.waitingForResponse:
       case matrix.SyncStatus.processing:
       case matrix.SyncStatus.cleaningUp:
@@ -3267,36 +3287,53 @@ class MatrixBackend extends ChatBackend
   /// Schedules a room-list projection. With [roomIds] only those rooms are
   /// projected again; other rooms keep their last projection. Without, every
   /// room is (local actions, account data, sign-in).
-  void _scheduleRoomUpdate({Iterable<String>? roomIds}) {
+  void _scheduleRoomUpdate({
+    Iterable<String>? roomIds,
+    Iterable<String> retryIds = const [],
+  }) {
     if (roomIds == null) {
       _allRoomsDirty = true;
     } else {
       _dirtyRoomIds.addAll(roomIds);
     }
+    _retryRoomIds.addAll(retryIds);
     if (_roomUpdateTimer?.isActive ?? false) return;
     _roomUpdateTimer = Timer(const Duration(milliseconds: 40), _refreshRooms);
   }
 
-  /// Projects only the rooms a sync touched. Account data (m.direct, push
-  /// rules, ignored users) can change any room, so it reprojects all. Rooms
+  /// Global account data that changes how rooms are projected (DM partners
+  /// and names, notification modes, ignored people).
+  static const _roomListAccountData = {
+    'm.direct',
+    'm.push_rules',
+    'm.ignored_user_list',
+  };
+
+  /// Projects only the rooms a sync touched. Account data that rooms are
+  /// projected from reprojects all of them; other account data (folders,
+  /// bookmarks, settings of other clients) only notifies listeners. Rooms
   /// whose preview is still encrypted are retried on every sync, because
   /// their keys arrive as to-device messages, not room updates. Syncs that
   /// touch no room (presence, to-device only, empty long polls) do nothing.
   void _roomsSynced(matrix.SyncUpdate update) {
-    if ((update.accountData?.isNotEmpty ?? false) ||
-        _roomSyncState != RoomSyncState.ready) {
+    final accountData = update.accountData ?? const <matrix.BasicEvent>[];
+    if (_roomSyncState != RoomSyncState.ready ||
+        accountData.any((event) => _roomListAccountData.contains(event.type))) {
       _scheduleRoomUpdate();
       return;
     }
+    if (accountData.isNotEmpty) _accountDataChanged = true;
     final rooms = update.rooms;
     final ids = <String>{
       ...?rooms?.join?.keys,
       ...?rooms?.invite?.keys,
       ...?rooms?.leave?.keys,
       ...?rooms?.knock?.keys,
-      ..._encryptedPreviewRooms,
     };
-    if (ids.isNotEmpty) _scheduleRoomUpdate(roomIds: ids);
+    final retry = _encryptedPreviewRooms.difference(ids);
+    if (ids.isNotEmpty || retry.isNotEmpty || _accountDataChanged) {
+      _scheduleRoomUpdate(roomIds: ids, retryIds: retry);
+    }
   }
 
   void _refreshRooms() {
@@ -3314,8 +3351,12 @@ class MatrixBackend extends ChatBackend
     if (client == null || _disposed || !client.isLogged()) return;
     final all = _allRoomsDirty;
     final dirty = Set.of(_dirtyRoomIds);
+    final retry = Set.of(_retryRoomIds);
+    final accountDataChanged = _accountDataChanged;
     _allRoomsDirty = false;
     _dirtyRoomIds.clear();
+    _retryRoomIds.clear();
+    _accountDataChanged = false;
     var changed = all;
     final projected = <ChatRoom>[];
     final index = <String, matrix.Room>{};
@@ -3325,8 +3366,18 @@ class MatrixBackend extends ChatBackend
           room.membership != matrix.Membership.invite) {
         continue;
       }
-      var chat = all || dirty.contains(room.id) ? null : _projected[room.id];
-      if (chat == null) {
+      final previous = _projected[room.id];
+      var chat = all || dirty.contains(room.id) ? null : previous;
+      if (chat != null && retry.contains(room.id)) {
+        // Still-encrypted previews are retried on every sync; most stay
+        // encrypted, and an identical projection changes nothing.
+        final fresh = _projectRoomSafely(room, client);
+        if (!sameChatRoom(chat, fresh)) {
+          changed = true;
+          chat = fresh;
+          _projected[room.id] = fresh;
+        }
+      } else if (chat == null) {
         changed = true;
         chat = _projectRoomSafely(room, client);
         _projected[room.id] = chat;
@@ -3356,6 +3407,7 @@ class MatrixBackend extends ChatBackend
     }
     // Unchanged lists keep their identity, so listeners can skip work.
     if (changed ||
+        accountDataChanged ||
         previousState != _roomSyncState ||
         previousIssue != _roomSyncIssue) {
       notifyListeners();
@@ -3395,7 +3447,9 @@ class MatrixBackend extends ChatBackend
               _memberActive--;
               _memberPending.remove('${room.id}|$id');
               if (_disposed || generation != _securityGeneration) return;
-              _scheduleRoomUpdate(roomIds: {room.id});
+              // Startup queues lookups for many rooms; most leave the row
+              // as it was, and those must not rebuild the list each time.
+              _scheduleRoomUpdate(roomIds: const [], retryIds: {room.id});
               _pumpMembers();
             }),
       );
@@ -3448,6 +3502,11 @@ class MatrixBackend extends ChatBackend
   @visibleForTesting
   void debugRoomsSynced(matrix.SyncUpdate update) => _roomsSynced(update);
 
+  /// Feeds a sync status to the backend as the SDK's stream would.
+  @visibleForTesting
+  void debugSyncStatus(matrix.SyncStatusUpdate update) =>
+      _handleSyncStatus(update);
+
   ChatRoom _projectRoomSafely(matrix.Room room, matrix.Client client) {
     debugRoomProjections++;
     if (room.lastEvent?.type == matrix.EventTypes.Encrypted) {
@@ -3475,11 +3534,12 @@ class MatrixBackend extends ChatBackend
     final name = room.parallaxName;
     final heroIds = room.peopleHeroes;
     final tags = room.tags.keys.toList(growable: false);
+    final isDirect = room.isDirectChatCached;
     // Cached membership only while projecting; missing members (lazy
     // loading) are fetched in the background and the room projected again.
     String? previewSender;
     String? unresolvedSender;
-    if (!room.isDirectChat &&
+    if (!isDirect &&
         event != null &&
         (event.type == matrix.EventTypes.Message ||
             event.type == matrix.EventTypes.Encrypted)) {
@@ -3512,7 +3572,7 @@ class MatrixBackend extends ChatBackend
       favourite: tags.contains(matrix.TagType.favourite),
       lowPriority: tags.contains(matrix.TagType.lowPriority),
       tags: tags,
-      notificationMode: switch (room.pushRuleState) {
+      notificationMode: switch (room.pushRuleStateCached) {
         matrix.PushRuleState.notify => RoomNotificationMode.allMessages,
         matrix.PushRuleState.mentionsOnly =>
           RoomNotificationMode.mentionsAndKeywords,
@@ -3534,14 +3594,11 @@ class MatrixBackend extends ChatBackend
       manuallyUnread: room.markedUnread,
       avatarUrl: room.parallaxAvatar,
       encrypted: room.encrypted,
-      isDirect: room.isDirectChat,
+      isDirect: isDirect,
       invited: room.membership == matrix.Membership.invite,
       heroes: [
-        for (final id in heroIds.take(4))
-          ChatAvatar(
-            name: room.unsafeGetUserFromMemoryOrFallback(id).calcDisplayname(),
-            url: room.unsafeGetUserFromMemoryOrFallback(id).avatarUrl,
-          ),
+        for (final user in heroIds.take(4).map(room.memberInMemory))
+          ChatAvatar(name: user.calcDisplayname(), url: user.avatarUrl),
       ],
     );
   }

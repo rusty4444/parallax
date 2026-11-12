@@ -12,6 +12,7 @@ import '../rooms_admin/leave_room.dart';
 import '../rooms_admin/rooms_admin_models.dart';
 import 'spaces_admin_features.dart';
 import 'spaces_admin_models.dart';
+import '../../client_caches.dart';
 import '../../matrix_room_names.dart';
 
 class MatrixSpacesAdmin implements SpacesAdminFeatures {
@@ -214,7 +215,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
         if (room.id == spaceId ||
             room.membership != matrix.Membership.join ||
             room.isSpace ||
-            room.isDirectChat ||
+            room.isDirectChatCached ||
             existing.contains(room.id)) {
           continue;
         }
@@ -553,7 +554,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
           members: local.summary.mJoinedMemberCount,
           joined: true,
           isSpace: local.isSpace,
-          isDirect: local.isDirectChat,
+          isDirect: local.isDirectChatCached,
         );
       }
       final preview = remote[child.roomId];
@@ -751,7 +752,7 @@ class MatrixSpacesAdmin implements SpacesAdminFeatures {
         final room = _joined(client, id);
         if (room == null) continue;
         try {
-          if (room.isDirectChat) continue;
+          if (room.isDirectChatCached) continue;
           found.add(room);
           if (room.isSpace) pending.add(room);
         } catch (_) {}

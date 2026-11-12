@@ -26,7 +26,8 @@ class IndexedMessage {
   final String? threadRootId;
 }
 
-/// A change to the index derived from one timeline event.
+/// A change to the index, derived from one timeline event or recording
+/// backfill progress.
 @immutable
 sealed class IndexOp {
   const IndexOp();
@@ -56,6 +57,19 @@ final class IndexDelete extends IndexOp {
   final String eventId;
 }
 
+/// Records that [roomId]'s stored history has been indexed, so later launches
+/// skip reading it again. Queued after the room's messages, so it is written
+/// in the same transaction (or not at all).
+final class IndexRoomBackfilled extends IndexOp {
+  const IndexRoomBackfilled(this.roomId);
+  final String roomId;
+}
+
+/// Version stored with each room's backfill progress. Bump it when what
+/// [IndexUpsert]s are derived from stored history changes, so every room's
+/// stored history is read again once.
+const indexBackfillVersion = 1;
+
 /// Longest body stored per message; longer bodies are truncated.
 const maxIndexedBodyLength = 8000;
 
@@ -79,7 +93,13 @@ String ftsMatchQuery(List<String> tokens) =>
 
 /// Storage for one account's index.
 abstract interface class MessageIndexStore {
+  /// Applies [ops] in order, atomically.
   Future<void> apply(List<IndexOp> ops);
+
+  /// Rooms whose stored history this index already holds (written by
+  /// [IndexRoomBackfilled] at the current [indexBackfillVersion]). Deleting
+  /// the index file forgets them, so a fresh index is backfilled again.
+  Future<Set<String>> backfilledRooms();
 
   /// Messages matching all [tokens], newest first.
   Future<List<IndexedMessage>> search(
@@ -155,6 +175,10 @@ enum IndexTextMode { fts5, fts4, like }
 class SqfliteMessageIndexStore implements MessageIndexStore {
   SqfliteMessageIndexStore._(this._db, this.mode);
 
+  /// Wraps an already open database (host tests use a recording fake).
+  @visibleForTesting
+  SqfliteMessageIndexStore.forDatabase(this._db, this.mode);
+
   final sqlite.Database _db;
   final IndexTextMode mode;
   int _writesSincePrune = 0;
@@ -213,33 +237,54 @@ class SqfliteMessageIndexStore implements MessageIndexStore {
     return IndexTextMode.like;
   }
 
+  /// One batch per call: sqflite runs every database in the app on a single
+  /// worker thread, so a statement per message would queue hundreds of
+  /// platform calls behind the Matrix SDK's own sync writes and reads. The
+  /// batch commits in a transaction, so [ops] still apply all or nothing.
   @override
   Future<void> apply(List<IndexOp> ops) async {
     if (ops.isEmpty) return;
-    await _db.transaction((txn) async {
-      for (final op in ops) {
-        switch (op) {
-          case IndexUpsert(:final message):
-            await txn.rawInsert(insertSql, [
-              message.eventId,
-              message.roomId,
-              message.sender,
-              message.time.millisecondsSinceEpoch,
-              message.threadRootId,
-              _bounded(message.body),
-            ]);
-          case IndexEdit(:final eventId, :final sender, :final body):
-            await txn.rawUpdate(editSql, [_bounded(body), eventId, sender]);
-          case IndexDelete(:final eventId):
-            await txn.rawDelete(deleteSql, [eventId]);
-        }
+    final batch = _db.batch();
+    for (final op in ops) {
+      switch (op) {
+        case IndexUpsert(:final message):
+          batch.rawInsert(insertSql, [
+            message.eventId,
+            message.roomId,
+            message.sender,
+            message.time.millisecondsSinceEpoch,
+            message.threadRootId,
+            _bounded(message.body),
+          ]);
+        case IndexEdit(:final eventId, :final sender, :final body):
+          batch.rawUpdate(editSql, [_bounded(body), eventId, sender]);
+        case IndexDelete(:final eventId):
+          batch.rawDelete(deleteSql, [eventId]);
+        case IndexRoomBackfilled(:final roomId):
+          batch.rawInsert(backfilledSql, [
+            '$backfillKeyPrefix$roomId',
+            '$indexBackfillVersion',
+          ]);
       }
-    });
-    _writesSincePrune += ops.length;
-    if (_writesSincePrune >= 500) {
-      _writesSincePrune = 0;
-      await _db.rawDelete(pruneSql, [maxIndexedMessages]);
     }
+    final writes = _writesSincePrune + ops.length;
+    final prune = writes >= 500;
+    if (prune) batch.rawDelete(pruneSql, [maxIndexedMessages]);
+    await batch.commit(noResult: true);
+    _writesSincePrune = prune ? 0 : writes;
+  }
+
+  @override
+  Future<Set<String>> backfilledRooms() async {
+    final rows = await _db.rawQuery(backfilledRoomsSql, [
+      '$indexBackfillVersion',
+    ]);
+    return {
+      for (final row in rows)
+        if (row['key'] case final String key
+            when key.startsWith(backfillKeyPrefix))
+          key.substring(backfillKeyPrefix.length),
+    };
   }
 
   @override
@@ -340,6 +385,14 @@ class SqfliteMessageIndexStore implements MessageIndexStore {
   static const pruneSql =
       'DELETE FROM messages WHERE id IN (SELECT id FROM messages '
       'ORDER BY ts DESC LIMIT -1 OFFSET ?)';
+
+  /// Backfill progress lives in `meta`, one row per room, so it is deleted
+  /// with the index file (sign-out, account change, clearing, turning off).
+  static const backfillKeyPrefix = 'backfill:';
+  static const backfilledSql =
+      'INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)';
+  static const backfilledRoomsSql =
+      "SELECT key FROM meta WHERE key LIKE 'backfill:%' AND value = ?";
 
   static const _columns =
       'm.event_id, m.room_id, m.sender, m.ts, m.thread_root, m.body';

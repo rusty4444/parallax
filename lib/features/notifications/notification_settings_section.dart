@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
-import '../../widgets.dart';
 import 'notification_features.dart';
 import 'notification_model.dart';
 import 'notification_renderer.dart';
@@ -118,75 +117,55 @@ class _NotificationContentSectionState
     final p = widget.palette;
     final enabled = _loaded && _available && !_saving;
     final content = _preferences.showContent;
+    // Rows for the Settings "Notifications" group (its card and heading).
+    const divider = Divider(height: 1, indent: 16, endIndent: 16);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 28),
-        Eyebrow('Notification content', palette: p),
-        const SizedBox(height: 10),
-        Material(
-          color: p.surface,
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: p.stroke),
+        SwitchListTile(
+          key: const ValueKey('notifications.showContent'),
+          secondary: const Icon(Icons.chat_bubble_outline_rounded),
+          title: const Text('Show message content'),
+          subtitle: const Text(
+            'Sender, message text and room name. When off, '
+            'notifications only say you have a new message.',
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 10, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Push notifications carry only room and event IDs. '
-                  'Parallax fetches and decrypts each message on this '
-                  'device before showing it.',
-                  style: TextStyle(color: p.muted, fontSize: 12),
-                ),
-                SwitchListTile(
-                  key: const ValueKey('notifications.showContent'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Show message content'),
-                  subtitle: const Text(
-                    'Sender, message text and room name. When off, '
-                    'notifications only say you have a new message.',
-                  ),
-                  value: content,
-                  activeThumbColor: p.accent,
-                  onChanged: enabled
-                      ? (value) => unawaited(
-                          _save(_preferences.copyWith(showContent: value)),
-                        )
-                      : null,
-                ),
-                SwitchListTile(
-                  key: const ValueKey('notifications.showMedia'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Show media previews in notifications'),
-                  subtitle: const Text(
-                    'Photos, stickers and video thumbnails, downloaded and '
-                    'decrypted on this device.',
-                  ),
-                  value: content && _preferences.showMediaPreviews,
-                  activeThumbColor: p.accent,
-                  onChanged: enabled && content
-                      ? (value) => unawaited(
-                          _save(
-                            _preferences.copyWith(showMediaPreviews: value),
-                          ),
-                        )
-                      : null,
-                ),
-                Text(
-                  _available
-                      ? 'On a secure lock screen, Android hides notification '
-                            'content when you choose to hide sensitive '
-                            'notifications in system settings.'
-                      : 'Notification settings are unavailable on this '
-                            'device.',
-                  style: TextStyle(color: p.muted, fontSize: 12),
-                ),
-              ],
-            ),
+          value: content,
+          activeThumbColor: p.accent,
+          onChanged: enabled
+              ? (value) =>
+                    unawaited(_save(_preferences.copyWith(showContent: value)))
+              : null,
+        ),
+        divider,
+        SwitchListTile(
+          key: const ValueKey('notifications.showMedia'),
+          secondary: const Icon(Icons.image_outlined),
+          title: const Text('Show media previews in notifications'),
+          subtitle: const Text(
+            'Photos, stickers and video thumbnails, downloaded and '
+            'decrypted on this device.',
+          ),
+          value: content && _preferences.showMediaPreviews,
+          activeThumbColor: p.accent,
+          onChanged: enabled && content
+              ? (value) => unawaited(
+                  _save(_preferences.copyWith(showMediaPreviews: value)),
+                )
+              : null,
+        ),
+        divider,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+          child: Text(
+            _available
+                ? 'Push notifications carry only room and event IDs. '
+                      'Parallax fetches and decrypts each message on this '
+                      'device before showing it. On a secure lock screen, '
+                      'Android hides notification content when you choose to '
+                      'hide sensitive notifications in system settings.'
+                : 'Notification settings are unavailable on this device.',
+            style: TextStyle(color: p.muted, fontSize: 12),
           ),
         ),
       ],

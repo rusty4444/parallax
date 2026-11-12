@@ -73,7 +73,6 @@ void main() {
 
   testWidgets('both toggles default on and persist', (tester) async {
     await pump(tester);
-    expect(find.text('Notification content'.toUpperCase()), findsOneWidget);
     expect(tile(tester, 'notifications.showContent').value, isTrue);
     expect(tile(tester, 'notifications.showMedia').value, isTrue);
     await tester.tap(find.text('Show media previews in notifications'));
@@ -135,13 +134,15 @@ void main() {
     );
   });
 
-  testWidgets('the settings hook contributes the section', (tester) async {
+  testWidgets('the settings hook adds rows to the Notifications group', (
+    tester,
+  ) async {
     late List<Widget> sections;
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (context) {
-            sections = notificationSettingsSections(
+            sections = notificationSettingsRows(
               context,
               SettingsHookContext(
                 backend: backend,

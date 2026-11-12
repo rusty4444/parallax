@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parallax/features/notifications/notification_model.dart'
+    show maxLinesPerRoom;
 import 'package:parallax/features/platform/background_connection.dart';
 import 'package:parallax/push_notifications.dart';
 import 'package:parallax/push_settings_screen.dart';
@@ -771,6 +773,153 @@ void main() {
         await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       }
       expect(done, isTrue);
+    });
+
+    group('render queue', () {
+      /// Lets queued jobs and microtasks run.
+      Future<void> turns() async {
+        for (var i = 0; i < 20; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+
+      late List<String> started;
+      late Map<String, Completer<void>> gates;
+      late List<bool> currentAfter;
+      var running = 0;
+      var most = 0;
+
+      setUp(() async {
+        started = [];
+        gates = {};
+        currentAfter = [];
+        running = 0;
+        most = 0;
+        builtIn.richRenderer = (envelope, isCurrent) async {
+          final id = envelope.eventId!;
+          started.add(id);
+          running++;
+          if (running > most) most = running;
+          try {
+            await (gates[id] ??= Completer<void>()).future;
+            currentAfter.add(isCurrent());
+          } finally {
+            running--;
+          }
+        };
+        await builtIn.setSession(session('@alice:example.org'));
+        await builtIn.enable(consent: true);
+      });
+
+      void present(String room, String event) => expect(
+        builtIn.presentInApp(roomId: '!$room:example.org', eventId: event),
+        isTrue,
+      );
+
+      void release(Iterable<String> events) {
+        for (final id in events) {
+          (gates[id] ??= Completer<void>()).complete();
+        }
+      }
+
+      test('renders two at once, oldest first, one per room', () async {
+        present('a', r'$a1');
+        present('a', r'$a2');
+        present('b', r'$b1');
+        present('c', r'$c1');
+        await turns();
+        // $a2 waits for $a1 (same room), so $b1 takes the second slot.
+        expect(started, [r'$a1', r'$b1']);
+        release([r'$a1']);
+        await turns();
+        expect(started, [r'$a1', r'$b1', r'$a2']);
+        release([r'$b1']);
+        await turns();
+        expect(started, [r'$a1', r'$b1', r'$a2', r'$c1']);
+        release([r'$a2', r'$c1']);
+        await builtIn.settle();
+        expect(most, PushNotifications.maxConcurrentRenders);
+        expect(currentAfter, everyElement(isTrue));
+        expect(inApp.shown, isEmpty);
+      });
+
+      test(
+        'a long catch-up keeps each room’s newest events, once each',
+        () async {
+          // Dropping older events must not shorten the room's conversation.
+          expect(
+            PushNotifications.maxQueuedRendersPerRoom,
+            greaterThan(maxLinesPerRoom),
+          );
+          const count = 20;
+          release([for (var i = 1; i <= count; i++) '\$e$i']);
+          present('a', r'$e0');
+          for (var i = 1; i <= count; i++) {
+            present('a', '\$e$i');
+          }
+          // Already waiting: not rendered twice.
+          present('a', '\$e$count');
+          await turns();
+          expect(started, [r'$e0']);
+          release([r'$e0']);
+          await builtIn.settle();
+          expect(started, [
+            r'$e0',
+            for (
+              var i = count - PushNotifications.maxQueuedRendersPerRoom + 1;
+              i <= count;
+              i++
+            )
+              '\$e$i',
+          ]);
+        },
+      );
+
+      test('past the overall bound the busiest room gives way first', () async {
+        // Two slow renders hold both slots while the queue fills up.
+        present('x', r'$x');
+        present('y', r'$y');
+        present('z', r'$z1');
+        present('z', r'$z2');
+        const single = PushNotifications.maxQueuedRenders - 1;
+        for (var i = 0; i < single; i++) {
+          present('r$i', '\$r$i');
+        }
+        await turns();
+        expect(started, [r'$x', r'$y']);
+        release(gates.keys.toList());
+        release([r'$z1', r'$z2', for (var i = 0; i < single; i++) '\$r$i']);
+        await builtIn.settle();
+        expect(started, isNot(contains(r'$z1')));
+        expect(started, contains(r'$z2'));
+        expect(started.where((id) => id.startsWith(r'$r')), hasLength(single));
+      });
+
+      test('waiting renders never run after sign-out', () async {
+        present('a', r'$a');
+        present('b', r'$b');
+        present('c', r'$c');
+        present('d', r'$d');
+        await turns();
+        expect(started, [r'$a', r'$b']);
+        await builtIn.logout();
+        expect(
+          builtIn.presentInApp(roomId: '!e:example.org', eventId: r'$e'),
+          isFalse,
+        );
+        // The next session renders at once: renders left over from the old
+        // one hold no slot and post nothing.
+        await builtIn.setSession(session('@bob:example.org'));
+        await builtIn.enable(consent: true);
+        present('a', r'$new');
+        await turns();
+        expect(started, [r'$a', r'$b', r'$new']);
+        release([r'$a', r'$b', r'$new']);
+        await builtIn.settle();
+        expect(started, [r'$a', r'$b', r'$new']);
+        expect(currentAfter, [false, false, true]);
+        expect(inApp.shown, isEmpty);
+      });
     });
 
     test('push providers ignore synced events', () async {

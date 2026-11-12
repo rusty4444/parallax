@@ -112,6 +112,12 @@ List<Widget> roomDetailsSectionsFor(
   ...packsRoomDetailsSections(context, ctx),
 ];
 
+/// Extra rows inside the Settings Notifications group.
+List<Widget> notificationSettingsRowsFor(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [...notificationSettingsRows(context, ctx)];
+
 List<Widget> settingsSectionsFor(
   BuildContext context,
   SettingsHookContext ctx,
@@ -121,7 +127,6 @@ List<Widget> settingsSectionsFor(
   ...mediaSettingsSections(context, ctx),
   ...platformSettingsSections(context, ctx),
   ...messageSearchSettingsSections(context, ctx),
-  ...notificationSettingsSections(context, ctx),
   ...savedSettingsSections(context, ctx),
   ...packsSettingsSections(context, ctx),
   ...qrLoginSettingsSections(context, ctx),

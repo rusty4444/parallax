@@ -579,13 +579,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
           preferences: _preferences,
           draftStore: _draftStore,
           notifications: _pushReady ? _notifications : null,
-          child: MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              textScaler: _PreferenceTextScaler(
-                MediaQuery.textScalerOf(context),
-                _preferences.textScale,
-              ),
-            ),
+          child: _AppTextScale(
+            factor: _preferences.textScale,
             child: Column(
               children: [
                 if (_pushError != null)
@@ -629,9 +624,12 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
             ),
           ),
         ),
-        home: AnimatedBuilder(
-          animation: _backend,
-          builder: (context, _) => switch (_startupError == null
+        // Only the session status picks the screen. Rebuilding on every
+        // backend notification (each sync, each timeline update of an open
+        // room) rebuilt the whole inbox underneath the room on screen.
+        home: _SessionStatusBuilder(
+          backend: _backend,
+          builder: (context) => switch (_startupError == null
               ? _backend.connection
               : SessionStatus.offline) {
             SessionStatus.loading => Scaffold(
@@ -716,6 +714,81 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   }
 }
 
+/// Rebuilds [builder] only when the backend's session status or startup
+/// error changes, not on every notification.
+class _SessionStatusBuilder extends StatefulWidget {
+  const _SessionStatusBuilder({required this.backend, required this.builder});
+  final ChatBackend backend;
+  final WidgetBuilder builder;
+
+  @override
+  State<_SessionStatusBuilder> createState() => _SessionStatusBuilderState();
+}
+
+class _SessionStatusBuilderState extends State<_SessionStatusBuilder> {
+  late SessionStatus _status;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _read();
+    widget.backend.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_SessionStatusBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.backend, widget.backend)) {
+      oldWidget.backend.removeListener(_changed);
+      widget.backend.addListener(_changed);
+      _read();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.backend.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _read() {
+    _status = widget.backend.connection;
+    _error = widget.backend.error;
+  }
+
+  void _changed() {
+    if (widget.backend.connection == _status &&
+        widget.backend.error == _error) {
+      return;
+    }
+    setState(_read);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
+}
+
+/// Applies the app's text size on top of the platform's. Only this widget
+/// depends on all of MediaQuery (it changes every frame while the keyboard
+/// animates); [child] is built once by the caller and passes through.
+class _AppTextScale extends StatelessWidget {
+  const _AppTextScale({required this.factor, required this.child});
+  final double factor;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => MediaQuery(
+    data: MediaQuery.of(context).copyWith(
+      textScaler: _PreferenceTextScaler(
+        MediaQuery.textScalerOf(context),
+        factor,
+      ),
+    ),
+    child: child,
+  );
+}
+
 /// Preserve platform accessibility's nonlinear scaling at each font size.
 class _PreferenceTextScaler extends TextScaler {
   const _PreferenceTextScaler(this.platform, this.factor);
@@ -727,4 +800,16 @@ class _PreferenceTextScaler extends TextScaler {
 
   @override
   double get textScaleFactor => scale(14) / 14;
+
+  // Value equality: a new scaler is made whenever MediaQuery changes (each
+  // keyboard animation frame). Without it every Text in the app saw a
+  // "changed" text scale and rebuilt on each of those frames.
+  @override
+  bool operator ==(Object other) =>
+      other is _PreferenceTextScaler &&
+      other.platform == platform &&
+      other.factor == factor;
+
+  @override
+  int get hashCode => Object.hash(platform, factor);
 }

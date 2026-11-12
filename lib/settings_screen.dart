@@ -58,7 +58,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late VisualTheme _style = widget.style;
   late bool _followSystem = widget.followSystemTheme;
   late Future<CryptoStatus> _cryptoFuture;
-  late Future<List<VerificationDevice>> _devicesFuture;
+
+  /// Other devices, loaded the first time the (collapsed) list is opened:
+  /// the lookup queries the server's device keys.
+  Future<List<VerificationDevice>>? _devicesFuture;
+  bool _devicesExpanded = false;
   late final AccountFeatures? _account = accountFeaturesOf(widget.backend);
   Future<HomeProfile>? _profileFuture;
   Future<AccountManagement>? _managementFuture;
@@ -69,7 +73,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _cryptoFuture = widget.backend.cryptoStatus();
-    _devicesFuture = widget.backend.ownDevices();
     _refreshAccount();
   }
 
@@ -89,7 +92,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _refreshCrypto() => setState(() {
     _cryptoFuture = widget.backend.cryptoStatus();
-    _devicesFuture = widget.backend.ownDevices();
+    if (_devicesFuture != null) _devicesFuture = widget.backend.ownDevices();
+  });
+
+  void _refreshDevices() =>
+      setState(() => _devicesFuture = widget.backend.ownDevices());
+
+  void _toggleDevices() => setState(() {
+    _devicesExpanded = !_devicesExpanded;
+    if (_devicesExpanded) _devicesFuture ??= widget.backend.ownDevices();
   });
 
   Future<String?> _askRecoveryCredential({
@@ -186,6 +197,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted && _owner.isCurrent) setState(() => _restoring = false);
     }
   }
+
+  /// "Verify with another device": collapsed until tapped, so a long list
+  /// of sessions doesn't fill the screen and isn't fetched on every visit.
+  Widget _devicesSection(AppPalette p) => Material(
+    color: p.surface,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+      side: BorderSide(color: p.stroke),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          key: const ValueKey('devices-toggle'),
+          leading: const Icon(Icons.devices_other_rounded),
+          title: const Text('Verify with another device'),
+          subtitle: const Text('Your other signed-in devices'),
+          trailing: AnimatedRotation(
+            turns: _devicesExpanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: const Icon(Icons.expand_more_rounded),
+          ),
+          onTap: _toggleDevices,
+        ),
+        if (_devicesExpanded)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: FutureBuilder<List<VerificationDevice>>(
+              future: _devicesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return TextButton(
+                    onPressed: _refreshDevices,
+                    child: const Text('Retry loading devices'),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text('Loading your other devices…'),
+                  );
+                }
+                final devices = snapshot.data!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (devices.isEmpty)
+                      const Text(
+                        'No other device found. Sign in on a second client first.',
+                      )
+                    else
+                      for (final device in devices)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(device.name),
+                          subtitle: Text(
+                            device.verified
+                                ? '${device.id} · Verified'
+                                : '${device.id} · Not verified',
+                          ),
+                          trailing: const Icon(Icons.verified_user_outlined),
+                          onTap: () => _verifyDevice(device),
+                        ),
+                    TextButton(
+                      onPressed: _refreshDevices,
+                      child: const Text('Refresh devices'),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+      ],
+    ),
+  );
 
   Future<void> _verifyDevice(VerificationDevice device) async {
     final userId = widget.backend.userId;
@@ -522,6 +609,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
+                  ...notificationSettingsRowsFor(
+                    context,
+                    SettingsHookContext(backend: widget.backend, palette: p),
+                  ),
                 ],
               ),
               SettingsGroup(
@@ -746,51 +837,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              FutureBuilder<List<VerificationDevice>>(
-                future: _devicesFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return TextButton(
-                      onPressed: _refreshCrypto,
-                      child: const Text('Retry loading devices'),
-                    );
-                  }
-                  if (!snapshot.hasData) {
-                    return const Text('Loading your other devices…');
-                  }
-                  final devices = snapshot.data!;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Verify with another device',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 6),
-                      if (devices.isEmpty)
-                        const Text(
-                          'No other device found. Sign in on a second client first.',
-                        )
-                      else
-                        for (final device in devices)
-                          ListTile(
-                            title: Text(device.name),
-                            subtitle: Text(
-                              device.verified
-                                  ? '${device.id} · Verified'
-                                  : '${device.id} · Not verified',
-                            ),
-                            trailing: const Icon(Icons.verified_user_outlined),
-                            onTap: () => _verifyDevice(device),
-                          ),
-                      TextButton(
-                        onPressed: _refreshCrypto,
-                        child: const Text('Refresh devices'),
-                      ),
-                    ],
-                  );
-                },
-              ),
+              _devicesSection(p),
               ...settingsSectionsFor(
                 context,
                 SettingsHookContext(backend: widget.backend, palette: p),

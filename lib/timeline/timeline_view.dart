@@ -49,6 +49,12 @@ class TimelineView extends StatefulWidget {
   State<TimelineView> createState() => _TimelineViewState();
 }
 
+/// Key of one list slot, distinct from the keys of the widgets inside it
+/// (a bubble keyed by its event ID is not its slot).
+class _ItemKey extends ValueKey<String> {
+  const _ItemKey(super.value);
+}
+
 /// A flattened list item: a row, or one member of an expanded group.
 class _Item {
   const _Item.row(this.row) : child = null;
@@ -68,6 +74,15 @@ class _TimelineViewState extends State<TimelineView> {
   /// Newest entry when the user scrolled away from the bottom.
   String? _awayNewestId;
 
+  /// Receipts, rows and the ID lookup for the last messages/room seen.
+  ({
+    Object key,
+    Map<String, List<ReceiptReader>> receipts,
+    List<TimelineRow> rows,
+    Map<String, ChatEntry> byId,
+  })?
+  _derived;
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +96,7 @@ class _TimelineViewState extends State<TimelineView> {
         oldWidget.backend != widget.backend) {
       _groupIds.clear();
       _expanded.clear();
+      _derived = null;
       _away = false;
       _awayNewestId = null;
     }
@@ -155,19 +171,52 @@ class _TimelineViewState extends State<TimelineView> {
       palette: palette,
     );
     final features = richTimelineFeaturesOf(backend);
-    final receipts =
-        features?.latestReceipts(
-          widget.roomId,
-          eventIds: {for (final entry in entries) entry.id},
-        ) ??
-        const {};
     final isDirect = widget.room?.isDirect ?? false;
-    final rows = buildTimelineRows(
-      entries,
-      isDirect: isDirect,
-      groupIds: _groupIds,
-    );
+    // The room screen rebuilds on every backend notification (up to once a
+    // frame while a room is busy). Receipts, rows and lookups only change
+    // with the messages or the room (receipts arrive in the room's sync,
+    // which projects it again), so they are worked out once per change.
+    final key = (entries, widget.room, features, isDirect);
+    var derived = _derived;
+    if (derived == null || derived.key != key) {
+      derived = _derived = (
+        key: key,
+        receipts:
+            features?.latestReceipts(
+              widget.roomId,
+              eventIds: {for (final entry in entries) entry.id},
+            ) ??
+            const <String, List<ReceiptReader>>{},
+        rows: buildTimelineRows(
+          entries,
+          isDirect: isDirect,
+          groupIds: _groupIds,
+        ),
+        byId: {for (final entry in entries) entry.id: entry},
+      );
+    }
+    final receipts = derived.receipts;
+    final rows = derived.rows;
+    final byId = derived.byId;
     final items = _items(rows);
+    // The newest item is index 0 (reverse list), so every new message shifts
+    // every index. Give each item a key unique in this build and map it to
+    // its index, so Flutter moves the existing bubbles instead of discarding
+    // and rebuilding all of them (re-parsing their text, reloading their
+    // images). A key seen again (a day repeated when server times go
+    // backwards) gets an occurrence suffix: duplicates would let two old
+    // children claim one slot.
+    final itemKeys = List<String>.filled(items.length, '');
+    final indexOfKey = <String, int>{};
+    for (var i = 0; i < items.length; i++) {
+      final base = items[i].key;
+      var key = base;
+      for (var n = 2; indexOfKey.containsKey(key); n++) {
+        key = '$base#$n';
+      }
+      itemKeys[i] = key;
+      indexOfKey[key] = items.length - i - 1;
+    }
     final lastOwn = entries
         .where(
           (entry) =>
@@ -227,9 +276,7 @@ class _TimelineViewState extends State<TimelineView> {
       onHeart: () => widget.onHeart(entry),
       onAction: () => widget.onAction(entry),
       onReaction: (emoji) => widget.onReaction(entry, emoji),
-      replyPreview: entry.replyToId == null
-          ? null
-          : entries.where((item) => item.id == entry.replyToId).firstOrNull,
+      replyPreview: entry.replyToId == null ? null : byId[entry.replyToId],
     );
 
     Widget buildItem(_Item item) {
@@ -320,6 +367,8 @@ class _TimelineViewState extends State<TimelineView> {
         widget.compact ? 8 : 18,
       ),
       itemCount: items.length + (backend.canLoadOlder ? 1 : 0),
+      findChildIndexCallback: (key) =>
+          key is _ItemKey ? indexOfKey[key.value] : null,
       itemBuilder: (context, index) {
         if (index == items.length) {
           return Center(
@@ -331,7 +380,11 @@ class _TimelineViewState extends State<TimelineView> {
             ),
           );
         }
-        return buildItem(items[items.length - index - 1]);
+        final i = items.length - index - 1;
+        return KeyedSubtree(
+          key: _ItemKey(itemKeys[i]),
+          child: buildItem(items[i]),
+        );
       },
     );
     return Stack(

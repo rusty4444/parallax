@@ -9,6 +9,11 @@ import 'package:matrix/matrix.dart' as matrix;
 import 'package:parallax/features/notifications/matrix_push_projection.dart';
 import 'package:parallax/features/notifications/notification_content.dart';
 import 'package:parallax/features/notifications/notification_media.dart';
+import 'package:parallax/features/notifications/notification_features.dart';
+import 'package:parallax/features/notifications/notification_model.dart';
+import 'package:parallax/room_events.dart' show MatrixSdkAccess;
+
+import 'widget_test.dart' show FakeBackend;
 
 const _me = '@me:example.org';
 
@@ -35,6 +40,24 @@ class _Client extends matrix.Client {
 
   @override
   Future<void> dispose({bool closeDatabase = true}) async {}
+}
+
+/// A signed-in client whose device can change (a new sign-in).
+class _SessionClient extends _Client {
+  String device = 'DEVICE';
+  @override
+  String? get deviceID => device;
+}
+
+class _SdkBackend extends FakeBackend implements MatrixSdkAccess {
+  _SdkBackend(this.client);
+  final matrix.Client client;
+  bool signedIn = true;
+  @override
+  matrix.Client? get sdkClient => client;
+  @override
+  bool isSessionCurrent(matrix.Client client) =>
+      signedIn && identical(client, this.client);
 }
 
 matrix.Event _state(
@@ -183,6 +206,124 @@ void main() {
       expect(resolved.line.senderName, 'Alice Smith');
     },
   );
+
+  test('names are checked with the server once per room and person', () async {
+    final checked = <String>[];
+    final client = _Client((request) async {
+      if (request.url.path.contains('/state/m.room.member/')) {
+        checked.add(request.url.path);
+        return http.Response(
+          '{"membership":"join","displayname":"Alice Smith"}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('{"errcode":"M_NOT_FOUND"}', 404);
+    });
+    final ledger = MemberRefreshLedger();
+    final room = _groupRoom(client);
+    final other = matrix.Room(id: '!other:example.org', client: client);
+    other.setState(
+      _state(other, 'm.room.member', '@alice:example.org', {
+        'membership': 'join',
+        'displayname': 'Alice',
+      }),
+    );
+    Future<ResolvedPushEvent> project(
+      matrix.Room room,
+      String eventId, {
+      MemberRefreshLedger? ledger,
+    }) => projectPushEvent(
+      event: matrix.Event(
+        type: 'm.room.message',
+        content: const {'msgtype': 'm.text', 'body': 'Hi'},
+        senderId: '@alice:example.org',
+        eventId: eventId,
+        originServerTs: DateTime(2026, 11, 12, 9, 30),
+        room: room,
+      ),
+      room: room,
+      myUserId: _me,
+      isDirect: false,
+      highlight: false,
+      memberRefreshes: ledger,
+    );
+
+    // A catch-up burst from one person: lookups at once share a request.
+    final burst = await Future.wait([
+      project(room, r'$1', ledger: ledger),
+      project(room, r'$2', ledger: ledger),
+    ]);
+    expect(burst.map((r) => r.line.senderName), ['Alice Smith', 'Alice Smith']);
+    expect(checked, hasLength(1));
+    // Later ones in the same room reuse the checked name.
+    final later = await project(room, r'$3', ledger: ledger);
+    expect(later.line.senderName, 'Alice Smith');
+    expect(checked, hasLength(1));
+    // Membership is per room.
+    expect(
+      (await project(other, r'$4', ledger: ledger)).line.senderName,
+      'Alice Smith',
+    );
+    expect(checked, hasLength(2));
+    expect(ledger.length, 2);
+    // A new session checks again.
+    ledger.clear();
+    await project(room, r'$5', ledger: ledger);
+    expect(checked, hasLength(3));
+    // Without a ledger (background isolates) every notification checks.
+    await project(room, r'$6');
+    await project(room, r'$7');
+    expect(checked, hasLength(5));
+  });
+
+  test(
+    'the member ledger forgets its oldest pairs past its capacity',
+    () async {
+      final checked = <String>[];
+      final client = _Client((request) async {
+        checked.add(Uri.decodeComponent(request.url.pathSegments.last));
+        return http.Response(
+          '{"membership":"join"}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      const people = ['@a:example.org', '@b:example.org', '@c:example.org'];
+      final room = _groupRoom(client);
+      for (final id in people) {
+        room.setState(
+          _state(room, 'm.room.member', id, {'membership': 'join'}),
+        );
+      }
+      final ledger = MemberRefreshLedger(capacity: 2);
+      for (final id in people) {
+        await ledger.refresh(room, id);
+      }
+      expect(ledger.length, 2);
+      // @a was forgotten, @c is still known.
+      await ledger.refresh(room, '@c:example.org');
+      await ledger.refresh(room, '@a:example.org');
+      expect(checked, [...people, '@a:example.org']);
+    },
+  );
+
+  test('the live client keeps one member ledger per session', () {
+    final client = _SessionClient();
+    final backend = _SdkBackend(client);
+    final features = MatrixNotificationFeatures(backend);
+    final ledger = features.memberRefreshesFor(client);
+    expect(features.memberRefreshesFor(client), same(ledger));
+    // Signing out forgets it as soon as the session is seen to have ended.
+    backend.signedIn = false;
+    expect(features.userId, isNull);
+    backend.signedIn = true;
+    final next = features.memberRefreshesFor(client);
+    expect(next, isNot(same(ledger)));
+    // A new sign-in on the same client is another session.
+    client.device = 'OTHER';
+    expect(features.memberRefreshesFor(client), isNot(same(next)));
+  });
 
   test('emotes use the display name', () async {
     final room = _groupRoom(client);

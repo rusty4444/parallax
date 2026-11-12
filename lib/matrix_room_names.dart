@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:matrix/matrix.dart';
 
 import 'bridge_bots.dart';
+import 'client_caches.dart';
 import 'people_names.dart';
 
 /// State event types whose `bridgebot` names a room's bridge bot (MSC2346
@@ -11,6 +12,17 @@ const bridgeStateTypes = {'m.bridge', 'uk.half-shot.bridge'};
 
 /// Room names and pictures without bridge bots.
 extension ParallaxRoomNames on Room {
+  /// [userId]'s member state if it is loaded, else a bare fallback.
+  ///
+  /// Unlike the SDK's `unsafeGetUserFromMemoryOrFallback`, never starts a
+  /// lookup: that fires a detached database read and server request for
+  /// each missing member, and the room list asks for every room's people at
+  /// once after a cold start. The backend loads missing names a few at a
+  /// time and projects the room again.
+  User memberInMemory(String userId) =>
+      getState(EventTypes.RoomMember, userId)?.asUser(this) ??
+      User(userId, room: this);
+
   /// Bots named by this room's bridge state, where that state is loaded.
   Set<String> get bridgeBotIds => {
     for (final type in bridgeStateTypes)
@@ -26,14 +38,14 @@ extension ParallaxRoomNames on Room {
       (stateBots ?? bridgeBotIds).contains(userId) ||
       looksLikeBridgeBot(
         userId,
-        displayName: unsafeGetUserFromMemoryOrFallback(userId).displayName,
+        displayName: memberInMemory(userId).displayName,
       );
 
   /// The other people this room is named and pictured after (the server's
   /// heroes, or the DM partner), without bridge bots unless only bots remain.
   List<String> get peopleHeroes {
     final heroes = [...?summary.mHeroes];
-    final direct = directChatMatrixID;
+    final direct = directChatPartner;
     if (heroes.isEmpty && direct != null) heroes.add(direct);
     final bots = bridgeBotIds;
     return withoutBridgeBots([
@@ -55,7 +67,7 @@ extension ParallaxRoomNames on Room {
     const i18n = MatrixDefaultLocalizations();
     final names = [
       for (final hero in heroes)
-        unsafeGetUserFromMemoryOrFallback(hero).calcDisplayname(i18n: i18n),
+        memberInMemory(hero).calcDisplayname(i18n: i18n),
     ];
     final members =
         (summary.mJoinedMemberCount ?? 0) + (summary.mInvitedMemberCount ?? 0);
@@ -211,7 +223,7 @@ extension ParallaxRoomNames on Room {
   Uri? get parallaxAvatar {
     final url = getState(EventTypes.RoomAvatar)?.content.tryGet<String>('url');
     if (url != null) return Uri.tryParse(url);
-    final direct = directChatMatrixID;
+    final direct = directChatPartner;
     if (direct != null &&
         isBridgeBot(direct) &&
         peopleHeroes.any((hero) => hero != direct)) {

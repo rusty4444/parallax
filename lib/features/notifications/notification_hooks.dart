@@ -19,7 +19,9 @@ Widget wrapWithNotifications(
   Widget child,
 ) => NotificationsHost(app: ctx, child: child);
 
-List<Widget> notificationSettingsSections(
+/// Rows for the Settings Notifications group: message content and media
+/// previews in notifications.
+List<Widget> notificationSettingsRows(
   BuildContext context,
   SettingsHookContext ctx,
 ) => [NotificationContentSection(palette: ctx.palette, backend: ctx.backend)];

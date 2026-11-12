@@ -319,6 +319,61 @@ void main() {
       ),
     );
 
+    testWidgets('a new message keeps the existing bubbles (no rebuild)', (
+      tester,
+    ) async {
+      final backend = _Backend();
+      final now = DateTime.now();
+      final first = [
+        message(r'$a', body: 'first', time: now),
+        message(r'$b', body: 'second', time: now.add(const Duration(hours: 1))),
+      ];
+      await tester.pumpWidget(timeline(backend, first));
+      final before = tester.element(find.byKey(const ValueKey(r'$b')));
+      await tester.pumpWidget(
+        timeline(backend, [
+          ...first,
+          message(
+            r'$c',
+            body: 'third',
+            time: now.add(const Duration(hours: 2)),
+          ),
+        ]),
+      );
+      expect(find.text('third'), findsOneWidget);
+      // Every index shifted by one; the bubble moved instead of being
+      // thrown away and built again.
+      expect(
+        identical(tester.element(find.byKey(const ValueKey(r'$b'))), before),
+        isTrue,
+      );
+    });
+
+    testWidgets('a day shown twice (times going backwards) still updates', (
+      tester,
+    ) async {
+      final backend = _Backend();
+      final now = DateTime.now();
+      final earlier = now.subtract(const Duration(days: 2));
+      final entries = [
+        message(r'$a', body: 'one', time: earlier),
+        message(r'$b', body: 'two', time: now),
+        message(r'$c', body: 'three', time: earlier),
+      ];
+      await tester.pumpWidget(timeline(backend, entries));
+      await tester.pumpWidget(
+        timeline(backend, [
+          ...entries,
+          message(r'$d', body: 'four', time: now),
+        ]),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('four'), findsOneWidget);
+      await tester.pumpWidget(timeline(backend, entries.sublist(1)));
+      expect(tester.takeException(), isNull);
+      expect(find.text('one'), findsNothing);
+    });
+
     testWidgets('day separators, sender grouping, edited and highlight', (
       tester,
     ) async {

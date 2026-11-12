@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Faster, no more short freezes
+
+- The room list no longer rebuilds every room after each sync (every message, and every 30 seconds when idle). On large accounts that rebuild re-read the whole direct-chat list and every push rule for each room and briefly froze the app. Now only the rooms a sync changed are updated.
+- Photo galleries are resized in the background, and queued photos, videos and voice messages are saved without freezing the screen. Upload progress updates the screen about once per percent instead of every 64 KB.
+- The chat list stays still while a room is open and catches up when you go back. Rows and message bubbles are kept when new messages move them, instead of being rebuilt with their pictures reloaded.
+- Opening and closing the keyboard no longer makes every piece of text in the app redraw.
+- After the app has been in the background, notifications are shown at most two at a time, in order per room.
+- Device search reads each room's stored history once instead of on every launch, and writes in batches.
+- More profile pictures and animated stickers stay cached, and room backgrounds are decoded at screen size.
+
+### Settings and home screen
+
+- The other-devices list under Encryption is collapsed until you open it.
+- Notification content (message text and media previews) is in the Notifications section, and the Message search heading sits above its card like the other sections.
+- Settings → Reading and media preferences → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
+
 ### Notifications without Google or a push service
 
 - Notifications are on by default after sign-in, with no opt-in. Parallax keeps its own connection to your homeserver in the background (a foreground service with a small “Parallax is connected” notification) and shows new messages itself, so no Firebase project, push gateway or UnifiedPush app is needed. It restarts after a reboot or an update.

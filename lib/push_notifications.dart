@@ -508,6 +508,21 @@ class _OwnedRegistration {
   final PushRegistration registration;
 }
 
+/// A rich render waiting for (or holding) one of the render slots.
+class _QueuedRender {
+  _QueuedRender(this.envelope, this.driver, this.generation);
+  final PushEnvelope envelope;
+  final PushDriver driver;
+  final int generation;
+
+  String get roomId => envelope.roomId;
+
+  bool sameEvent(PushEnvelope other) =>
+      envelope.roomId == other.roomId &&
+      envelope.eventId == other.eventId &&
+      envelope.registrationId == other.registrationId;
+}
+
 /// Opt-in owner. Construction/configuration/session binding never starts FCM.
 /// All platform calls, registrations and navigation are serialized and joined.
 class PushNotifications extends ChangeNotifier {
@@ -558,7 +573,30 @@ class PushNotifications extends ChangeNotifier {
   /// unset, or when it throws, the driver's generic notification is shown.
   PushRichRenderer? richRenderer;
 
-  final _renders = <Future<void>>{};
+  /// Rich renders running at once. Each one reads the notification store,
+  /// fetches the event (database, sometimes the server) and may check names
+  /// with the server, so the catch-up sync after resuming would otherwise
+  /// start dozens together and starve the UI of sqflite's single worker.
+  static const maxConcurrentRenders = 2;
+
+  /// Waiting renders kept per room; the oldest are dropped. Each render adds
+  /// one line to the room's notification, which keeps only its newest few
+  /// (maxLinesPerRoom in the notifications feature), so older ones would be
+  /// pushed out anyway. The margin covers events that add no line
+  /// (undescribable or silent).
+  static const maxQueuedRendersPerRoom = 12;
+
+  /// Waiting renders kept overall. Past this the busiest room loses its
+  /// oldest first, so every room keeps its newest event as long as possible;
+  /// Android shows at most 50 notifications per app anyway.
+  static const maxQueuedRenders = 200;
+
+  /// Renders in flight, joined by [settle].
+  final _renders = <_QueuedRender, Future<void>>{};
+
+  /// Renders waiting for a slot, oldest first.
+  final _renderQueue = <_QueuedRender>[];
+  final _queuedPerRoom = <String, int>{};
 
   PushConfiguration get configuration => _configuration;
   PushProvider get provider => _configuration.provider;
@@ -668,6 +706,7 @@ class PushNotifications extends ChangeNotifier {
     }
     _enabled = true;
     final generation = ++_generation;
+    _clearQueuedRenders();
     final unifiedPush = _configuration.isUnifiedPush;
     final inApp = _configuration.isInApp;
     _emit(
@@ -824,36 +863,119 @@ class PushNotifications extends ChangeNotifier {
   /// Shows [envelope]: rich when a renderer is attached (detached from the
   /// serial queue so a slow fetch cannot hold up registration or disable),
   /// generic otherwise or when rich rendering fails.
+  ///
+  /// Rich renders wait in a FIFO queue for one of [maxConcurrentRenders]
+  /// slots. Every queued event is still rendered rather than merged with
+  /// others of its room: each one appends a line to the room's
+  /// conversation, so merging would lose messages from it.
   Future<void> _present(
     PushEnvelope envelope,
     PushDriver driver,
     int generation,
   ) async {
-    final renderer = richRenderer;
-    if (renderer == null) {
+    if (richRenderer == null) {
       await driver.showNotification(envelope);
       return;
     }
+    _queueRender(_QueuedRender(envelope, driver, generation));
+  }
+
+  void _queueRender(_QueuedRender render) {
+    if (render.generation != _generation) return;
+    // The same event already waiting (a hand-off and this device's sync,
+    // for example) would only post the same notification again.
+    if (_renderQueue.any((queued) => queued.sameEvent(render.envelope))) {
+      return;
+    }
+    _renderQueue.add(render);
+    final count = (_queuedPerRoom[render.roomId] ?? 0) + 1;
+    _queuedPerRoom[render.roomId] = count;
+    if (count > maxQueuedRendersPerRoom) _dropQueuedRender(render.roomId);
+    if (_renderQueue.length > maxQueuedRenders) {
+      String? busiest;
+      var most = 1;
+      _queuedPerRoom.forEach((room, queued) {
+        if (queued > most) {
+          busiest = room;
+          most = queued;
+        }
+      });
+      _dropQueuedRender(busiest);
+    }
+    _pumpRenders();
+  }
+
+  /// Drops the oldest waiting render of [roomId], or of any room.
+  void _dropQueuedRender([String? roomId]) {
+    final index = roomId == null
+        ? 0
+        : _renderQueue.indexWhere((queued) => queued.roomId == roomId);
+    if (index >= 0) _unqueue(index);
+  }
+
+  _QueuedRender _unqueue(int index) {
+    final render = _renderQueue.removeAt(index);
+    final left = (_queuedPerRoom[render.roomId] ?? 1) - 1;
+    if (left > 0) {
+      _queuedPerRoom[render.roomId] = left;
+    } else {
+      _queuedPerRoom.remove(render.roomId);
+    }
+    return render;
+  }
+
+  /// Forgets waiting renders (push off, account changed, re-enabled): they
+  /// belong to a generation that may no longer post anything.
+  void _clearQueuedRenders() {
+    _renderQueue.clear();
+    _queuedPerRoom.clear();
+  }
+
+  /// Starts waiting renders while a slot is free. A room renders one event
+  /// at a time, so its notification is never re-posted with an older
+  /// conversation after a newer one. Renders left over from an earlier
+  /// generation post nothing, so they hold no slot.
+  void _pumpRenders() {
+    bool live(_QueuedRender render) => render.generation == _generation;
+    while (_renders.keys.where(live).length < maxConcurrentRenders) {
+      final busy = {
+        for (final render in _renders.keys.where(live)) render.roomId,
+      };
+      final index = _renderQueue.indexWhere(
+        (queued) => !busy.contains(queued.roomId),
+      );
+      if (index < 0) return;
+      _startRender(_unqueue(index));
+    }
+  }
+
+  void _startRender(_QueuedRender queued) {
+    final envelope = queued.envelope;
     bool current() =>
-        _current(generation) &&
+        _current(queued.generation) &&
         _activeRegistration?.registrationId == envelope.registrationId;
-    late final Future<void> render;
-    render =
+    _renders[queued] =
         Future<void>.microtask(() async {
+          // Waited while push was turned off or re-registered.
+          if (!current()) return;
           try {
+            // The renderer attached now: the one present when this was queued
+            // may belong to a host that has since gone.
+            final renderer = richRenderer;
+            if (renderer == null) throw StateError('No rich renderer');
             await renderer(envelope, current);
           } catch (_) {
             if (!current()) return;
             try {
-              await driver.showNotification(envelope);
+              await queued.driver.showNotification(envelope);
             } catch (_) {
               // A failed alert must not tear down push delivery.
             }
           }
         }).whenComplete(() {
-          _renders.remove(render);
+          _renders.remove(queued);
+          _pumpRenders();
         });
-    _renders.add(render);
   }
 
   /// A push handed over by a background isolate of this process (FCM
@@ -1090,6 +1212,8 @@ class PushNotifications extends ChangeNotifier {
     _activeRegistration = null;
     ++_generation;
     ++_tokenRevision;
+    // Waiting renders never start; ones in flight see isCurrent turn false.
+    _clearQueuedRenders();
     final generation = _generation;
     _emit(
       PushStatus.disabled,
@@ -1118,7 +1242,7 @@ class PushNotifications extends ChangeNotifier {
       final current = _tail;
       await current;
       if (_renders.isNotEmpty) {
-        await Future.wait(List.of(_renders));
+        await Future.wait(List.of(_renders.values));
         continue;
       }
       if (identical(current, _tail)) return;
@@ -1143,6 +1267,7 @@ class PushNotifications extends ChangeNotifier {
     _activeRegistration = null;
     _session = null;
     ++_generation;
+    _clearQueuedRenders();
     unawaited(_enqueue(_cleanup).catchError((Object _) {}));
     super.dispose();
   }

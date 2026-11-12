@@ -252,6 +252,30 @@ void main() {
       );
     });
 
+    testWidgets('busy backends re-check members at most twice a second', (
+      tester,
+    ) async {
+      final security = _CountingSecurity();
+      final backend = SecurityTestBackend();
+      await pump(tester, backend, security);
+      expect(security.reads, 1);
+      // A burst of timeline updates: one check now, one when it settles.
+      for (var i = 0; i < 30; i++) {
+        backend.ping();
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(security.reads, 2);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(security.reads, 3);
+      // Security changes are shown at once.
+      security.changes[_room] = [
+        _change('@bob:example.org', UserTrustLevel.pinViolation),
+      ];
+      security.update();
+      await tester.pump();
+      expect(find.text('Dismiss'), findsOneWidget);
+    });
+
     testWidgets('banner follows live security changes', (tester) async {
       final security = FakeSecurity();
       final backend = SecurityTestBackend();
@@ -373,4 +397,14 @@ class _SecureBackend extends SecurityTestBackend implements SecurityFeatures {
       _security.acknowledgeIdentityChange(userId, masterKey);
   @override
   Future<void> verifyUser(String userId) => _security.verifyUser(userId);
+}
+
+class _CountingSecurity extends FakeSecurity {
+  int reads = 0;
+
+  @override
+  List<IdentityChange> identityChanges(String roomId) {
+    reads++;
+    return super.identityChanges(roomId);
+  }
 }

@@ -315,15 +315,24 @@ class _NotificationsHostState extends State<NotificationsHost>
       toClear.add(active);
     }
     _lastActiveRoom = active;
-    for (final room in _backend.rooms) {
-      final previous = _unread[room.id];
-      if (previous != null && previous > 0 && room.unread == 0) {
-        toClear.add(room.id);
+    // The room list keeps its identity until a room changes; most
+    // notifications (timeline updates, sending) leave it alone.
+    final rooms = _backend.rooms;
+    if (!identical(rooms, _lastRooms)) {
+      _lastRooms = rooms;
+      for (final room in rooms) {
+        final previous = _unread[room.id];
+        if (previous != null && previous > 0 && room.unread == 0) {
+          toClear.add(room.id);
+        }
+        _unread[room.id] = room.unread;
       }
-      _unread[room.id] = room.unread;
     }
     if (toClear.isNotEmpty) unawaited(_clear(toClear));
   }
+
+  /// Room list last scanned for rooms read elsewhere.
+  List<ChatRoom>? _lastRooms;
 
   Future<void> _clear(Set<String> roomIds) async {
     final handler = await _handler();

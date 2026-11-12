@@ -125,6 +125,7 @@ class NoteToSelfTile extends StatelessWidget {
     this.onLongPress,
     this.compact = false,
     this.busy = false,
+    this.previewLines = 2,
   });
 
   final ChatRoom room;
@@ -133,6 +134,9 @@ class NoteToSelfTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool compact;
   final bool busy;
+
+  /// Lines of last-note preview (0 hides it), as the home setting chooses.
+  final int previewLines;
 
   @override
   Widget build(BuildContext context) {
@@ -194,36 +198,40 @@ class NoteToSelfTile extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 5),
-                      Row(
-                        children: [
-                          if (room.encrypted) ...[
-                            Icon(
-                              Icons.lock_outline,
-                              size: 13,
-                              color: p.secondary,
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          Expanded(
-                            child: Text(
-                              preview,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: unread ? p.foreground : p.muted,
-                                fontSize: 13,
-                                height: 1.25,
+                      if (previewLines > 0) ...[
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            if (room.encrypted) ...[
+                              Icon(
+                                Icons.lock_outline,
+                                size: 13,
+                                color: p.secondary,
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Expanded(
+                              child: Text(
+                                preview,
+                                maxLines: previewLines,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: unread ? p.foreground : p.muted,
+                                  fontSize: 13,
+                                  height: 1.25,
+                                ),
                               ),
                             ),
-                          ),
-                          if (busy)
-                            const SizedBox.square(
-                              dimension: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                        ],
-                      ),
+                            if (busy)
+                              const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

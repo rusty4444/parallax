@@ -14,6 +14,37 @@ enum MediaPreviewMode {
   never,
 }
 
+/// How rows look in the home room list.
+enum HomeRowStyle {
+  /// Rounded cards with space between them (the original look).
+  cards('Cards'),
+
+  /// Flat full-width rows separated by thin lines.
+  list('List'),
+
+  /// Flat rows with smaller pictures and less padding, to fit more chats.
+  compact('Compact');
+
+  const HomeRowStyle(this.label);
+  final String label;
+}
+
+/// How much of the last message the home room list shows.
+enum HomePreview {
+  /// No message preview: the room name and time only.
+  none('None', 0),
+
+  /// One line.
+  small('Small', 1),
+
+  /// Up to two lines (the original look).
+  long('Long', 2);
+
+  const HomePreview(this.label, this.maxLines);
+  final String label;
+  final int maxLines;
+}
+
 /// App-wide, nonsensitive display and messaging preferences.
 ///
 /// Defaults are available immediately. Await [load] before applying saved values
@@ -36,6 +67,8 @@ class AppearancePreferences extends ChangeNotifier {
   static const _expandedHomeKey = 'parallax.appearance.v1.expanded_home';
   static const _hapticsKey = 'parallax.appearance.v1.haptics';
   static const _quickReactionKey = 'parallax.appearance.v1.quick_reaction';
+  static const _homeRowStyleKey = 'parallax.appearance.v1.home_row_style';
+  static const _homePreviewKey = 'parallax.appearance.v1.home_preview';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -52,8 +85,16 @@ class AppearancePreferences extends ChangeNotifier {
   bool _expandedHome = false;
   bool _haptics = true;
   String _quickReaction = defaultQuickReaction;
+  HomeRowStyle _homeRowStyle = HomeRowStyle.cards;
+  HomePreview _homePreview = HomePreview.long;
 
   double get textScale => _textScale;
+
+  /// Look of the home room list rows (cards by default).
+  HomeRowStyle get homeRowStyle => _homeRowStyle;
+
+  /// Last-message preview in the home room list (two lines by default).
+  HomePreview get homePreview => _homePreview;
   bool get compact => _compact;
 
   /// True only when previews load everywhere. Renderers that cannot tell
@@ -117,7 +158,17 @@ class AppearancePreferences extends ChangeNotifier {
     final quickReaction = rawReaction is String && isQuickReaction(rawReaction)
         ? rawReaction
         : defaultQuickReaction;
+    final rawRowStyle = prefs.get(_homeRowStyleKey);
+    final homeRowStyle =
+        HomeRowStyle.values.where((s) => s.name == rawRowStyle).firstOrNull ??
+        HomeRowStyle.cards;
+    final rawPreview = prefs.get(_homePreviewKey);
+    final homePreview =
+        HomePreview.values.where((s) => s.name == rawPreview).firstOrNull ??
+        HomePreview.long;
     final changed =
+        homeRowStyle != _homeRowStyle ||
+        homePreview != _homePreview ||
         scale != _textScale ||
         compact != _compact ||
         mode != _mediaPreviewMode ||
@@ -136,7 +187,25 @@ class AppearancePreferences extends ChangeNotifier {
     _expandedHome = expandedHome;
     _haptics = haptics;
     _quickReaction = quickReaction;
+    _homeRowStyle = homeRowStyle;
+    _homePreview = homePreview;
     if (changed) _notifyIfActive();
+  });
+
+  Future<void> setHomeRowStyle(HomeRowStyle value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setString(_homeRowStyleKey, value.name));
+    if (_homeRowStyle == value) return;
+    _homeRowStyle = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setHomePreview(HomePreview value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setString(_homePreviewKey, value.name));
+    if (_homePreview == value) return;
+    _homePreview = value;
+    _notifyIfActive();
   });
 
   /// Finite values are clamped to 0.85–1.5; NaN and infinity are rejected.

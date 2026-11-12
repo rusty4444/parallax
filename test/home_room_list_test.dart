@@ -278,6 +278,35 @@ void main() {
       );
     });
 
+    testWidgets('row style and message preview follow the home settings', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = AppearancePreferences();
+      addTearDown(prefs.dispose);
+      await pump(tester, prefs: prefs);
+      // Defaults: cards with a two-line preview.
+      expect(find.text('Mia: hello'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('Mia: hello')).maxLines, 2);
+      expect(find.byType(Divider), findsNothing);
+
+      await prefs.setHomePreview(HomePreview.small);
+      await prefs.setHomeRowStyle(HomeRowStyle.list);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(find.text('Mia: hello')).maxLines, 1);
+      // Flat rows are separated by lines.
+      expect(find.byType(Divider), findsWidgets);
+
+      await prefs.setHomePreview(HomePreview.none);
+      await prefs.setHomeRowStyle(HomeRowStyle.compact);
+      await tester.pumpAndSettle();
+      expect(find.text('Mia: hello'), findsNothing);
+      // Names and unread/mention badges stay.
+      expect(find.text('Team'), findsOneWidget);
+      expect(find.byTooltip('Mentioned'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+    });
+
     testWidgets('Space switcher filters to Space children', (tester) async {
       await pump(tester);
       await openHomeOptions(tester);

@@ -189,6 +189,43 @@ class ChatRoom {
   );
 }
 
+/// Whether two projections of a room show the same thing (every field).
+bool sameChatRoom(ChatRoom a, ChatRoom b) {
+  if (identical(a, b)) return true;
+  if (a.id != b.id ||
+      a.name != b.name ||
+      a.preview != b.preview ||
+      a.lastActivity != b.lastActivity ||
+      a.unread != b.unread ||
+      a.avatarUrl != b.avatarUrl ||
+      a.encrypted != b.encrypted ||
+      a.isDirect != b.isDirect ||
+      a.manuallyUnread != b.manuallyUnread ||
+      a.invited != b.invited ||
+      a.highlightCount != b.highlightCount ||
+      a.favourite != b.favourite ||
+      a.lowPriority != b.lowPriority ||
+      a.notificationMode != b.notificationMode ||
+      a.isSpace != b.isSpace ||
+      a.isPublic != b.isPublic ||
+      a.previewSender != b.previewSender ||
+      a.canonicalAlias != b.canonicalAlias ||
+      a.tags.length != b.tags.length ||
+      a.heroes.length != b.heroes.length) {
+    return false;
+  }
+  for (var i = 0; i < a.tags.length; i++) {
+    if (a.tags[i] != b.tags[i]) return false;
+  }
+  for (var i = 0; i < a.heroes.length; i++) {
+    if (a.heroes[i].name != b.heroes[i].name ||
+        a.heroes[i].url != b.heroes[i].url) {
+      return false;
+    }
+  }
+  return true;
+}
+
 int compareRooms(ChatRoom a, ChatRoom b) {
   if (a.invited != b.invited) return a.invited ? -1 : 1;
   final activity = (b.lastActivity ?? DateTime(1970)).compareTo(

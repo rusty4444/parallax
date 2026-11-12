@@ -126,6 +126,70 @@ void main() {
     },
   );
 
+  test(
+    'the end of every sync projects nothing once the list is ready',
+    () async {
+      final before = backend.rooms;
+      // The SDK reports "finished" after every sync, empty long polls too.
+      for (var i = 0; i < 3; i++) {
+        backend.debugSyncStatus(
+          matrix.SyncStatusUpdate(matrix.SyncStatus.finished),
+        );
+      }
+      await settle();
+      expect(identical(backend.rooms, before), isTrue);
+      expect(backend.debugRoomProjections, 3);
+      expect(notifications, 1);
+    },
+  );
+
+  test('an encrypted preview retried without change notifies no one', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Encrypted,
+      senderId: '@friend:example.org',
+      content: const {'algorithm': 'm.megolm.v1.aes-sha2', 'ciphertext': 'x'},
+      room: r,
+      eventId: r'$sealed',
+      originServerTs: DateTime(2026, 11, 13),
+    );
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(
+          join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    expect(notifications, 2);
+    final before = backend.rooms;
+
+    // Later syncs retry it; the key hasn't arrived, so nothing changes.
+    backend.debugRoomsSynced(matrix.SyncUpdate(nextBatch: '3'));
+    await settle();
+    expect(backend.debugRoomProjections, 5);
+    expect(identical(backend.rooms, before), isTrue);
+    expect(notifications, 2);
+
+    // The key arrives: the decrypted preview replaces it.
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@friend:example.org',
+      content: const {'msgtype': 'm.text', 'body': 'decrypted'},
+      room: r,
+      eventId: r'$sealed',
+      originServerTs: DateTime(2026, 11, 13),
+    );
+    backend.debugRoomsSynced(matrix.SyncUpdate(nextBatch: '4'));
+    await settle();
+    expect(notifications, 3);
+    expect(
+      backend.rooms.firstWhere((room) => room.id == '!b:example.org').preview,
+      'decrypted',
+    );
+  });
+
   test('a sync touching one room projects only that room', () async {
     final before = {for (final r in backend.rooms) r.id: r};
     client.getRoomById('!b:example.org')!.lastEvent = matrix.Event(
@@ -174,6 +238,22 @@ void main() {
       expect(backend.debugRoomProjections, 6);
     },
   );
+
+  test('other account data notifies without projecting rooms', () async {
+    final before = backend.rooms;
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        accountData: [
+          matrix.BasicEvent(type: 'io.element.recent_emoji', content: const {}),
+        ],
+      ),
+    );
+    await settle();
+    expect(backend.debugRoomProjections, 3);
+    expect(identical(backend.rooms, before), isTrue);
+    expect(notifications, 2);
+  });
 
   test('a left room drops out of the list', () async {
     client.rooms.removeWhere((r) => r.id == '!c:example.org');

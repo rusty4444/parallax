@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:matrix/matrix.dart' as matrix;
 
 import '../../chat_backend.dart';
@@ -83,12 +84,35 @@ class MatrixNotificationFeatures implements NotificationFeatures {
   static const serverTimeout = Duration(seconds: 8);
   static const sendWait = Duration(seconds: 20);
 
-  matrix.Client _client() {
+  /// Member names checked with the server by this session's notifications,
+  /// and the session (client, account, device) they belong to.
+  MemberRefreshLedger? _memberRefreshes;
+  (matrix.Client, String?, String?)? _memberRefreshesOwner;
+
+  /// This session's ledger; a new one after sign-out or an account change.
+  @visibleForTesting
+  MemberRefreshLedger memberRefreshesFor(matrix.Client client) {
+    final owner = (client, client.userID, client.deviceID);
+    if (_memberRefreshesOwner != owner) {
+      _memberRefreshes = MemberRefreshLedger();
+      _memberRefreshesOwner = owner;
+    }
+    return _memberRefreshes!;
+  }
+
+  /// The signed-in session's client, or null. Forgets the member ledger as
+  /// soon as the session ends, rather than at the next notification.
+  matrix.Client? _currentClient() {
     final client = _access.sdkClient;
-    if (client == null ||
-        !_access.isSessionCurrent(client) ||
-        client.userID == null ||
-        client.deviceID == null) {
+    if (client != null && _access.isSessionCurrent(client)) return client;
+    _memberRefreshes = null;
+    _memberRefreshesOwner = null;
+    return null;
+  }
+
+  matrix.Client _client() {
+    final client = _currentClient();
+    if (client == null || client.userID == null || client.deviceID == null) {
       throw const NotificationSessionChanged();
     }
     return client;
@@ -101,20 +125,10 @@ class MatrixNotificationFeatures implements NotificationFeatures {
   }
 
   @override
-  String? get userId {
-    final client = _access.sdkClient;
-    return client != null && _access.isSessionCurrent(client)
-        ? client.userID
-        : null;
-  }
+  String? get userId => _currentClient()?.userID;
 
   @override
-  String? get deviceId {
-    final client = _access.sdkClient;
-    return client != null && _access.isSessionCurrent(client)
-        ? client.deviceID
-        : null;
-  }
+  String? get deviceId => _currentClient()?.deviceID;
 
   @override
   Stream<SyncedNotification> get syncNotifications {
@@ -191,6 +205,7 @@ class MatrixNotificationFeatures implements NotificationFeatures {
       highlight: pushEventHighlights(client.pushruleEvaluator, event),
       media: media,
       loadMediaPreview: preferences.mediaEnabled,
+      memberRefreshes: memberRefreshesFor(client),
     );
     _check(client);
     return resolved;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
+import '../../appearance_preferences.dart';
 import '../../chat_backend.dart';
 import '../../room_avatar.dart';
 import '../../widgets.dart';
@@ -23,6 +24,8 @@ class RoomListTile extends StatelessWidget {
     this.compact = false,
     this.hideInviteAvatar = false,
     this.busy = false,
+    this.style = HomeRowStyle.cards,
+    this.preview = HomePreview.long,
   });
 
   final ChatRoom room;
@@ -37,6 +40,13 @@ class RoomListTile extends StatelessWidget {
   final bool compact;
   final bool hideInviteAvatar;
   final bool busy;
+
+  /// Cards, flat list rows or compact rows (Settings > Appearance).
+  final HomeRowStyle style;
+
+  /// Lines of last-message preview: none, one or two. Invitations always
+  /// say what they are.
+  final HomePreview preview;
 
   static String timeLabel(
     BuildContext context,
@@ -75,201 +85,238 @@ class RoomListTile extends StatelessWidget {
     final mentioned = room.highlightCount > 0;
     final emphasised = !room.invited && (unread || mentioned);
     final badgeColour = room.muted ? p.muted : p.accent;
-    final preview = room.invited
+    final cards = style == HomeRowStyle.cards;
+    final dense = compact || style == HomeRowStyle.compact;
+    final avatarSize = style == HomeRowStyle.compact ? 40.0 : 52.0;
+    // Invitations always say what they are; otherwise the setting decides.
+    final previewLines = room.invited ? 2 : preview.maxLines;
+    final previewText = room.invited
         ? (room.isDirect ? 'Invited you to chat' : 'Invited you to join')
         : room.preview.isEmpty
         ? 'No messages yet'
         : room.previewSender == null
         ? room.preview
         : '${room.previewSender}: ${room.preview}';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: room.invited
-            ? Color.alphaBlend(p.secondary.withValues(alpha: 0.08), p.surface)
-            : p.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: room.invited
-              ? BorderSide(color: p.secondary.withValues(alpha: 0.5))
-              : BorderSide.none,
-        ),
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: EdgeInsets.all(compact ? 9 : 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                room.invited && hideInviteAvatar
-                    ? InitialAvatar(name: room.name, palette: p)
-                    : RoomAvatar(room: room, backend: backend, palette: p),
-                const SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              room.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: p.foreground,
-                                fontWeight: emphasised
-                                    ? FontWeight.w800
-                                    : FontWeight.w700,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          if (favourite)
-                            Icon(Icons.star_rounded, size: 16, color: p.accent),
-                          if (failedSend)
-                            Tooltip(
-                              message: 'Message not sent',
-                              child: Icon(
-                                Icons.error_outline,
-                                size: 16,
-                                color: p.accent,
-                              ),
-                            ),
-                          if (room.muted)
-                            Tooltip(
-                              message: 'Notifications muted',
-                              child: Icon(
-                                Icons.notifications_off_outlined,
-                                size: 15,
-                                color: p.muted,
-                              ),
-                            ),
-                          const SizedBox(width: 6),
-                          Text(
-                            timeLabel(context, room.lastActivity),
-                            style: TextStyle(
-                              color: emphasised && !room.muted
-                                  ? p.accent
-                                  : p.muted,
-                              fontSize: 11,
-                              fontWeight: emphasised
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Row(
-                        children: [
-                          if (room.encrypted) ...[
-                            Icon(
-                              Icons.lock_outline,
-                              size: 13,
-                              color: p.secondary,
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          Expanded(
-                            child: Text(
-                              preview,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: emphasised ? p.foreground : p.muted,
-                                fontSize: 13,
-                                height: 1.25,
-                              ),
-                            ),
-                          ),
-                          if (room.invited) ...[
-                            const SizedBox(width: 8),
-                            Text(
-                              'INVITE',
-                              style: TextStyle(
-                                color: p.secondary,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ] else ...[
-                            if (mentioned) ...[
-                              const SizedBox(width: 8),
-                              Tooltip(
-                                message: 'Mentioned',
-                                child: _Badge(
-                                  colour: badgeColour,
-                                  palette: p,
-                                  child: Icon(
-                                    Icons.alternate_email_rounded,
-                                    size: 12,
-                                    color: room.muted
-                                        ? p.background
-                                        : p.accentOn,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            if (room.unread > 0 || room.manuallyUnread) ...[
-                              const SizedBox(width: 6),
-                              _Badge(
-                                colour: badgeColour,
-                                palette: p,
-                                child: Text(
-                                  room.unread == 0
-                                      ? '•'
-                                      : room.unread > 99
-                                      ? '99+'
-                                      : '${room.unread}',
-                                  style: TextStyle(
-                                    color: room.muted
-                                        ? p.background
-                                        : p.accentOn,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ],
-                      ),
-                      if (room.invited &&
-                          (onAccept != null || onDecline != null)) ...[
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: busy ? null : onDecline,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: p.foreground,
-                                  side: BorderSide(color: p.stroke),
-                                ),
-                                child: const Text('Decline'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton(
-                                onPressed: busy ? null : onAccept,
-                                child: const Text('Accept'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
+    final lock = room.encrypted
+        ? [
+            Icon(Icons.lock_outline, size: 13, color: p.secondary),
+            const SizedBox(width: 4),
+          ]
+        : const <Widget>[];
+    final badges = room.invited
+        ? [
+            const SizedBox(width: 8),
+            Text(
+              'INVITE',
+              style: TextStyle(
+                color: p.secondary,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ]
+        : [
+            if (mentioned) ...[
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Mentioned',
+                child: _Badge(
+                  colour: badgeColour,
+                  palette: p,
+                  child: Icon(
+                    Icons.alternate_email_rounded,
+                    size: 12,
+                    color: room.muted ? p.background : p.accentOn,
                   ),
                 ),
-              ],
+              ),
+            ],
+            if (room.unread > 0 || room.manuallyUnread) ...[
+              const SizedBox(width: 6),
+              _Badge(
+                colour: badgeColour,
+                palette: p,
+                child: Text(
+                  room.unread == 0
+                      ? '•'
+                      : room.unread > 99
+                      ? '99+'
+                      : '${room.unread}',
+                  style: TextStyle(
+                    color: room.muted ? p.background : p.accentOn,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ],
+          ];
+    final nameRow = Row(
+      children: [
+        // Without a preview line, the lock and badges join the name.
+        if (previewLines == 0) ...lock,
+        Expanded(
+          child: Text(
+            room.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: p.foreground,
+              fontWeight: emphasised ? FontWeight.w800 : FontWeight.w700,
+              fontSize: dense ? 15 : 16,
             ),
           ),
         ),
-      ),
+        if (favourite) Icon(Icons.star_rounded, size: 16, color: p.accent),
+        if (failedSend)
+          Tooltip(
+            message: 'Message not sent',
+            child: Icon(Icons.error_outline, size: 16, color: p.accent),
+          ),
+        if (room.muted)
+          Tooltip(
+            message: 'Notifications muted',
+            child: Icon(
+              Icons.notifications_off_outlined,
+              size: 15,
+              color: p.muted,
+            ),
+          ),
+        const SizedBox(width: 6),
+        Text(
+          timeLabel(context, room.lastActivity),
+          style: TextStyle(
+            color: emphasised && !room.muted ? p.accent : p.muted,
+            fontSize: 11,
+            fontWeight: emphasised ? FontWeight.w700 : FontWeight.w400,
+          ),
+        ),
+        if (previewLines == 0) ...badges,
+      ],
+    );
+    final content = Row(
+      crossAxisAlignment: previewLines == 0
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        room.invited && hideInviteAvatar
+            ? InitialAvatar(name: room.name, palette: p, size: avatarSize)
+            : RoomAvatar(
+                room: room,
+                backend: backend,
+                palette: p,
+                size: avatarSize,
+              ),
+        SizedBox(width: dense ? 11 : 13),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              nameRow,
+              if (previewLines > 0) ...[
+                SizedBox(height: dense ? 3 : 5),
+                Row(
+                  children: [
+                    ...lock,
+                    Expanded(
+                      child: Text(
+                        previewText,
+                        maxLines: previewLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: emphasised ? p.foreground : p.muted,
+                          fontSize: 13,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                    ...badges,
+                  ],
+                ),
+              ],
+              if (room.invited && (onAccept != null || onDecline != null)) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: busy ? null : onDecline,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: p.foreground,
+                          side: BorderSide(color: p.stroke),
+                        ),
+                        child: const Text('Decline'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: busy ? null : onAccept,
+                        child: const Text('Accept'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+    final inviteTint = Color.alphaBlend(
+      p.secondary.withValues(alpha: 0.08),
+      p.surface,
+    );
+    if (cards) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: room.invited ? inviteTint : p.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: room.invited
+                ? BorderSide(color: p.secondary.withValues(alpha: 0.5))
+                : BorderSide.none,
+          ),
+          child: InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: EdgeInsets.all(dense ? 9 : 14),
+              child: content,
+            ),
+          ),
+        ),
+      );
+    }
+    // List and compact: flat rows divided by a line under the text.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: room.invited ? inviteTint : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: dense ? 7 : 11,
+              ),
+              child: content,
+            ),
+          ),
+        ),
+        Divider(
+          height: 1,
+          thickness: 1,
+          indent: avatarSize + (dense ? 15 : 17),
+          color: p.stroke.withValues(alpha: 0.6),
+        ),
+      ],
     );
   }
 }
