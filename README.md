@@ -47,7 +47,7 @@ Core screens (room, timeline, room info, settings and the app shell) expose exte
 
 The code is hosted on private Gitea at `http://192.168.68.247:3300/rusty4444/parallax` (git.samprim.net). The issues, pull requests and releases were migrated from the old GitHub repository, which has been deleted.
 
-`.gitea/workflows/android-apk.yml` checks and builds each push and publishes a per-commit prerelease APK. It needs a self-hosted Gitea Actions runner labelled `parallax-android`. Until one is registered, APKs are built locally and attached to Gitea releases by hand.
+`.gitea/workflows/android-apk.yml` checks and builds each push. Pushes to `main` also publish a per-commit prerelease APK (`build-<12-character SHA>`). It runs on Sam's Mac as the self-hosted Gitea Actions runner `sam-mac-parallax` (label `parallax-android`, LaunchAgent `ai.hermes.gitea-runner`), so the Mac needs to be awake for builds to run.
 
 The app ID is **`net.samrussell.parallax`**. It installs as a new app alongside the old MatriXpress preview (`net.samrussell.matrixpress`), so sign in again and confirm your identity. Builds are signed with the same personal debug certificate as before (SHA-256 `2E:1C:94:…:EF:F7`), so later Parallax test builds update in place. They are **test builds**, not production-signed releases.
 
