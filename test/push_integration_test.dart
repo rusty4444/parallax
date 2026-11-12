@@ -27,6 +27,13 @@ const _joined = ChatRoom(
   preview: '',
   lastActivity: null,
 );
+const _previousRoomId = '!previous:example.org';
+const _previousRoom = ChatRoom(
+  id: _previousRoomId,
+  name: 'Previous room',
+  preview: '',
+  lastActivity: null,
+);
 
 /// Stream cancellation can finish in the real zone even when the app lifecycle
 /// callback started in fake async. Pump both zones rather than blocking runAsync
@@ -472,6 +479,32 @@ void main() {
       await h.close(tester);
     },
   );
+
+  testWidgets('notification from an open room backs out to the inbox', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.backend.roomList = [_previousRoom, _joined];
+    await h.boot(tester);
+    await h.enable(tester);
+    await tester.tap(find.text('Previous room'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomScreen), findsOneWidget);
+    expect(h.backend.openedRooms, [_previousRoomId]);
+
+    h.tapNotification();
+    await _join(tester, h.push.settle);
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomScreen), findsOneWidget);
+    expect(h.backend.openedRooms, [_previousRoomId, _roomId]);
+
+    await tester.tap(find.byTooltip('Back to rooms'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InboxScreen), findsOneWidget);
+    expect(find.byType(RoomScreen, skipOffstage: false), findsNothing);
+    expect(h.backend.activeRoomId, isNull);
+    await h.close(tester);
+  });
 
   testWidgets('missing joined room refreshes safely before dispatch', (
     tester,

@@ -47,12 +47,30 @@ extension ParallaxRoomNames on Room {
   List<String> get peopleHeroes {
     final heroes = [...?summary.mHeroes];
     final direct = directChatPartner;
-    if (heroes.isEmpty && direct != null) heroes.add(direct);
+    // A sparse summary can name only us and the bridge bot even when m.direct
+    // identifies the real contact. Always consider that partner, not just when
+    // the server supplied no heroes at all.
+    if (direct != null && !heroes.contains(direct)) heroes.add(direct);
     final bots = bridgeBotIds;
-    return withoutBridgeBots([
+    bool isBot(String id) => isBridgeBot(id, bots);
+    final result = withoutBridgeBots([
       for (final hero in heroes)
         if (hero.isNotEmpty && hero != client.userID) hero,
-    ], (id) => isBridgeBot(id, bots));
+    ], isBot);
+    if (direct == null || result.any((id) => !isBot(id))) return result;
+
+    // Some bridge portals incorrectly make the bot the DM partner and provide
+    // no person in the summary. Prefer the latest bridged sender, then a person
+    // already present in member state; _needMembers will load their avatar.
+    final recent = lastEvent?.senderId;
+    if (recent != null && recent != client.userID && !isBot(recent)) {
+      return [recent];
+    }
+    final loadedPeople = [
+      for (final id in states[EventTypes.RoomMember]?.keys ?? const <String>[])
+        if (id != client.userID && !isBot(id)) id,
+    ];
+    return loadedPeople.isEmpty ? result : loadedPeople.take(4).toList();
   }
 
   /// [getLocalizedDisplayname] without bridge bots and without "Group
@@ -74,12 +92,9 @@ extension ParallaxRoomNames on Room {
         (summary.mJoinedMemberCount ?? 0) + (summary.mInvitedMemberCount ?? 0);
     // Everyone except me and the people already named. Bots the server
     // listed as heroes don't count as "others".
-    final listed = {...?summary.mHeroes}..remove(client.userID);
+    final listed = {...?summary.mHeroes, ...heroes}..remove(client.userID);
     final others = members > 0
-        ? math.max<int>(
-            0,
-            members - 1 - math.max<int>(listed.length, heroes.length),
-          )
+        ? math.max<int>(0, members - 1 - listed.length)
         : 0;
     final result = joinPeopleNames(names, others: others);
     if (isAbandonedDMRoom) return i18n.wasDirectChatDisplayName(result);

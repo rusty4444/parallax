@@ -134,7 +134,7 @@ Future<ResolvedPushEvent> projectPushEvent({
   String? imagePath;
   if (media != null) {
     final avatar = media.avatar(sender.avatarUrl);
-    final roomAvatar = isDirect ? null : media.avatar(room.avatar);
+    final roomAvatar = media.avatar(room.parallaxAvatar);
     final ref = description.media;
     final preview = ref != null && loadMediaPreview
         ? media.preview(ref, event.eventId)

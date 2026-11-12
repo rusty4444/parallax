@@ -409,9 +409,12 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       if (!current() || navigator == null) return;
       // Complete on dispatch, NOT on pop. Push.logout joins this callback; waiting
       // for the route lifetime would deadlock sign-out from a notification route.
+      // A notification is a fresh entry into a room: retain the inbox root but
+      // remove any previous room/media/settings routes above it. Back therefore
+      // returns to the inbox, never to an inactive room whose timeline is empty.
       unawaited(
         navigator
-            .push<void>(
+            .pushAndRemoveUntil<void>(
               MaterialPageRoute<void>(
                 builder: (_) => RoomScreen(
                   backend: backend,
@@ -419,6 +422,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                   roomId: request.roomId,
                 ),
               ),
+              (route) => route.isFirst,
             )
             .then<void>(
               (_) {},

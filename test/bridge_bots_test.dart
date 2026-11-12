@@ -179,6 +179,27 @@ void main() {
       expect(r.peopleHeroes, [_alex]);
     });
 
+    test('a DM partner fills an incomplete hero list before the bot', () {
+      final r = room(
+        {_bot: 'Meta bridge bot', _alex: 'Alex'},
+        heroes: [_bot],
+        direct: _alex,
+      );
+      expect(r.parallaxName, 'Alex');
+      expect(r.peopleHeroes, [_alex]);
+    });
+
+    test('a bot-directed room finds the loaded contact with sparse heroes', () {
+      final r = room(
+        {_bot: 'Meta bridge bot', _alex: 'Alex'},
+        heroes: [_bot],
+        direct: _bot,
+      );
+      expect(r.parallaxAvatar, isNull);
+      expect(r.parallaxName, 'Alex');
+      expect(r.peopleHeroes, [_alex]);
+    });
+
     test('an ordinary DM keeps its partner name and avatar', () {
       final r = room({_alex: 'Alex'}, direct: _alex);
       expect(r.parallaxName, 'Alex');

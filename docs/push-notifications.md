@@ -274,8 +274,9 @@ or UnifiedPush distributor only ever see event and room IDs.
 
 - **One conversation per room** (Android MessagingStyle, ID derived from the room
   ID): sender name and avatar as the person icon, the room name as the title of
-  group rooms, and the last few messages of that room. Notifications are grouped
-  under a summary.
+  group rooms, and the last few messages of that room. The room thumbnail is the
+  large icon for direct and group chats; a direct chat without its own artwork
+  falls back to the other person's avatar. Notifications are grouped under a summary.
 - **Message text per type:** text and notices; emotes as “\* Name waves”; images,
   videos and stickers (“Image”, “Video”, “Sticker” or the caption); files as
   “📎 name”; “Voice message”; “📍 Location”; polls as “Poll: question”; reactions;
@@ -292,7 +293,8 @@ or UnifiedPush distributor only ever see event and room IDs.
 - **Calls:** an MSC4075 `m.rtc.notification` ring (or legacy `m.call.invite`) in a
   DM becomes a high-priority, call-category notification on the “Calls” channel
   that opens the room. Expired rings show “Missed call”.
-- **Actions:** tap opens the room, “Mark as read” (as before) and an inline
+- **Actions:** tap opens the room with Back returning to the message list (without
+  restoring a previously open room), “Mark as read” (as before) and an inline
   **Reply**. Notifications of a room are cleared when you open it in Parallax or it
   becomes read (for example on another device), and already-read events are not
   shown.

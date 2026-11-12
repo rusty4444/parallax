@@ -202,7 +202,9 @@ RenderedNotification renderRoomThread(
     groupConversation: !thread.isDirect,
     messages: messages,
   );
-  final roomAvatar = thread.roomAvatarPath;
+  final roomAvatar =
+      thread.roomAvatarPath ??
+      (thread.isDirect ? latest.senderAvatarPath : null);
   final details = AndroidNotificationDetails(
     messageChannelId,
     messageChannelName,
@@ -217,7 +219,7 @@ RenderedNotification renderRoomThread(
     onlyAlertOnce: !alert,
     silent: !alert,
     when: latest.timestamp.millisecondsSinceEpoch,
-    largeIcon: !thread.isDirect && roomAvatar != null && fileExists(roomAvatar)
+    largeIcon: roomAvatar != null && fileExists(roomAvatar)
         ? _bitmap(roomAvatar)
         : null,
     actions: _roomActions(canMarkRead: thread.latestEventId != null),

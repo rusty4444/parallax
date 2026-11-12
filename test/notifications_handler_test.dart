@@ -30,6 +30,7 @@ ResolvedPushEvent resolved({
   bool highlight = false,
   String? imagePath,
   String? avatarPath,
+  String? roomAvatarPath,
   DateTime? at,
 }) => ResolvedPushEvent(
   roomId: room,
@@ -37,6 +38,7 @@ ResolvedPushEvent resolved({
   kind: kind,
   roomName: 'Book club',
   isDirect: isDirect,
+  roomAvatarPath: roomAvatarPath,
   ringing: ringing,
   line: NotificationLine(
     eventId: eventId,
@@ -144,6 +146,68 @@ void main() {
       expect(room.title, 'Alice');
       expect(style(room).conversationTitle, isNull);
       expect(style(room).groupConversation, isFalse);
+    });
+
+    test('room thumbnails appear in direct and group notifications', () async {
+      final roomAvatar = File('${directory.path}/room.png')
+        ..writeAsBytesSync([1, 2, 3]);
+      final senderAvatar = File('${directory.path}/sender.png')
+        ..writeAsBytesSync([4, 5, 6]);
+
+      Future<String?> largeIcon({
+        required String eventId,
+        required bool isDirect,
+        String? roomPath,
+        String? senderPath,
+      }) async {
+        await handler(
+          (_, _) async => resolved(
+            eventId: eventId,
+            isDirect: isDirect,
+            avatarPath: senderPath,
+            roomAvatarPath: roomPath,
+          ),
+          useStore: false,
+        ).handle(envelope(eventId));
+        final bitmap = android(
+          surface.byId(roomNotificationId(room))!,
+        ).largeIcon;
+        return bitmap is FilePathAndroidBitmap ? bitmap.data : null;
+      }
+
+      expect(
+        await largeIcon(
+          eventId: r'$group-room',
+          isDirect: false,
+          roomPath: roomAvatar.path,
+        ),
+        roomAvatar.path,
+      );
+      expect(
+        await largeIcon(
+          eventId: r'$direct-room',
+          isDirect: true,
+          roomPath: roomAvatar.path,
+          senderPath: senderAvatar.path,
+        ),
+        roomAvatar.path,
+      );
+      expect(
+        await largeIcon(
+          eventId: r'$direct-fallback',
+          isDirect: true,
+          senderPath: senderAvatar.path,
+        ),
+        senderAvatar.path,
+      );
+      expect(
+        await largeIcon(
+          eventId: r'$group-no-room-art',
+          isDirect: false,
+          senderPath: senderAvatar.path,
+        ),
+        isNull,
+      );
     });
 
     test('messages accumulate in one notification per room', () async {

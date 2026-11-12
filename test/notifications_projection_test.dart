@@ -512,6 +512,36 @@ void main() {
       expect(requests.length, before);
     });
 
+    test('direct chats fetch their own room thumbnail', () async {
+      final requests = <http.BaseRequest>[];
+      final loader = NotificationMediaLoader(
+        httpClient: MockClient((request) async {
+          requests.add(request);
+          return http.Response.bytes(_png(128, 128), 200);
+        }),
+        homeserver: Uri.parse('https://matrix.example.org'),
+        accessToken: 'token',
+        cacheRoot: cache,
+        process: (job) async => processNotificationImage(job),
+      );
+      final room = _groupRoom(client);
+      room.setState(
+        _state(room, 'm.room.avatar', '', {
+          'url': 'mxc://example.org/direct-room',
+        }),
+      );
+      final resolved = await projectPushEvent(
+        event: _message(room, {'msgtype': 'm.text', 'body': 'Hello'}),
+        room: room,
+        myUserId: _me,
+        isDirect: true,
+        highlight: false,
+        media: loader,
+      );
+      expect(File(resolved.roomAvatarPath!).existsSync(), isTrue);
+      expect(requests.any((r) => r.url.path.endsWith('/direct-room')), isTrue);
+    });
+
     test('previews are skipped when media is off and fail soft', () async {
       var requests = 0;
       final loader = NotificationMediaLoader(
