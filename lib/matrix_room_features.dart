@@ -1,6 +1,7 @@
 import 'package:matrix/matrix.dart';
 
 import 'chat_backend.dart';
+import 'features/threads/thread_models.dart';
 import 'messaging_features.dart';
 
 /// Account-bound SDK operations shared by the optional messaging screens.
@@ -153,6 +154,114 @@ class MatrixRoomFeatures {
         return time == 0 ? a.id.compareTo(b.id) : time;
       });
     return ThreadPage(messages, nextBatch: response.nextBatch);
+  });
+
+  Future<Event> _decrypted(Event event) async {
+    if (event.type != EventTypes.Encrypted || client.encryption == null) {
+      return event;
+    }
+    final decrypted = await client.encryption!.decryptRoomEvent(event);
+    _checkOwner();
+    return decrypted;
+  }
+
+  /// Thread roots in [roomId], most recent activity first, via
+  /// `GET /_matrix/client/v1/rooms/{roomId}/threads`. Each root carries the
+  /// server's bundled `m.thread` summary (reply count, latest reply and
+  /// participation). Encrypted roots and latest replies are decrypted
+  /// locally when keys are available.
+  Future<ThreadListPage> loadThreadRoots(
+    String roomId, {
+    ThreadListFilter filter = ThreadListFilter.all,
+    String? nextBatch,
+    int limit = 25,
+  }) => _owned(() async {
+    final room = _room(roomId);
+    final response = await client.getThreadRoots(
+      roomId,
+      include: filter == ThreadListFilter.participated
+          ? Include.participated
+          : Include.all,
+      limit: limit,
+      from: nextBatch,
+    );
+    _checkOwner();
+    final seen = <String>{};
+    final threads = <ThreadSummary>[];
+    for (final raw in response.chunk) {
+      if (!seen.add(raw.eventId)) continue;
+      final root = await _decrypted(Event.fromMatrixEvent(raw, room));
+      final relations = raw.unsigned?['m.relations'];
+      final summary = relations is Map ? relations['m.thread'] : null;
+      final latestRaw = summary is Map ? summary['latest_event'] : null;
+      Event? latest;
+      if (latestRaw is Map) {
+        try {
+          latest = await _decrypted(
+            Event.fromJson(Map<String, dynamic>.from(latestRaw), room),
+          );
+        } on StateError {
+          rethrow;
+        } catch (_) {
+          // A malformed bundled event must not hide the thread itself.
+        }
+      }
+      final count = summary is Map ? summary['count'] : null;
+      threads.add(
+        ThreadSummary(
+          root: mapEvent(root),
+          latest: latest == null ? null : mapEvent(latest),
+          replyCount: count is num ? count.toInt().clamp(0, 1 << 30) : 0,
+          participated:
+              summary is Map && summary['current_user_participated'] == true,
+          unread: latest == null
+              ? null
+              : threadUnread(room, raw.eventId, latest),
+        ),
+      );
+    }
+    final next = response.nextBatch;
+    return ThreadListPage(
+      threads,
+      nextBatch: next == null || next.isEmpty || next == nextBatch
+          ? null
+          : next,
+    );
+  });
+
+  /// Whether [latest] is newer than this account's threaded read receipt in
+  /// [rootId]. Null when there is no threaded receipt to compare with: unread
+  /// state is then unknown rather than inferred.
+  bool? threadUnread(Room room, String rootId, Event latest) {
+    if (latest.senderId == _userId) return false;
+    final own = room.receiptState.byThread[rootId]?.latestOwnReceipt;
+    if (own == null) return null;
+    if (own.eventId == latest.eventId) return false;
+    return latest.originServerTs.isAfter(own.timestamp);
+  }
+
+  /// Sends a threaded read receipt (`thread_id` = [rootId]) for [eventId], a
+  /// reply in that thread. Private (`m.read.private`) when [public] is false.
+  /// Skips the request when this receipt is already the latest own one.
+  Future<void> sendThreadReceipt(
+    String roomId,
+    String rootId,
+    String eventId, {
+    required bool public,
+  }) => _owned(() async {
+    final room = _room(roomId);
+    if (room.membership != Membership.join) {
+      throw StateError('Room is not joined.');
+    }
+    if (!eventId.startsWith(r'$') || eventId == rootId) return;
+    final own = room.receiptState.byThread[rootId]?.latestOwnReceipt;
+    if (own?.eventId == eventId) return;
+    await client.postReceipt(
+      roomId,
+      public ? ReceiptType.mRead : ReceiptType.mReadPrivate,
+      eventId,
+      threadId: rootId,
+    );
   });
 
   /// Matrix exposes receipts through sync, not a per-event HTTP endpoint.

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
 import 'package:parallax/chat_backend.dart';
+import 'package:parallax/features/threads/local_message_search.dart';
+import 'package:parallax/features/threads/timeline_navigation.dart';
 import 'package:parallax/message_search_screen.dart';
 import 'package:parallax/messaging_features.dart';
 
@@ -458,4 +460,237 @@ void main() {
     expect(backend.requests, hasLength(2));
     expect(tester.takeException(), isNull);
   });
+
+  group('device history search', () {
+    /// Opens the search route; the returned getter yields the popped room.
+    Future<String? Function()> openSearch(
+      WidgetTester tester,
+      _DeviceBackend backend,
+    ) async {
+      String? selected;
+      var popped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  selected = await Navigator.push<String>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MessageSearchScreen(
+                        backend: backend,
+                        palette: paletteFor(VisualTheme.parallax),
+                      ),
+                    ),
+                  );
+                  popped = true;
+                },
+                child: const Text('Open search'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open search'));
+      await tester.pumpAndSettle();
+      return () => popped ? selected : null;
+    }
+
+    testWidgets('combines device and server results and jumps to roots', (
+      tester,
+    ) async {
+      final backend = _DeviceBackend();
+      final popped = await openSearch(tester, backend);
+      expect(backend.started, isTrue);
+      expect(find.text('Search this device’s history'), findsOneWidget);
+      await _type(tester, 'pizza');
+      expect(backend.localQueries.single.query, 'pizza');
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      backend.localQueries.single.result.complete(
+        LocalSearchPage(
+          hits: [
+            _local(r'$thread-reply', root: r'$root'),
+            _local(r'$plain'),
+          ],
+          nextOffset: 30,
+        ),
+      );
+      backend.requests.single.result.complete(
+        MessageSearchPage(hits: [_hit(r'$server')]),
+      );
+      await tester.pump();
+      expect(find.text('ENCRYPTED ROOMS · THIS DEVICE'), findsOneWidget);
+      expect(find.text('OTHER ROOMS · SERVER'), findsOneWidget);
+      expect(find.text(r'$thread-reply'), findsOneWidget);
+      expect(find.text('In a thread'), findsOneWidget);
+      expect(find.text(r'$server'), findsOneWidget);
+
+      await tester.tap(find.text('Load more from this device'));
+      await tester.pump();
+      expect(backend.localQueries.last.offset, 30);
+      backend.localQueries.last.result.complete(
+        LocalSearchPage(hits: [_local(r'$plain'), _local(r'$older')]),
+      );
+      await tester.pump();
+      expect(find.text(r'$older'), findsOneWidget);
+      expect(find.text(r'$plain'), findsOneWidget);
+      expect(find.text('Load more from this device'), findsNothing);
+
+      await tester.tap(find.text(r'$thread-reply'));
+      await tester.pumpAndSettle();
+      expect(backend.jumps.single, (
+        room: '!secret:matrix.example',
+        event: r'$root',
+      ));
+      expect(popped(), '!secret:matrix.example');
+    });
+
+    testWidgets('a failed jump still opens the room with a notice', (
+      tester,
+    ) async {
+      final backend = _DeviceBackend()..failJump = true;
+      final popped = await openSearch(tester, backend);
+      await _type(tester, 'pizza');
+      backend.localQueries.single.result.complete(
+        const LocalSearchPage(hits: []),
+      );
+      backend.requests.single.result.complete(
+        MessageSearchPage(hits: [_hit(r'$server')]),
+      );
+      await tester.pump();
+      expect(find.text('No matches in this device’s history.'), findsOne);
+      await tester.tap(find.text(r'$server'));
+      await tester.pumpAndSettle();
+      expect(backend.jumps.single.event, r'$server');
+      expect(popped(), '!room:matrix.example');
+      expect(
+        find.text('Couldn’t jump to that message. Opening the room instead.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('local failures stay inline and server results still show', (
+      tester,
+    ) async {
+      final backend = _DeviceBackend();
+      await openSearch(tester, backend);
+      await _type(tester, 'pizza');
+      backend.localQueries.single.result.completeError(StateError('io'));
+      backend.requests.single.result.complete(
+        MessageSearchPage(hits: [_hit(r'$server')]),
+      );
+      await tester.pump();
+      expect(find.text('Couldn’t search this device’s history.'), findsOne);
+      expect(find.text(r'$server'), findsOneWidget);
+    });
+
+    testWidgets('turning device search off confirms and wipes the index', (
+      tester,
+    ) async {
+      final backend = _DeviceBackend();
+      await openSearch(tester, backend);
+      await _type(tester, 'pizza');
+      backend.localQueries.single.result.complete(
+        LocalSearchPage(hits: [_local(r'$private')]),
+      );
+      backend.requests.single.result.complete(
+        const MessageSearchPage(hits: []),
+      );
+      await tester.pump();
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(find.text('Turn off device search?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(backend.enabledWrites, isEmpty);
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Turn off'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(backend.enabledWrites, [false]);
+      // The query reruns as a server-only search.
+      expect(find.text(r'$private'), findsNothing);
+      expect(backend.requests, hasLength(2));
+      expect(backend.localQueries, hasLength(1));
+      backend.requests.last.result.complete(
+        MessageSearchPage(hits: [_hit(r'$server')]),
+      );
+      await tester.pump();
+      expect(find.text(r'$server'), findsOneWidget);
+      expect(find.text('ENCRYPTED ROOMS · THIS DEVICE'), findsNothing);
+    });
+
+    testWidgets('account change discards late device results', (tester) async {
+      final backend = _DeviceBackend();
+      await openSearch(tester, backend);
+      await _type(tester, 'pizza');
+      backend.replaceAccount();
+      await tester.pump();
+      backend.localQueries.single.result.complete(
+        LocalSearchPage(hits: [_local(r'$late-private')]),
+      );
+      await tester.pump();
+      expect(find.text(r'$late-private'), findsNothing);
+      expect(find.textContaining('Account changed'), findsOneWidget);
+    });
+  });
+}
+
+LocalMessageHit _local(String id, {String? root}) => LocalMessageHit(
+  id: id,
+  roomId: '!secret:matrix.example',
+  roomName: 'Secret',
+  sender: 'Alice',
+  body: id,
+  time: DateTime(2026),
+  threadRootId: root,
+);
+
+class _DeviceBackend extends _SearchBackend
+    implements LocalMessageSearch, TimelineNavigation {
+  bool started = false;
+  bool enabled = true;
+  bool failJump = false;
+  final enabledWrites = <bool>[];
+  final localQueries =
+      <({String query, int offset, Completer<LocalSearchPage> result})>[];
+  final jumps = <({String room, String event})>[];
+
+  @override
+  void ensureStarted() => started = true;
+  @override
+  Future<bool> isEnabled() async => enabled;
+  @override
+  Future<void> setEnabled(bool value) async {
+    enabledWrites.add(value);
+    enabled = value;
+  }
+
+  @override
+  Future<void> clear() async {}
+  @override
+  Future<LocalSearchPage> search(
+    String query, {
+    int offset = 0,
+    int limit = 30,
+  }) {
+    final result = Completer<LocalSearchPage>();
+    localQueries.add((query: query, offset: offset, result: result));
+    return result.future;
+  }
+
+  @override
+  Future<void> openRoomAt(String roomId, String eventId) async {
+    jumps.add((room: roomId, event: eventId));
+    if (failJump) throw StateError('gone');
+  }
+
+  @override
+  String? focusedEventIn(String roomId) => null;
+  @override
+  bool hasNewerThanFocus(String roomId) => false;
+  @override
+  Future<void> jumpToLatest(String roomId) async {}
 }
