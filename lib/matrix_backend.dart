@@ -4,7 +4,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:flutter/widgets.dart' show AppLifecycleListener;
+import 'package:flutter/widgets.dart'
+    show AppLifecycleListener, AppLifecycleState, WidgetsBinding;
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -66,7 +67,9 @@ class MatrixBackend extends ChatBackend
     this.localStorage,
     this.beforeLogout,
     Future<Duration> Function()? undoSendDelay,
-  }) : _sendReadReceipts = sendReadReceipts ?? (() => true),
+    bool Function()? isAppVisible,
+  }) : _isAppVisible = isAppVisible ?? _appResumed,
+       _sendReadReceipts = sendReadReceipts ?? (() => true),
        _sendTypingNotifications = sendTypingNotifications ?? (() => true),
        _undoSendDelay =
            undoSendDelay ?? UndoSendPreferences.shared.resolveDelay;
@@ -77,11 +80,15 @@ class MatrixBackend extends ChatBackend
     SecureValueStore? localStorage,
     Future<void> Function()? beforeLogout,
     Future<Duration> Function()? undoSendDelay,
+    bool Function()? sendReadReceipts,
+    bool Function()? isAppVisible,
   }) {
     final backend = MatrixBackend(
       localStorage: localStorage,
       beforeLogout: beforeLogout,
       undoSendDelay: undoSendDelay,
+      sendReadReceipts: sendReadReceipts,
+      isAppVisible: isAppVisible,
     );
     backend._client = client;
     client.onSoftLogout = backend._refreshAuthentication;
@@ -93,6 +100,20 @@ class MatrixBackend extends ChatBackend
 
   final bool Function() _sendReadReceipts;
   final bool Function() _sendTypingNotifications;
+
+  /// Whether Parallax is on screen (messages arriving in the open room are
+  /// only marked read while it is).
+  final bool Function() _isAppVisible;
+
+  static bool _appResumed() {
+    try {
+      final state = WidgetsBinding.instance.lifecycleState;
+      return state == null || state == AppLifecycleState.resumed;
+    } catch (_) {
+      return true;
+    }
+  }
+
   final Future<void> Function()? beforeLogout;
   final SecureValueStore? localStorage;
   // Undo send (lib/features/scheduled): grace period for new sends, the
@@ -1056,7 +1077,11 @@ class MatrixBackend extends ChatBackend
     _loadingHistory = false;
     _messages = const [];
     _requestedSenders.clear();
+    _readUpTo = null;
+    _readTimer?.cancel();
     notifyListeners();
+    // Before the timeline loads, so backing out at once still reads it.
+    _markRead(room, _receiptTarget([?room.lastEvent]), clearMarkedUnread: true);
 
     matrix.Timeline? created;
     created = await room.getTimeline(
@@ -1072,18 +1097,86 @@ class MatrixBackend extends ChatBackend
     }
     _timeline = created;
     _refreshMessages(created);
-    if (_sendReadReceipts() && room.isUnread && created.events.isNotEmpty) {
-      final eventId = created.events.first.eventId;
-      if (eventId.isNotEmpty) {
-        // Receipt delivery must never hold the timeline's first frame hostage.
-        unawaited(
-          room
-              .setReadMarker(eventId, mRead: eventId)
-              .then((_) => _scheduleRoomUpdate())
-              .catchError((Object _) {}),
-        );
-      }
+    _markRead(room, _receiptTarget(created.events));
+  }
+
+  // --- Read state (Element X: opening a room reads it) ---------------------
+
+  /// Event the open room was last marked read up to (null: not yet).
+  String? _readUpTo;
+  Timer? _readTimer;
+
+  /// Newest event a receipt can name. Local echoes of pending or failed
+  /// sends have no server ID yet, and the server rejects receipts for them.
+  static matrix.Event? _receiptTarget(Iterable<matrix.Event> newestFirst) {
+    for (final event in newestFirst) {
+      if (event.status.isSent && event.eventId.startsWith(r'$')) return event;
     }
+    return null;
+  }
+
+  /// Moves the fully-read marker and sends a private read receipt up to
+  /// [target] whenever the room has unread or new messages. The public
+  /// receipt follows "Send read receipts"; turning that off must not leave
+  /// rooms unread. [clearMarkedUnread] also drops a manual "mark as unread"
+  /// (bridges set it when a chat is marked unread on the phone).
+  void _markRead(
+    matrix.Room room,
+    matrix.Event? target, {
+    bool clearMarkedUnread = false,
+  }) {
+    if (_disposed) return;
+    final work = <Future<void>>[];
+    if (clearMarkedUnread && room.markedUnread) {
+      work.add(room.markUnread(false));
+    }
+    final eventId = target?.eventId;
+    if (eventId != null &&
+        eventId != _readUpTo &&
+        (room.isUnread || room.hasNewMessages)) {
+      _readUpTo = eventId;
+      work.add(
+        room.setReadMarker(
+          eventId,
+          mRead: eventId,
+          public: _sendReadReceipts(),
+        ),
+      );
+    }
+    if (work.isEmpty) return;
+    // Receipt delivery must never hold the timeline's first frame hostage.
+    unawaited(
+      Future.wait(work).then((_) => _scheduleRoomUpdate()).catchError((
+        Object _,
+      ) {
+        // Retry with the next update.
+        if (_readUpTo == eventId) _readUpTo = null;
+      }),
+    );
+  }
+
+  /// Marks messages that arrived while the room was on screen as read.
+  void _scheduleMarkRead() {
+    _readTimer?.cancel();
+    _readTimer = Timer(const Duration(milliseconds: 300), markActiveRoomRead);
+  }
+
+  @override
+  void markActiveRoomRead() {
+    final client = _client;
+    final roomId = _activeRoomId;
+    final timeline = _timeline;
+    if (_disposed ||
+        client == null ||
+        roomId == null ||
+        timeline == null ||
+        _focusedEventId != null ||
+        !_isAppVisible()) {
+      return;
+    }
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) return;
+    _markRead(room, _receiptTarget(timeline.events));
   }
 
   // --- Jump to event (lib/features/threads/timeline_navigation.dart) ------
@@ -1223,6 +1316,10 @@ class MatrixBackend extends ChatBackend
   @override
   void closeRoom(String roomId) {
     if (_activeRoomId != roomId) return;
+    _readTimer?.cancel();
+    // Messages that arrived in the last moments before leaving.
+    markActiveRoomRead();
+    _readUpTo = null;
     _roomGeneration++;
     _timeline?.cancelSubscriptions();
     _timeline = null;
@@ -3522,6 +3619,7 @@ class MatrixBackend extends ChatBackend
           .reversed,
     );
     _requestMissingSenders(timeline, events.take(_visibleMessageLimit));
+    if (_focusedEventId == null) _scheduleMarkRead();
     notifyListeners();
   }
 
@@ -3789,6 +3887,7 @@ class MatrixBackend extends ChatBackend
     _clearSecurityPrompts();
     _roomUpdateTimer?.cancel();
     _messageRefreshTimer?.cancel();
+    _readTimer?.cancel();
     _syncSubscription?.cancel();
     _syncStatusSubscription?.cancel();
     _loginSubscription?.cancel();

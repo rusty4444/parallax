@@ -429,7 +429,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) unawaited(_flushDraft());
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_flushDraft());
+    } else if (_owner.isCurrent) {
+      // Messages that arrived while Parallax was in the background.
+      widget.backend.markActiveRoomRead();
+    }
   }
 
   @override

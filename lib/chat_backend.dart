@@ -459,6 +459,10 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> openRoom(String roomId);
   Future<void> loadOlder(String roomId);
   void closeRoom(String roomId);
+
+  /// Marks what the open room shows as read (Parallax came back on screen
+  /// with the room open). Backends without read state ignore it.
+  void markActiveRoomRead() {}
   Future<void> sendText(
     String roomId,
     String text, {
