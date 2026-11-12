@@ -40,6 +40,8 @@ import 'queued_media_sender.dart';
 import 'push_notifications.dart';
 import 'secure_store.dart';
 import 'send_cancellation.dart';
+import 'features/packs/custom_reactions.dart';
+import 'features/packs/matrix_packs.dart' show packShortcodeForKey;
 import 'hooks/registry.dart' show transformOutgoingText;
 import 'hooks/hook_types.dart' show OutgoingTextContext;
 
@@ -1413,11 +1415,15 @@ class MatrixBackend extends ChatBackend
     }
   }
 
+  /// [emoji] is an emoji, or an `mxc://` key for a custom emoji (MSC4027),
+  /// sent with `com.beeper.reaction.shortcode` from [shortcode], the room's
+  /// packs or an existing reaction with the same key.
   @override
   Future<void> react(
     String roomId,
     String eventId, {
     String emoji = '❤️',
+    String? shortcode,
   }) async {
     final client = _requireClient();
     final room = client.getRoomById(roomId);
@@ -1425,7 +1431,7 @@ class MatrixBackend extends ChatBackend
     if (room == null || timeline == null || _activeRoomId != roomId) {
       throw StateError('Room unavailable');
     }
-    if (emoji.isEmpty || emoji.runes.length > 8) {
+    if (!isValidReactionKey(emoji)) {
       throw ArgumentError('Invalid reaction');
     }
     final inFlightKey = '$roomId/$eventId/$emoji';
@@ -1450,6 +1456,30 @@ class MatrixBackend extends ChatBackend
           )
           .firstOrNull;
       if (ownReaction == null) {
+        final label = isCustomReactionKey(emoji)
+            ? normaliseReactionShortcode(shortcode) ??
+                  normaliseReactionShortcode(
+                    packShortcodeForKey(client, roomId, emoji),
+                  ) ??
+                  event
+                      .aggregatedEvents(
+                        timeline,
+                        matrix.RelationshipTypes.reaction,
+                      )
+                      .where(
+                        (reaction) =>
+                            (reaction.content['m.relates_to']
+                                as Map?)?['key'] ==
+                            emoji,
+                      )
+                      .map(
+                        (reaction) => normaliseReactionShortcode(
+                          reaction.content[reactionShortcodeKey],
+                        ),
+                      )
+                      .nonNulls
+                      .firstOrNull
+            : null;
         // Encrypted rooms use the same recipient approval, fail-closed
         // encryption and final HTTP guard as messages. The content keeps the
         // SDK from sending a relation-only plaintext m.reaction (see
@@ -1459,9 +1489,14 @@ class MatrixBackend extends ChatBackend
         final sentId = await _protectSend(
           room,
           () => room.sendEvent(
-            Map<String, dynamic>.of(
-              reactionEventContent(eventId, emoji, encrypted: room.encrypted),
-            ),
+            Map<String, dynamic>.of({
+              ...reactionEventContent(
+                eventId,
+                emoji,
+                encrypted: room.encrypted,
+              ),
+              reactionShortcodeKey: ?label,
+            }),
             type: matrix.EventTypes.Reaction,
           ),
         );

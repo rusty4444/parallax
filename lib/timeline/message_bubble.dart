@@ -6,6 +6,7 @@ import '../feature_settings_scope.dart';
 import '../features/rich_timeline/rich_timeline_features.dart';
 import '../features/rich_timeline/rich_timeline_hooks.dart';
 import '../features/media/media_hooks.dart';
+import '../features/packs/pack_image.dart';
 import '../features/reactions/reaction_hooks.dart';
 import '../features/rich_timeline/timeline_widgets.dart';
 import '../features/rooms_admin/rooms_admin_hooks.dart';
@@ -246,11 +247,18 @@ class MessageBubble extends StatelessWidget {
                               ),
                               child: ActionChip(
                                 tooltip: reaction.mine
-                                    ? 'Remove your ${reaction.emoji} reaction'
-                                    : 'React with ${reaction.emoji}',
-                                label: Text(
-                                  '${reaction.emoji} ${reaction.count}',
-                                ),
+                                    ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
+                                    : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
+                                // Custom emoji reactions (MSC4027) show the
+                                // pack image; others keep the emoji text.
+                                label:
+                                    customReactionChipLabel(
+                                      backend: backend,
+                                      roomId: roomId,
+                                      reactionKey: reaction.emoji,
+                                      count: reaction.count,
+                                    ) ??
+                                    Text('${reaction.emoji} ${reaction.count}'),
                                 backgroundColor: reaction.mine
                                     ? palette.accent.withValues(alpha: 0.25)
                                     : palette.background,
