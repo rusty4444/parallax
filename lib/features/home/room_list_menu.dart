@@ -14,6 +14,9 @@ enum RoomMenuAction {
 
   /// Opens the saved module's "Add to folder…" sheet.
   addToFolder,
+
+  /// Opens the chat picture sheet (a picture only this phone shows).
+  chatPicture,
   copyLink,
   leave,
 }
@@ -126,6 +129,11 @@ Future<RoomMenuAction?> showRoomListMenu(
                   Icons.create_new_folder_outlined,
                   'Add to folder…',
                 ),
+              item(
+                RoomMenuAction.chatPicture,
+                Icons.add_photo_alternate_outlined,
+                'Chat picture…',
+              ),
               item(
                 RoomMenuAction.copyLink,
                 Icons.link_rounded,

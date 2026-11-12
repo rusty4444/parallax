@@ -3661,6 +3661,7 @@ class MatrixBackend extends ChatBackend
       isPublic: room.joinRules == matrix.JoinRules.public,
       previewSender: previewSender,
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
+      network: room.parallaxNetwork,
       id: room.id,
       name: name,
       preview: event?.type == matrix.EventTypes.Message

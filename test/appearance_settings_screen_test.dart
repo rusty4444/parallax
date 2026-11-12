@@ -89,8 +89,13 @@ void main() {
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1);
     expect(tester.widget<Slider>(find.byType(Slider)).min, 0.85);
     expect(tester.widget<Slider>(find.byType(Slider)).max, 1.5);
-    // Compact, all home options.
-    expect(switchValues(tester), [false, false]);
+    // Compact, all home options, app logos.
+    expect(switchValues(tester), [false, false, false]);
+    final logos = find.byKey(const ValueKey('appearance.network_logos'));
+    await tester.ensureVisible(logos);
+    await tester.tap(logos);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(logos).value, isTrue);
 
     await showPage(tester, chats);
     expect(find.text('Double-tap reaction'), findsOneWidget);

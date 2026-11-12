@@ -213,6 +213,18 @@ class PreferenceRows {
       value: preferences.expandedHome,
       onChanged: (value) => _save(() => preferences.setExpandedHome(value)),
     ),
+    SwitchListTile(
+      key: const ValueKey('appearance.network_logos'),
+      secondary: const Icon(Icons.apps_rounded),
+      title: const Text('App logos instead of letters'),
+      subtitle: const Text(
+        'Chats without a picture show the app they come from: '
+        'WhatsApp, Messenger, Google Messages, Discord, LinkedIn, '
+        'Xbox or Matrix. Long-press a chat to set your own picture.',
+      ),
+      value: preferences.networkLogos,
+      onChanged: (value) => _save(() => preferences.setNetworkLogos(value)),
+    ),
   ];
 
   /// Chats → Touch: double-tap reaction and haptic feedback.

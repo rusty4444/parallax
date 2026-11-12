@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'chat_network.dart';
 import 'crypto_setup_policy.dart';
 import 'room_details.dart';
 
@@ -115,6 +116,7 @@ class ChatRoom {
     this.isPublic = false,
     this.previewSender,
     this.canonicalAlias,
+    this.network,
   });
 
   final String id;
@@ -152,6 +154,10 @@ class ChatRoom {
   final String? previewSender;
   final String? canonicalAlias;
 
+  /// The app the chat comes from (bridged or native Matrix); null when
+  /// unknown. Picks the logo shown when the chat has no picture.
+  final ChatNetwork? network;
+
   bool get muted => notificationMode == RoomNotificationMode.mute;
 
   ChatRoom copyWith({
@@ -186,6 +192,7 @@ class ChatRoom {
     isPublic: isPublic,
     previewSender: previewSender,
     canonicalAlias: canonicalAlias,
+    network: network,
   );
 }
 
@@ -210,6 +217,7 @@ bool sameChatRoom(ChatRoom a, ChatRoom b) {
       a.isPublic != b.isPublic ||
       a.previewSender != b.previewSender ||
       a.canonicalAlias != b.canonicalAlias ||
+      a.network != b.network ||
       a.tags.length != b.tags.length ||
       a.heroes.length != b.heroes.length) {
     return false;

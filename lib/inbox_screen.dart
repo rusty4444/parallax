@@ -20,6 +20,7 @@ import 'room_creation_request.dart';
 import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
 import 'messaging_features.dart';
+import 'room_picture_sheet.dart';
 import 'space_browser_screen.dart';
 import 'user_directory_screen.dart';
 import 'message_search_screen.dart';
@@ -262,6 +263,10 @@ class _InboxScreenState extends State<InboxScreen> {
       );
       return;
     }
+    if (choice == RoomMenuAction.chatPicture) {
+      await showRoomPictureSheet(context, room: room);
+      return;
+    }
     if (choice == RoomMenuAction.copyLink) {
       try {
         final link =
@@ -310,7 +315,9 @@ class _InboxScreenState extends State<InboxScreen> {
                 )?.preferences.sendReadReceipts ??
                 true,
           );
-        case RoomMenuAction.copyLink || RoomMenuAction.addToFolder:
+        case RoomMenuAction.copyLink ||
+            RoomMenuAction.addToFolder ||
+            RoomMenuAction.chatPicture:
           break;
       }
     } catch (_) {

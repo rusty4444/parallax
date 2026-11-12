@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:matrix/matrix.dart';
 
 import 'bridge_bots.dart';
+import 'chat_network.dart';
 import 'client_caches.dart';
 import 'people_names.dart';
 
@@ -217,6 +218,19 @@ extension ParallaxRoomNames on Room {
       ),
     );
   }
+
+  /// The app this room comes from: its bridge state where loaded, else
+  /// the usernames of the people it is named after (bridged contacts and
+  /// bots), else native Matrix.
+  ChatNetwork get parallaxNetwork => chatNetworkOf(
+    bridgeStates: [
+      for (final type in bridgeStateTypes)
+        for (final event
+            in states[type]?.values ?? const <StrippedStateEvent>[])
+          event.content,
+    ],
+    userIds: [...?summary.mHeroes, ?directChatPartner],
+  );
 
   /// [avatar], except a DM whose partner is a bridge bot shows its people
   /// (the avatar cluster) instead of the bot's logo.
