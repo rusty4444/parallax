@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'chat_backend.dart';
+import 'features/home/home_features.dart';
 import 'messaging_features.dart';
 import 'room_join_dialog.dart';
 
@@ -247,6 +248,59 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     }
   }
 
+  bool get _canLeave {
+    final spaceId = widget.spaceId;
+    if (spaceId == null || _expired) return false;
+    try {
+      return roomListFeaturesOf(
+            widget.backend,
+          )?.joinedSpaces.any((space) => space.id == spaceId) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _leave() async {
+    final spaceId = widget.spaceId;
+    final features = roomListFeaturesOf(widget.backend);
+    if (spaceId == null || features == null || !_ownerCurrent) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Leave this Space?'),
+        content: const Text(
+          'You will leave the Space itself. Rooms you joined through it stay '
+          'in your chat list until you leave them too.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Leave Space'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || !_ownerCurrent) return;
+    final generation = _joinGeneration;
+    try {
+      await features.leaveSpace(spaceId);
+      if (mounted && _ownerCurrent && generation == _joinGeneration) {
+        Navigator.pop(context);
+      }
+    } catch (_) {
+      if (mounted && _ownerCurrent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Couldn’t leave this Space.')),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _generation++;
@@ -260,6 +314,12 @@ class _SpaceBrowserScreenState extends State<SpaceBrowserScreen> {
     appBar: AppBar(
       title: Text(widget.spaceId == null ? 'Spaces' : 'Browse Space'),
       actions: [
+        if (_canLeave)
+          IconButton(
+            tooltip: 'Leave Space',
+            onPressed: _leave,
+            icon: const Icon(Icons.exit_to_app_rounded),
+          ),
         IconButton(
           tooltip: 'Refresh',
           onPressed: _expired || _features == null ? null : _refresh,

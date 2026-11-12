@@ -26,20 +26,47 @@ void main() {
   }
 
   testWidgets('renders each preference with its default value', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await showScreen(tester);
     expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Text size'), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
     expect(find.text('Compact layout'), findsOneWidget);
-    expect(find.text('Auto-load media'), findsOneWidget);
+    expect(find.text('Show media in timeline'), findsOneWidget);
     expect(find.text('Send read receipts'), findsOneWidget);
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1);
     expect(tester.widget<Slider>(find.byType(Slider)).min, 0.85);
     expect(tester.widget<Slider>(find.byType(Slider)).max, 1.5);
+    expect(
+      tester
+          .widget<RadioGroup<MediaPreviewMode>>(
+            find.byType(RadioGroup<MediaPreviewMode>),
+          )
+          .groupValue,
+      MediaPreviewMode.always,
+    );
     final switches = tester.widgetList<SwitchListTile>(
       find.byType(SwitchListTile),
     );
-    expect(switches.map((tile) => tile.value), [false, true, true]);
+    // Compact, hide invite avatars, read receipts, typing notifications.
+    expect(switches.map((tile) => tile.value), [false, false, true, true]);
+  });
+
+  testWidgets('media preview choice is saved and restored', (tester) async {
+    await showScreen(tester);
+    await tester.ensureVisible(find.text('Show in private rooms'));
+    await tester.tap(find.text('Show in private rooms'));
+    await tester.pumpAndSettle();
+    expect(preferences.mediaPreviewMode, MediaPreviewMode.privateRooms);
+    await tester.ensureVisible(find.text('Always hide'));
+    await tester.tap(find.text('Always hide'));
+    await tester.pumpAndSettle();
+    expect(preferences.autoLoadMedia, isFalse);
+    final restored = AppearancePreferences(prefs: prefs);
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.mediaPreviewMode, MediaPreviewMode.never);
   });
 
   testWidgets('all switches update the model and persisted preferences', (
@@ -48,22 +75,25 @@ void main() {
     await showScreen(tester);
     for (final title in [
       'Compact layout',
-      'Auto-load media',
+      'Hide avatars in room invites',
       'Send read receipts',
+      'Send typing notifications',
     ]) {
       await tester.ensureVisible(find.text(title));
       await tester.tap(find.text(title));
       await tester.pumpAndSettle();
     }
     expect(preferences.compact, isTrue);
-    expect(preferences.autoLoadMedia, isFalse);
+    expect(preferences.hideInviteAvatars, isTrue);
     expect(preferences.sendReadReceipts, isFalse);
+    expect(preferences.sendTypingNotifications, isFalse);
     final restored = AppearancePreferences(prefs: prefs);
     addTearDown(restored.dispose);
     await restored.load();
     expect(restored.compact, isTrue);
-    expect(restored.autoLoadMedia, isFalse);
+    expect(restored.hideInviteAvatars, isTrue);
     expect(restored.sendReadReceipts, isFalse);
+    expect(restored.sendTypingNotifications, isFalse);
   });
 
   testWidgets('slider changes text size and saves it', (tester) async {
@@ -121,7 +151,10 @@ void main() {
         home: AppearanceSettingsScreen(preferences: preferences),
       ),
     );
-    await tester.scrollUntilVisible(find.text('Send read receipts'), 160);
+    await tester.scrollUntilVisible(
+      find.text('Send typing notifications'),
+      160,
+    );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });

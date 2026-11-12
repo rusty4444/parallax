@@ -24,6 +24,11 @@ class AppearanceSettingsScreen extends StatelessWidget {
     }
   }
 
+  Widget _heading(BuildContext context, String text) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+  );
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: preferences,
@@ -32,13 +37,7 @@ class AppearanceSettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text(
-              'Reading',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
+          _heading(context, 'Reading'),
           Card(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -73,36 +72,82 @@ class AppearanceSettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text(
-              'Media & privacy',
-              style: Theme.of(context).textTheme.titleMedium,
+          _heading(context, 'Media & privacy'),
+          Card(
+            child: RadioGroup<MediaPreviewMode>(
+              groupValue: preferences.mediaPreviewMode,
+              onChanged: (value) {
+                if (value == null) return;
+                _save(context, () => preferences.setMediaPreviewMode(value));
+              },
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    leading: Icon(Icons.image_outlined),
+                    title: Text('Show media in timeline'),
+                    subtitle: Text(
+                      'Hidden media can always be shown by tapping on it. '
+                      'Loading media uses data.',
+                    ),
+                  ),
+                  RadioListTile(
+                    value: MediaPreviewMode.always,
+                    title: Text('Always show'),
+                  ),
+                  RadioListTile(
+                    value: MediaPreviewMode.privateRooms,
+                    title: Text('Show in private rooms'),
+                  ),
+                  RadioListTile(
+                    value: MediaPreviewMode.never,
+                    title: Text('Always hide'),
+                  ),
+                ],
+              ),
             ),
           ),
+          const SizedBox(height: 8),
           Card(
             child: Column(
               children: [
                 SwitchListTile(
-                  secondary: const Icon(Icons.image_outlined),
-                  title: const Text('Auto-load media'),
+                  secondary: const Icon(Icons.no_photography_outlined),
+                  title: const Text('Hide avatars in room invites'),
                   subtitle: const Text(
-                    'Load images and media previews automatically. Uses data.',
+                    'Don’t load pictures from people and rooms that invite '
+                    'you until you accept.',
                   ),
-                  value: preferences.autoLoadMedia,
-                  onChanged: (value) =>
-                      _save(context, () => preferences.setAutoLoadMedia(value)),
+                  value: preferences.hideInviteAvatars,
+                  onChanged: (value) => _save(
+                    context,
+                    () => preferences.setHideInviteAvatars(value),
+                  ),
                 ),
                 SwitchListTile(
                   secondary: const Icon(Icons.done_all_rounded),
                   title: const Text('Send read receipts'),
                   subtitle: const Text(
-                    'Let others know when you’ve read messages.',
+                    'Let others know when you’ve read messages. When off, '
+                    'receipts stay private to your account.',
                   ),
                   value: preferences.sendReadReceipts,
                   onChanged: (value) => _save(
                     context,
                     () => preferences.setSendReadReceipts(value),
+                  ),
+                ),
+                SwitchListTile(
+                  secondary: const Icon(Icons.keyboard_outlined),
+                  title: const Text('Send typing notifications'),
+                  subtitle: const Text(
+                    'Let others see when you’re typing. Never sent in '
+                    'encrypted rooms.',
+                  ),
+                  value: preferences.sendTypingNotifications,
+                  onChanged: (value) => _save(
+                    context,
+                    () => preferences.setSendTypingNotifications(value),
                   ),
                 ),
               ],
