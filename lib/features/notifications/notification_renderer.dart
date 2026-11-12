@@ -220,7 +220,6 @@ RenderedNotification renderRoomThread(
     largeIcon: !thread.isDirect && roomAvatar != null && fileExists(roomAvatar)
         ? _bitmap(roomAvatar)
         : null,
-    subText: highlight && !thread.isDirect ? 'Mentioned you' : null,
     actions: _roomActions(canMarkRead: thread.latestEventId != null),
   );
   return RenderedNotification(
@@ -246,9 +245,9 @@ Message _message(
   String? Function(String path)? contentUriFor,
   FileExists fileExists,
 ) {
-  final text = line.highlight && !line.fromMe
-      ? 'Mentioned you: ${line.text}'
-      : line.text;
+  // Highlights raise priority only. Keep the complete message visible rather
+  // than spending its limited notification space on a "Mentioned you" label.
+  final text = line.text;
   final image = line.imagePath;
   final uri = image != null && contentUriFor != null && fileExists(image)
       ? contentUriFor(image)

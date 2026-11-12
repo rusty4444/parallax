@@ -279,8 +279,8 @@ or UnifiedPush distributor only ever see event and room IDs.
 - **Message text per type:** text and notices; emotes as “\* Name waves”; images,
   videos and stickers (“Image”, “Video”, “Sticker” or the caption); files as
   “📎 name”; “Voice message”; “📍 Location”; polls as “Poll: question”; reactions;
-  live location. Mentions and keyword highlights (push rule `highlight`) are marked
-  “Mentioned you: …” and raised in priority.
+  live location. Mentions and keyword highlights (push rule `highlight`) are raised
+  in priority without adding labels that obscure the message text.
 - **Media previews:** a decrypted image/sticker/video thumbnail, downloaded with
   strict size caps (3 MB for encrypted originals; server-scaled thumbnails for
   plaintext media), decoded with pixel bounds and re-encoded to a small JPEG in the

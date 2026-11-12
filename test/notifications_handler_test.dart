@@ -108,8 +108,9 @@ void main() {
         expect(messaging.person.name, 'Me');
         expect(messaging.messages!.single.person!.name, 'Alice');
         expect(messaging.messages!.single.person!.key, '@alice:example.org');
-        expect(messaging.messages!.single.text, 'Mentioned you: See you at 6');
+        expect(messaging.messages!.single.text, 'See you at 6');
         final details = android(room);
+        expect(details.subText, isNull);
         expect(details.visibility, NotificationVisibility.private);
         expect(details.groupKey, notificationGroupKey);
         expect(details.category, AndroidNotificationCategory.message);
