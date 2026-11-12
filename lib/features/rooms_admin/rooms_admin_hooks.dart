@@ -15,6 +15,8 @@ import 'knock_requests_screen.dart';
 import 'rooms_admin_features.dart';
 import 'start_chat_screen.dart';
 import 'user_profile_screen.dart';
+import '../call/call_features.dart';
+import '../call/call_screen.dart';
 
 /// True once [openStartChat] provides the full start-chat flow.
 const bool startChatAvailable = true;
@@ -130,7 +132,20 @@ Future<void> removeMessageWithReason(
 Future<void> Function(BuildContext context)? roomsAdminCallAction(
   BuildContext context,
   RoomHookContext ctx,
-) => null;
+) {
+  final calls = callFeaturesOf(ctx.backend);
+  if (calls == null ||
+      (ctx.room?.invited ?? false) ||
+      !calls.canJoinCall(ctx.roomId)) {
+    return null;
+  }
+  return (context) => openCallScreen(
+    context,
+    backend: ctx.backend,
+    roomId: ctx.roomId,
+    palette: ctx.palette,
+  );
+}
 
 /// Element X "Decline and block" for the invitation [roomId]: declines,
 /// optionally blocks the inviter and reports the room. Returns true when the

@@ -5,7 +5,10 @@ import '../chat_backend.dart';
 import '../feature_settings_scope.dart';
 import '../features/rich_timeline/rich_timeline_features.dart';
 import '../features/rich_timeline/rich_timeline_hooks.dart';
+import '../features/media/media_hooks.dart';
+import '../features/reactions/reaction_hooks.dart';
 import '../features/rich_timeline/timeline_widgets.dart';
+import '../features/rooms_admin/rooms_admin_hooks.dart';
 import '../hooks/registry.dart';
 import '../media_viewer.dart';
 import '../message_image.dart';
@@ -99,165 +102,188 @@ class MessageBubble extends StatelessWidget {
     final maxWidth =
         MediaQuery.sizeOf(context).width * 0.83 -
         (avatars ? senderAvatarSize + _avatarGap : 0);
-    final bubble = ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: mine
-              ? palette.bubble
-              : highlighted
-              ? Color.alphaBlend(
-                  palette.accent.withValues(alpha: 0.12),
-                  palette.surface,
-                )
-              : palette.surface,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(19),
-            topRight: const Radius.circular(19),
-            bottomLeft: Radius.circular(mine ? 19 : 5),
-            bottomRight: Radius.circular(mine ? 5 : 19),
-          ),
-          border: mine
-              ? null
-              : Border.all(
-                  color: highlighted
-                      ? palette.accent.withValues(alpha: 0.75)
-                      : palette.stroke,
-                  width: highlighted ? 1.5 : 1,
+    // Stickers render without bubble chrome, as in Element X.
+    final standalone = mediaEntryStandalone(
+      context,
+      hook,
+      onLongPress: onAction,
+    );
+    final bubble = standalone != null
+        ? ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: standalone,
+          )
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: mine
+                    ? palette.bubble
+                    : highlighted
+                    ? Color.alphaBlend(
+                        palette.accent.withValues(alpha: 0.12),
+                        palette.surface,
+                      )
+                    : palette.surface,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(19),
+                  topRight: const Radius.circular(19),
+                  bottomLeft: Radius.circular(mine ? 19 : 5),
+                  bottomRight: Radius.circular(mine ? 5 : 19),
                 ),
-        ),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            14,
-            compact ? 6 : 10,
-            14,
-            compact ? 5 : 8,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onDoubleTap: onHeart,
-                onLongPress: onAction,
-                behavior: HitTestBehavior.opaque,
+                border: mine
+                    ? null
+                    : Border.all(
+                        color: highlighted
+                            ? palette.accent.withValues(alpha: 0.75)
+                            : palette.stroke,
+                        width: highlighted ? 1.5 : 1,
+                      ),
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  14,
+                  compact ? 6 : 10,
+                  14,
+                  compact ? 5 : 8,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!mine && sender) ...[
-                      Text(
-                        entry.senderLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: palette.secondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                    ],
-                    if (entry.replyToId != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(
-                              color: palette.secondary,
-                              width: 3,
+                    GestureDetector(
+                      onDoubleTap: onHeart,
+                      onLongPress: onAction,
+                      behavior: HitTestBehavior.opaque,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!mine && sender) ...[
+                            Text(
+                              entry.senderLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: palette.secondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
-                          ),
-                        ),
-                        child: Text(
-                          replyPreview == null
-                              ? 'In reply to an earlier message'
-                              : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: mine ? palette.bubbleText : palette.muted,
-                            fontSize: 12,
-                          ),
+                            const SizedBox(height: 5),
+                          ],
+                          if (entry.replyToId != null) ...[
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  left: BorderSide(
+                                    color: palette.secondary,
+                                    width: 3,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                replyPreview == null
+                                    ? 'In reply to an earlier message'
+                                    : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: mine
+                                      ? palette.bubbleText
+                                      : palette.muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                          ],
+                          if (special != null)
+                            special
+                          else ...[
+                            if (entry.isImage) ...[
+                              MessageImage(
+                                backend: backend,
+                                palette: palette,
+                                roomId: roomId,
+                                eventId: entry.id,
+                              ),
+                              const SizedBox(height: 4),
+                            ],
+                            if (entry.isAttachment)
+                              _AttachmentRow(
+                                entry: entry,
+                                backend: backend,
+                                roomId: roomId,
+                                palette: palette,
+                              )
+                            else if (entry.body.isNotEmpty)
+                              buildMessageText(
+                                context,
+                                hook,
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 15,
+                                  height: 1.35,
+                                ),
+                              ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (entry.reactions.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 3,
+                        children: [
+                          for (final reaction in entry.reactions)
+                            GestureDetector(
+                              // Element X: long-press a reaction to see who reacted.
+                              onLongPress: () => showReactionSummaryForEntry(
+                                context,
+                                hook,
+                                emoji: reaction.emoji,
+                              ),
+                              child: ActionChip(
+                                tooltip: reaction.mine
+                                    ? 'Remove your ${reaction.emoji} reaction'
+                                    : 'React with ${reaction.emoji}',
+                                label: Text(
+                                  '${reaction.emoji} ${reaction.count}',
+                                ),
+                                backgroundColor: reaction.mine
+                                    ? palette.accent.withValues(alpha: 0.25)
+                                    : palette.background,
+                                onPressed: () => onReaction(reaction.emoji),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    ...footers,
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.bottomRight,
+                      child: Text(
+                        [
+                          if (entry.edited && !entry.redacted) '(edited)',
+                          TimeOfDay.fromDateTime(
+                            entry.time.toLocal(),
+                          ).format(context),
+                        ].join('  '),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: mine
+                              ? palette.bubbleText.withValues(alpha: 0.77)
+                              : palette.muted,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                    ],
-                    if (special != null)
-                      special
-                    else ...[
-                      if (entry.isImage) ...[
-                        MessageImage(
-                          backend: backend,
-                          palette: palette,
-                          roomId: roomId,
-                          eventId: entry.id,
-                        ),
-                        const SizedBox(height: 4),
-                      ],
-                      if (entry.isAttachment)
-                        _AttachmentRow(
-                          entry: entry,
-                          backend: backend,
-                          roomId: roomId,
-                          palette: palette,
-                        )
-                      else if (entry.body.isNotEmpty)
-                        buildMessageText(
-                          context,
-                          hook,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 15,
-                            height: 1.35,
-                          ),
-                        ),
-                    ],
+                    ),
                   ],
                 ),
               ),
-              if (entry.reactions.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 5,
-                  runSpacing: 3,
-                  children: [
-                    for (final reaction in entry.reactions)
-                      ActionChip(
-                        tooltip: reaction.mine
-                            ? 'Remove your ${reaction.emoji} reaction'
-                            : 'React with ${reaction.emoji}',
-                        label: Text('${reaction.emoji} ${reaction.count}'),
-                        backgroundColor: reaction.mine
-                            ? palette.accent.withValues(alpha: 0.25)
-                            : palette.background,
-                        onPressed: () => onReaction(reaction.emoji),
-                      ),
-                  ],
-                ),
-              ],
-              ...footers,
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  [
-                    if (entry.edited && !entry.redacted) '(edited)',
-                    TimeOfDay.fromDateTime(
-                      entry.time.toLocal(),
-                    ).format(context),
-                  ].join('  '),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: mine
-                        ? palette.bubbleText.withValues(alpha: 0.77)
-                        : palette.muted,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+            ),
+          );
     final row = avatars
         ? Row(
             mainAxisSize: MainAxisSize.min,
@@ -266,13 +292,22 @@ class MessageBubble extends StatelessWidget {
               SizedBox(
                 width: senderAvatarSize,
                 child: sender
-                    ? UserAvatar(
-                        key: ValueKey('avatar-${entry.id}'),
-                        name: entry.senderLabel,
-                        url: entry.senderAvatar,
-                        backend: backend,
-                        palette: palette,
-                        size: senderAvatarSize,
+                    ? GestureDetector(
+                        onTap: () => openUserProfile(
+                          context,
+                          backend,
+                          palette,
+                          entry.sender,
+                          roomId: roomId,
+                        ),
+                        child: UserAvatar(
+                          key: ValueKey('avatar-${entry.id}'),
+                          name: entry.senderLabel,
+                          url: entry.senderAvatar,
+                          backend: backend,
+                          palette: palette,
+                          size: senderAvatarSize,
+                        ),
                       )
                     : null,
               ),

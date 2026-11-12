@@ -11,6 +11,7 @@ import '../../feature_settings_scope.dart';
 import '../../room_join_dialog.dart';
 import '../../room_screen.dart';
 import '../../widgets.dart';
+import '../threads/timeline_navigation.dart';
 import 'matrix_links.dart';
 import 'platform_features.dart';
 
@@ -67,6 +68,22 @@ void _pushRoom(
   );
 }
 
+/// Focuses the room's timeline on a permalinked event before the room opens.
+/// Failure is not fatal: the room then opens at its live end.
+Future<void> _focusEvent(
+  ChatBackend backend,
+  String roomId,
+  String? eventId,
+) async {
+  final navigation = timelineNavigationOf(backend);
+  if (eventId == null || navigation == null) return;
+  try {
+    await navigation.openRoomAt(roomId, eventId);
+  } catch (_) {
+    // Opens normally below.
+  }
+}
+
 void _snack(BuildContext context, String message) => ScaffoldMessenger.maybeOf(
   context,
 )?.showSnackBar(SnackBar(content: Text(message)));
@@ -82,6 +99,8 @@ Future<void> _openRoomLink(
     if (!link.isAlias) {
       for (final room in backend.rooms) {
         if (room.id == link.roomIdOrAlias && !room.invited) {
+          await _focusEvent(backend, room.id, link.eventId);
+          if (!context.mounted || !owner.isCurrent) return;
           openRoomRoute(context, backend, palette, room.id);
           return;
         }
@@ -112,6 +131,8 @@ Future<void> _openRoomLink(
       ),
     );
     if (roomId != null && context.mounted && owner.isCurrent) {
+      await _focusEvent(backend, roomId, link.eventId);
+      if (!context.mounted || !owner.isCurrent) return;
       openRoomRoute(context, backend, palette, roomId);
     }
   } finally {

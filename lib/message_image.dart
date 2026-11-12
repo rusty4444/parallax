@@ -9,6 +9,7 @@ import 'feature_settings_scope.dart';
 import 'features/media/media_content.dart';
 import 'features/media/media_features.dart';
 import 'media_viewer.dart';
+import 'media_preview_policy.dart';
 
 /// Animated GIF/WebP originals up to this size play in the timeline; larger
 /// ones show their (static) thumbnail.
@@ -99,9 +100,7 @@ class _MessageImageState extends State<MessageImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _autoLoad =
-        FeatureSettingsScope.maybeOf(context)?.preferences.autoLoadMedia ??
-        true;
+    _autoLoad = autoLoadMediaFor(context, widget.backend, widget.roomId);
     final animate = _wantsAnimation(context);
     if (animate != _animate) {
       _animate = animate;

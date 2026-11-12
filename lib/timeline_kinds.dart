@@ -32,8 +32,6 @@ const callTimelineTypes = {
   'm.call.invite',
   'm.rtc.notification',
   'org.matrix.msc4075.rtc.notification',
-  'org.matrix.msc4075.call.notify',
-  'm.call.notify',
 };
 
 bool isTimelineVisibleType(String type) =>

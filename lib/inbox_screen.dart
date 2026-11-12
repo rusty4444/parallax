@@ -99,25 +99,43 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _waitingForCreatedRoom = false;
 
   Future<void> _showInvitation(ChatRoom room) async {
-    final choice = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Join ${room.name}?'),
         content: const Text('You were invited to this Matrix room.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, 'block'),
+            child: const Text('Decline and block'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'decline'),
             child: const Text('Decline invite'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(context, 'join'),
             child: const Text('Join room'),
           ),
         ],
       ),
     );
     if (choice == null || !mounted || !_owner.isCurrent) return;
-    await (choice ? _acceptInvite(room) : _declineInvite(room, confirm: false));
+    if (choice == 'block') {
+      // Element X "Decline and block": optionally report, block the
+      // inviter, then decline.
+      await showDeclineAndBlock(
+        context,
+        widget.backend,
+        widget.palette,
+        room.id,
+        roomName: room.name,
+      );
+      return;
+    }
+    await (choice == 'join'
+        ? _acceptInvite(room)
+        : _declineInvite(room, confirm: false));
   }
 
   Future<void> _acceptInvite(ChatRoom room) async {

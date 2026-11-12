@@ -112,6 +112,7 @@ class ChatRoom {
     this.tags = const [],
     this.notificationMode = RoomNotificationMode.allMessages,
     this.isSpace = false,
+    this.isPublic = false,
     this.previewSender,
     this.canonicalAlias,
   });
@@ -143,6 +144,9 @@ class ChatRoom {
 
   /// The room is a Space (`m.room.create` type `m.space`).
   final bool isSpace;
+
+  /// Anyone can join (join rule `public`). Drives "media in private rooms".
+  final bool isPublic;
 
   /// Display name of the last message's sender, for group previews.
   final String? previewSender;
@@ -179,6 +183,7 @@ class ChatRoom {
     tags: tags ?? this.tags,
     notificationMode: notificationMode ?? this.notificationMode,
     isSpace: isSpace,
+    isPublic: isPublic,
     previewSender: previewSender,
     canonicalAlias: canonicalAlias,
   );

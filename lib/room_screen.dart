@@ -8,6 +8,7 @@ import 'attachment_picker.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'features/reactions/reaction_hooks.dart';
+import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'hooks/registry.dart';
 import 'media_viewer.dart';
 import 'message_draft_store.dart';
@@ -558,7 +559,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     if (!reactionsAllowed(_roomContext(_currentRoom))) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Encrypted reactions are unavailable in this build.'),
+          content: Text('You can’t react to messages in this room.'),
         ),
       );
       return;
@@ -662,7 +663,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                 title: const Text('Save attachment'),
                 onTap: () => Navigator.pop(sheetContext, 'save'),
               ),
-            if (entry.mine && !entry.isImage && !entry.isAttachment)
+            if (entry.mine &&
+                const {
+                  EntryKind.text,
+                  EntryKind.emote,
+                  EntryKind.notice,
+                }.contains(entry.kind))
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit message'),
@@ -1019,13 +1025,17 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                     color: p.secondary,
                                   ),
                                   const SizedBox(width: 4),
-                                  Text(
-                                    room?.encrypted == true
-                                        ? 'Encrypted room'
-                                        : 'Encryption not enabled',
-                                    style: TextStyle(
-                                      color: p.muted,
-                                      fontSize: 11,
+                                  Flexible(
+                                    child: Text(
+                                      room?.encrypted == true
+                                          ? 'Encrypted room'
+                                          : 'Encryption not enabled',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: p.muted,
+                                        fontSize: 11,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1229,6 +1239,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         context,
                         roomCtx,
                       ),
+                      mentionSource: richTimelineMentionSource(roomCtx),
                       controller: _draft,
                       sendContext: _sendContext,
                       onAcknowledged: (textCleared) =>

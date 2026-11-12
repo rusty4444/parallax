@@ -2979,6 +2979,7 @@ class MatrixBackend extends ChatBackend
         matrix.PushRuleState.dontNotify => RoomNotificationMode.mute,
       },
       isSpace: room.isSpace,
+      isPublic: room.joinRules == matrix.JoinRules.public,
       previewSender: previewSender,
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       id: room.id,
@@ -3026,6 +3027,10 @@ class MatrixBackend extends ChatBackend
                 isTimelineVisibleType(event.type) &&
                 event.relationshipType != matrix.RelationshipTypes.edit &&
                 event.relationshipType != matrix.RelationshipTypes.thread &&
+                // Undecryptable relations (reactions, poll votes) keep their
+                // cleartext relation; aggregate them, never show a row.
+                event.relationshipType != matrix.RelationshipTypes.reaction &&
+                event.relationshipType != matrix.RelationshipTypes.reference &&
                 (event.status.isSynced ||
                     !queuedIds.contains(event.transactionId ?? event.eventId)),
           )

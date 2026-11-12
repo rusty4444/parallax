@@ -11,6 +11,7 @@ import 'media_bubbles.dart';
 import 'media_content.dart';
 import 'media_features.dart';
 import 'media_viewer_pager.dart';
+import '../../media_preview_policy.dart';
 
 /// Element X "Media and files": images and videos in a grid, and documents,
 /// audio and voice messages in a list, newest first, paginated from the
@@ -378,9 +379,7 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen>
 
   Widget _mediaTab() {
     final media = _media;
-    final autoLoad =
-        FeatureSettingsScope.maybeOf(context)?.preferences.autoLoadMedia ??
-        true;
+    final autoLoad = autoLoadMediaFor(context, widget.backend, widget.roomId);
     return NotificationListener<ScrollNotification>(
       onNotification: _nearEnd,
       child: CustomScrollView(

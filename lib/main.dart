@@ -530,19 +530,27 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                     ),
                   ),
                 Expanded(
-                  child: SecurityOverlay(
-                    backend: _backend,
-                    child: _authenticated
-                        ? wrapSignedInApp(
-                            context,
-                            AppHookContext(
-                              backend: _backend,
-                              palette: p,
-                              navigatorKey: _navigatorKey,
-                            ),
-                            child ?? const SizedBox.shrink(),
-                          )
-                        : child ?? const SizedBox.shrink(),
+                  child: Builder(
+                    builder: (context) {
+                      final hook = AppHookContext(
+                        backend: _backend,
+                        palette: p,
+                        navigatorKey: _navigatorKey,
+                      );
+                      final overlay = SecurityOverlay(
+                        backend: _backend,
+                        child: _authenticated
+                            ? wrapSignedInApp(
+                                context,
+                                hook,
+                                child ?? const SizedBox.shrink(),
+                              )
+                            : child ?? const SizedBox.shrink(),
+                      );
+                      return _authenticated
+                          ? wrapSignedInAppLock(context, hook, overlay)
+                          : overlay;
+                    },
                   ),
                 ),
               ],

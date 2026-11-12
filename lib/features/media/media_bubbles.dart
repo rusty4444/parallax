@@ -16,9 +16,10 @@ import 'media_actions.dart';
 import 'media_content.dart';
 import 'media_features.dart';
 import 'voice_waveform.dart';
+import '../../media_preview_policy.dart';
 
-bool _autoLoad(BuildContext context) =>
-    FeatureSettingsScope.maybeOf(context)?.preferences.autoLoadMedia ?? true;
+bool _autoLoad(BuildContext context, EntryHookContext ctx) =>
+    autoLoadMediaFor(context, ctx.backend, ctx.roomId);
 
 void _open(BuildContext context, EntryHookContext ctx) => unawaited(
   openMediaViewer(
@@ -224,7 +225,7 @@ class VideoMessageBody extends StatelessWidget {
                         placeholderIcon: Icons.movie_outlined,
                         width: size.width,
                         height: size.height,
-                        enabled: _autoLoad(context),
+                        enabled: _autoLoad(context, ctx),
                       )
                     else
                       ColoredBox(
@@ -678,7 +679,7 @@ class StickerMessageBody extends StatelessWidget {
               width: width,
               height: height,
               fit: BoxFit.contain,
-              enabled: _autoLoad(context),
+              enabled: _autoLoad(context, ctx),
             ),
           ),
         ),

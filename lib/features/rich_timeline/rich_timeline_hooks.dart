@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../chat_backend.dart';
 import '../../hooks/hook_types.dart';
+import '../platform/matrix_link_opener.dart';
 import 'mention_suggestions.dart';
 import 'message_actions.dart';
 import 'permalinks.dart';
@@ -47,7 +48,17 @@ Future<void> openMatrixPermalink(
   BuildContext context,
   EntryHookContext ctx,
   MatrixPermalink link,
-) => openTimelineLink(context, link.uri);
+) async {
+  // Route in-app (rooms, users, event permalinks); fall back to the browser
+  // for anything the platform module does not recognise.
+  final handled = await openMatrixLink(
+    context,
+    ctx.backend,
+    ctx.palette,
+    link.uri,
+  );
+  if (!handled && context.mounted) await openTimelineLink(context, link.uri);
+}
 
 /// Mention suggestions for the composer of [ctx]'s room.
 ///

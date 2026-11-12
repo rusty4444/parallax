@@ -36,7 +36,10 @@ List<MessageActionItem> messageActionsFor(
   ...pollMessageActions(context, ctx),
   ...mediaMessageActions(context, ctx),
   ...richTimelineMessageActions(context, ctx),
-  ...roomsAdminMessageActions(context, ctx),
+  // Moderator removal comes from the reactions module (live power levels);
+  // roomsAdminMessageActions duplicates it once room details were cached.
+  if (reactionMessageActions(context, ctx).isEmpty)
+    ...roomsAdminMessageActions(context, ctx),
 ];
 
 List<ComposerAttachmentAction> composerAttachmentsFor(
@@ -75,23 +78,33 @@ List<Widget> settingsSectionsFor(
   ...callSettingsSections(context, ctx),
   ...mediaSettingsSections(context, ctx),
   ...platformSettingsSections(context, ctx),
+  ...messageSearchSettingsSections(context, ctx),
 ];
 
-/// Wraps the signed-in app. Outermost first: app lock covers everything.
+/// Wraps the signed-in app (inside the verification overlay). The app lock
+/// is applied separately by [wrapSignedInAppLock], outside the overlay, so
+/// incoming verification prompts cannot appear above the lock screen.
 Widget wrapSignedInApp(
   BuildContext context,
   AppHookContext ctx,
   Widget child,
-) => wrapWithAppLock(
+) => wrapWithSecurityGate(
   context,
   ctx,
-  wrapWithSecurityGate(
+  wrapWithCallOverlay(
     context,
     ctx,
-    wrapWithCallOverlay(
+    wrapWithMessageSearchIndex(
       context,
       ctx,
       wrapWithPlatformIntents(context, ctx, child),
     ),
   ),
 );
+
+/// Outermost signed-in wrapper: the PIN/biometric app lock.
+Widget wrapSignedInAppLock(
+  BuildContext context,
+  AppHookContext ctx,
+  Widget child,
+) => wrapWithAppLock(context, ctx, child);
