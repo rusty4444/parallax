@@ -3713,7 +3713,9 @@ class MatrixBackend extends ChatBackend
       id: room.id,
       name: name,
       preview: event?.type == matrix.EventTypes.Message
-          ? event!.body
+          // SDK body substitutes an "Unknown message format" error when an
+          // uncaptioned media event has no body; text is the raw body or ''.
+          ? event!.text
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
           : '',
@@ -3876,7 +3878,7 @@ class MatrixBackend extends ChatBackend
           ? '🔒 Unable to decrypt this message'
           : kind == EntryKind.state || kind == EntryKind.call
           ? _fallbackBody(display)
-          : visibleMessageBody(display.body, isReply: replyToId != null),
+          : visibleMessageBody(display.text, isReply: replyToId != null),
       time: event.originServerTs,
       mine: event.senderId == client.userID,
       isImage:

@@ -409,6 +409,29 @@ void main() {
       await h.features.loadEvent(_roomId, r'$pin');
       expect(h.requests, hasLength(1));
     });
+
+    test('loadEvent leaves an uncaptioned image body empty', () async {
+      h.respond = (request) async => http.Response(
+        jsonEncode({
+          'type': 'm.room.message',
+          'event_id': r'$image',
+          'sender': '@whatsapp_lid-123:matrix.example',
+          'room_id': _roomId,
+          'origin_server_ts': 5000,
+          'content': {
+            'msgtype': 'm.image',
+            'url': 'mxc://matrix.example/forecast',
+          },
+        }),
+        200,
+      );
+
+      final entry = await h.features.loadEvent(_roomId, r'$image');
+
+      expect(entry!.kind, EntryKind.image);
+      expect(entry.body, isEmpty);
+      expect(messagePreviewText(entry), 'Image');
+    });
   });
 }
 

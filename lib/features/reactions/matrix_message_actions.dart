@@ -335,7 +335,7 @@ ChatEntry entryFromSdkEvent(matrix.Event event, String? ownUserId) {
     body = '🔒 Unable to decrypt this message';
   } else if (event.type == matrix.EventTypes.Message ||
       event.type == matrix.EventTypes.Sticker) {
-    body = visibleMessageBody(event.body, isReply: replyTo != null);
+    body = visibleMessageBody(event.text, isReply: replyTo != null);
   } else {
     try {
       body = event.calcLocalizedBodyFallback(

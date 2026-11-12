@@ -286,4 +286,38 @@ void main() {
 
     expect(h.readMarkers, isEmpty);
   });
+
+  test('uncaptioned bridged images do not gain an SDK error caption', () async {
+    Map<String, Object?> image(String id, int ts, {String? body}) => {
+      ..._event(id, ts),
+      'content': {
+        'msgtype': 'm.image',
+        'url': 'mxc://matrix.example/$id',
+        'body': ?body,
+      },
+    };
+    final h = _Harness(
+      notificationCount: 0,
+      // Cached events are newest first.
+      cached: [
+        image(r'$missing-body', 3000),
+        image(r'$empty-body', 2000, body: ''),
+        image(r'$captioned', 1000, body: 'Sunday forecast'),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+
+    await h.backend.openRoom(_roomId);
+
+    expect(h.backend.messages.map((entry) => entry.id), [
+      r'$captioned',
+      r'$empty-body',
+      r'$missing-body',
+    ]);
+    expect(h.backend.messages.map((entry) => entry.body), [
+      'Sunday forecast',
+      '',
+      '',
+    ]);
+  });
 }
