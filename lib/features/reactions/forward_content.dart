@@ -33,14 +33,15 @@ class ForwardPayload {
 }
 
 /// Builds the content to forward, or null when [entry] cannot be forwarded
-/// (local echo, redacted, state, poll, call, undecryptable …), as in Element X.
+/// (redacted, state, poll, call, undecryptable …).
 ///
-/// Media is forwarded by re-sending the same content, including encrypted
+/// Forwarding re-sends content, so own local echoes do not need a server event
+/// ID. Media is forwarded by re-sending the same content, including encrypted
 /// file info, so nothing is downloaded or re-uploaded. Relations (reply,
 /// thread, edit) and mentions are dropped so the copy stands alone and does
 /// not ping anyone in the target room.
 ForwardPayload? forwardPayloadFor(ChatEntry entry) {
-  if (entry.redacted || !entry.id.startsWith(r'$')) return null;
+  if (entry.redacted) return null;
   final type = entry.eventType;
   if (type != 'm.room.message' && type != 'm.sticker') return null;
   final source = entry.content;

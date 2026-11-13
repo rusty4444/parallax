@@ -777,8 +777,8 @@ void main() {
     final reactionsY = tester.getTopLeft(find.byTooltip('React ❤️')).dy;
     final forwardY = tester.getTopLeft(find.text('Forward')).dy;
     final moreY = tester.getTopLeft(find.text('More')).dy;
-    expect(replyY, lessThan(reactionsY));
-    expect(reactionsY, lessThan(forwardY));
+    expect(reactionsY, lessThan(replyY));
+    expect(replyY, lessThan(forwardY));
     expect(forwardY, lessThan(moreY));
 
     await tester.tap(find.text('More'));
@@ -797,6 +797,32 @@ void main() {
     expect(find.text('More'), findsOneWidget);
     expect(find.text('Open thread'), findsNothing);
     expect(find.text('Read receipts'), findsNothing);
+  });
+
+  testWidgets('own local messages show Forward in compact actions', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'local-own-message',
+          sender: '@me:s',
+          body: 'Forward my message',
+          time: DateTime(2026),
+          mine: true,
+          content: const {'msgtype': 'm.text', 'body': 'Forward my message'},
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Forward my message'));
+    await tester.pumpAndSettle();
+    expect(find.text('Forward'), findsOneWidget);
+    await tester.tap(find.text('Forward'));
+    await tester.pumpAndSettle();
+    expect(find.text('Forward message'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 
   testWidgets('+ picker reaction leads a persisted six-emoji recent row', (

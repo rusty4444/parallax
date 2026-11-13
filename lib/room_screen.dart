@@ -717,6 +717,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   Future<void> _showActions(ChatEntry entry) async {
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
     Haptics.longPress();
+    final unsent = !entry.id.startsWith(r'$');
     final hookActions = messageActionsFor(context, _entryContext(entry));
     final forwardAction = hookActions
         .where((item) => item.id == 'reactions.forward')
@@ -766,11 +767,6 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
               child: ListView(
                 shrinkWrap: true,
                 children: [
-                  ListTile(
-                    leading: const Icon(Icons.reply_rounded),
-                    title: const Text('Reply'),
-                    onTap: () => Navigator.pop(sheetContext, 'reply'),
-                  ),
                   if (reactionsAllowed(_roomContext(_currentRoom)))
                     _QuickReactions(
                       palette: widget.palette,
@@ -779,6 +775,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           ? () => Navigator.pop(sheetContext, _moreReactions)
                           : null,
                     ),
+                  ListTile(
+                    leading: const Icon(Icons.reply_rounded),
+                    title: const Text('Reply'),
+                    onTap: () => Navigator.pop(sheetContext, 'reply'),
+                  ),
                   if (forwardAction != null) hookTile(forwardAction),
                   if (!expanded && hasMoreActions)
                     ListTile(
@@ -832,7 +833,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                     if (entry.mine)
                       ListTile(
                         leading: const Icon(Icons.delete_outline),
-                        title: const Text('Delete message'),
+                        title: Text(
+                          unsent ? 'Discard unsent message' : 'Delete message',
+                        ),
                         onTap: () => Navigator.pop(sheetContext, 'delete'),
                       ),
                     for (final item in remainingHookActions) hookTile(item),
@@ -933,9 +936,13 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Delete this message?'),
-          content: const Text(
-            'This removes the message for everyone in the room.',
+          title: Text(
+            unsent ? 'Discard unsent message?' : 'Delete this message?',
+          ),
+          content: Text(
+            unsent
+                ? 'This removes the unsent message only from this device.'
+                : 'This removes the message for everyone in the room.',
           ),
           actions: [
             TextButton(
@@ -944,7 +951,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Delete'),
+              child: Text(unsent ? 'Discard' : 'Delete'),
             ),
           ],
         ),
@@ -955,7 +962,13 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       } catch (_) {
         if (mounted && _owner.isCurrent) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Couldn’t delete this message.')),
+            SnackBar(
+              content: Text(
+                unsent
+                    ? 'Couldn’t discard this unsent message.'
+                    : 'Couldn’t delete this message.',
+              ),
+            ),
           );
         }
       }

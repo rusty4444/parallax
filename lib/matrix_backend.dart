@@ -1924,6 +1924,18 @@ class MatrixBackend extends ChatBackend
         event.type != matrix.EventTypes.Message) {
       throw StateError('Only your own messages can be deleted');
     }
+    if (!event.status.isSent) {
+      // Failed local echoes have no server event to redact. cancelSend removes
+      // the transaction from the SDK database and every open timeline.
+      await event.cancelSend();
+      // The SDK broadcasts its timeline removal on an async stream. Yield once
+      // so that callback runs before projecting the now-removed transaction.
+      await Future<void>.delayed(Duration.zero);
+      if (identical(_timeline, timeline) && _activeRoomId == roomId) {
+        _refreshMessages(timeline);
+      }
+      return;
+    }
     await room.redactEvent(eventId, redactAllEdits: true);
   }
 
@@ -3801,28 +3813,42 @@ class MatrixBackend extends ChatBackend
         ? -1
         : events.indexWhere((event) => event.eventId == _focusedEventId);
     if (focus > 0) events = events.sublist(focus);
+    final visible = events
+        .take(_visibleMessageLimit)
+        .where(
+          (event) =>
+              isTimelineVisibleType(event.type) &&
+              event.relationshipType != matrix.RelationshipTypes.edit &&
+              event.relationshipType != matrix.RelationshipTypes.thread &&
+              // Undecryptable relations (reactions, poll votes) keep their
+              // cleartext relation; aggregate them, never show a row.
+              event.relationshipType != matrix.RelationshipTypes.reaction &&
+              event.relationshipType != matrix.RelationshipTypes.reference &&
+              (event.status.isSynced ||
+                  !queuedIds.contains(event.transactionId ?? event.eventId)),
+        )
+        .toList();
+    final ordered = _mergeUnsentByTime(visible);
     _messages = List.unmodifiable(
-      events
-          .take(_visibleMessageLimit)
-          .where(
-            (event) =>
-                isTimelineVisibleType(event.type) &&
-                event.relationshipType != matrix.RelationshipTypes.edit &&
-                event.relationshipType != matrix.RelationshipTypes.thread &&
-                // Undecryptable relations (reactions, poll votes) keep their
-                // cleartext relation; aggregate them, never show a row.
-                event.relationshipType != matrix.RelationshipTypes.reaction &&
-                event.relationshipType != matrix.RelationshipTypes.reference &&
-                (event.status.isSynced ||
-                    !queuedIds.contains(event.transactionId ?? event.eventId)),
-          )
-          .map((event) => _projectEntry(event, timeline))
-          .toList()
-          .reversed,
+      ordered.map((event) => _projectEntry(event, timeline)).toList().reversed,
     );
     _requestMissingSenders(timeline, events.take(_visibleMessageLimit));
     if (_focusedEventId == null) _scheduleMarkRead();
     notifyListeners();
+  }
+
+  /// The SDK prefixes its newest-first timeline with all sending/failed local
+  /// echoes. Keep server events in their original order, but merge those echoes
+  /// by timestamp so an old failure is not pinned below newer room messages.
+  static List<matrix.Event> _mergeUnsentByTime(List<matrix.Event> newestFirst) {
+    final merged = newestFirst.where((event) => event.status.isSynced).toList();
+    for (final event in newestFirst.where((event) => !event.status.isSynced)) {
+      final index = merged.indexWhere(
+        (candidate) => candidate.originServerTs.isBefore(event.originServerTs),
+      );
+      merged.insert(index < 0 ? merged.length : index, event);
+    }
+    return merged;
   }
 
   ChatEntry _projectEntry(matrix.Event event, matrix.Timeline? timeline) {

@@ -690,7 +690,7 @@ void main() {
     final backend = FakeBackend()
       ..entries = [
         ChatEntry(
-          id: 'mine',
+          id: r'$mine',
           sender: '@me:example.org',
           body: 'Old text',
           time: DateTime(2026),
@@ -722,7 +722,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'New text');
     await tester.tap(find.byTooltip('Send message'));
     await tester.pump();
-    expect(backend.lastEditId, 'mine');
+    expect(backend.lastEditId, r'$mine');
     expect(backend.lastMessage, 'New text');
 
     await tester.longPress(find.text('Old text'));
@@ -752,7 +752,49 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pump();
-    expect(backend.lastRedactedId, 'mine');
+    expect(backend.lastRedactedId, r'$mine');
+  });
+
+  testWidgets('failed local message offers a local discard action', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'txn-failed',
+          sender: '@me:example.org',
+          body: 'Failed last night',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.parallax),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Failed last night'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('More'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Discard unsent message'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Discard unsent message'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard unsent message?'), findsOneWidget);
+    expect(find.textContaining('only from this device'), findsOneWidget);
+    await tester.tap(find.text('Discard'));
+    await tester.pump();
+    expect(backend.lastRedactedId, 'txn-failed');
   });
 
   testWidgets('file attachment has a save action and composer picker', (

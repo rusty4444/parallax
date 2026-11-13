@@ -175,7 +175,7 @@ void main() {
         'Forward',
         'Unpin',
       ]);
-      expect(labels(_entry('local-echo')), isEmpty);
+      expect(labels(_entry('local-echo')), ['Forward']);
       expect(labels(_entry(r'$c', kind: EntryKind.state)), isEmpty);
       backend.perms = const MessageActionPermissions(
         canReact: true,

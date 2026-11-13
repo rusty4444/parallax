@@ -27,6 +27,7 @@ Map<String, Object?> _event(
 class _Database extends Fake implements matrix.DatabaseApi {
   /// Locally cached timeline, newest first (as the SDK stores it).
   List<Map<String, Object?>> cached = const [];
+  final removed = <(String, String)>[];
 
   @override
   Future<List<matrix.Event>> getEventList(
@@ -63,6 +64,12 @@ class _Database extends Fake implements matrix.DatabaseApi {
     String roomId,
     matrix.BasicEvent event,
   ) async {}
+
+  @override
+  Future<void> removeEvent(String eventId, String roomId) async {
+    removed.add((eventId, roomId));
+    cached = cached.where((event) => event['event_id'] != eventId).toList();
+  }
 
   @override
   Future<void> close() async {}
@@ -113,7 +120,7 @@ class _Harness {
     bool markedUnread = false,
     bool publicReceipts = true,
   }) {
-    final db = _Database()..cached = cached;
+    db = _Database()..cached = cached;
     client = _Client(db, requests);
     room = matrix.Room(
       id: _roomId,
@@ -138,6 +145,7 @@ class _Harness {
   }
 
   final requests = <_Request>[];
+  late final _Database db;
   late final _Client client;
   late final matrix.Room room;
   late final MatrixBackend backend;
@@ -285,6 +293,51 @@ void main() {
     await _settle();
 
     expect(h.readMarkers, isEmpty);
+  });
+
+  test('failed local echoes merge into timeline time order', () async {
+    final h = _Harness(
+      cached: [
+        _event('txn-late', 12000, sender: _me, status: -2),
+        _event('txn-early', 10000, sender: _me, status: -2),
+        _event(r'$newer', 11000),
+        _event(r'$older', 9000),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+
+    await h.backend.openRoom(_roomId);
+
+    expect(h.backend.messages.map((entry) => entry.id), [
+      r'$older',
+      'txn-early',
+      r'$newer',
+      'txn-late',
+    ]);
+  });
+
+  test('failed own message is discarded locally instead of redacted', () async {
+    final h = _Harness(
+      cached: [
+        _event(r'$newest', 9000),
+        _event('txn-failed', 8000, sender: _me, status: -2),
+        _event(r'$older', 7000),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+    await h.backend.openRoom(_roomId);
+
+    await h.backend.redactMessage(_roomId, 'txn-failed');
+
+    expect(h.db.removed, [('txn-failed', _roomId)]);
+    expect(
+      h.backend.messages.any((entry) => entry.id == 'txn-failed'),
+      isFalse,
+    );
+    expect(
+      h.requests.where((request) => request.path.contains('/redact')),
+      isEmpty,
+    );
   });
 
   test('uncaptioned bridged images do not gain an SDK error caption', () async {

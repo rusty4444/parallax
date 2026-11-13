@@ -91,8 +91,13 @@ void main() {
       expect(payload.content['msgtype'], 'm.image');
     });
 
-    test('rejects what Element X cannot forward', () {
-      expect(forwardPayloadFor(entry(id: 'local-txn')), isNull);
+    test('own local echoes forward their content without a server ID', () {
+      final payload = forwardPayloadFor(entry(id: 'local-txn'))!;
+      expect(payload.type, 'm.room.message');
+      expect(payload.content, {'msgtype': 'm.text', 'body': 'hi'});
+    });
+
+    test('rejects content that cannot be forwarded', () {
       expect(forwardPayloadFor(entry(redacted: true)), isNull);
       expect(
         forwardPayloadFor(
