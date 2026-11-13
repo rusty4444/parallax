@@ -349,81 +349,92 @@ void main() {
     expect(backend.debugRoomProjections, before + 1);
   });
 
-  test('a shown named group loads its four-person avatar stack', () async {
-    const id = '!group:example.org';
-    final r = matrix.Room(
-      id: id,
-      client: client,
-      summary: matrix.RoomSummary.fromJson({
-        'm.heroes': <String>[],
-        'm.joined_member_count': 5,
-        'm.invited_member_count': 0,
-      }),
-    );
-    r.setState(
-      matrix.Event(
-        type: matrix.EventTypes.RoomName,
-        stateKey: '',
+  test(
+    'a shown direct-marked group loads its four-person avatar stack',
+    () async {
+      const id = '!group:example.org';
+      final r = matrix.Room(
+        id: id,
+        client: client,
+        summary: matrix.RoomSummary.fromJson({
+          'm.heroes': <String>[],
+          'm.joined_member_count': 5,
+          'm.invited_member_count': 0,
+        }),
+      );
+      r.setState(
+        matrix.Event(
+          type: matrix.EventTypes.RoomName,
+          stateKey: '',
+          senderId: '@meta_1:example.org',
+          content: const {'name': '#FAM'},
+          room: r,
+          eventId: r'$room-name',
+          originServerTs: DateTime(2026, 11, 12),
+        ),
+      );
+      r.lastEvent = matrix.Event(
+        type: matrix.EventTypes.Message,
         senderId: '@meta_1:example.org',
-        content: const {'name': '#FAM'},
+        content: const {'msgtype': 'm.text', 'body': 'Hello family'},
         room: r,
-        eventId: r'$room-name',
-        originServerTs: DateTime(2026, 11, 12),
-      ),
-    );
-    r.lastEvent = matrix.Event(
-      type: matrix.EventTypes.Message,
-      senderId: '@meta_1:example.org',
-      content: const {'msgtype': 'm.text', 'body': 'Hello family'},
-      room: r,
-      eventId: r'$group-message',
-      originServerTs: DateTime(2026, 11, 13),
-    );
-    client.rooms.add(r);
-    serverMembers[id] = [
-      for (var i = 1; i <= 4; i++)
-        {
-          'type': 'm.room.member',
-          'state_key': '@meta_$i:example.org',
-          'sender': '@meta_$i:example.org',
-          'content': {
-            'membership': 'join',
-            'displayname': 'Person $i',
-            'avatar_url': 'mxc://example.org/person$i',
-          },
-          'event_id': '\$member-$i',
-          'origin_server_ts': i,
+        eventId: r'$group-message',
+        originServerTs: DateTime(2026, 11, 13),
+      );
+      client.accountData['m.direct'] = matrix.BasicEvent(
+        type: 'm.direct',
+        content: const {
+          '@meta_1:example.org': [id],
         },
-    ];
-    addTearDown(() => serverMembers.remove(id));
-    backend.debugRoomsSynced(
-      matrix.SyncUpdate(
-        nextBatch: '2',
-        rooms: matrix.RoomsUpdate(join: {id: matrix.JoinedRoomUpdate()}),
-      ),
-    );
-    await settle();
+      );
+      client.rooms.add(r);
+      serverMembers[id] = [
+        for (var i = 1; i <= 4; i++)
+          {
+            'type': 'm.room.member',
+            'state_key': '@meta_$i:example.org',
+            'sender': '@meta_$i:example.org',
+            'content': {
+              'membership': 'join',
+              'displayname': 'Person $i',
+              'avatar_url': 'mxc://example.org/person$i',
+            },
+            'event_id': '\$member-$i',
+            'origin_server_ts': i,
+          },
+      ];
+      addTearDown(() => serverMembers.remove(id));
+      backend.debugRoomsSynced(
+        matrix.SyncUpdate(
+          nextBatch: '2',
+          rooms: matrix.RoomsUpdate(join: {id: matrix.JoinedRoomUpdate()}),
+        ),
+      );
+      await settle();
 
-    backend.roomShown(id);
-    await settle();
-    await settle();
-    await settle();
+      backend.roomShown(id);
+      await settle();
+      await settle();
+      await settle();
 
-    final projected = backend.rooms.firstWhere((room) => room.id == id);
-    expect(projected.name, '#FAM');
-    expect(projected.heroes.map((hero) => hero.name), [
-      'Person 1',
-      'Person 2',
-      'Person 3',
-      'Person 4',
-    ]);
-    expect(projected.heroes.map((hero) => hero.url.toString()), [
-      'mxc://example.org/person1',
-      'mxc://example.org/person2',
-      'mxc://example.org/person3',
-      'mxc://example.org/person4',
-    ]);
-  });
+      final projected = backend.rooms.firstWhere((room) => room.id == id);
+      expect(projected.name, '#FAM');
+      expect(projected.isDirect, isTrue);
+      expect(projected.avatarUrl, isNull);
+      expect(projected.heroes.map((hero) => hero.name), [
+        'Person 1',
+        'Person 2',
+        'Person 3',
+        'Person 4',
+      ]);
+      expect(projected.heroes.map((hero) => hero.url.toString()), [
+        'mxc://example.org/person1',
+        'mxc://example.org/person2',
+        'mxc://example.org/person3',
+        'mxc://example.org/person4',
+      ]);
+    },
+  );
 
   test('favourites are read from the room index', () {
     expect(backend.isFavourite('!a:example.org'), isFalse);

@@ -3766,7 +3766,7 @@ class MatrixBackend extends ChatBackend
     }
     _pumpFresh();
     if (room.parallaxAvatar == null &&
-        !room.isDirectChatCached &&
+        (!room.isDirectChatCached || room.isMultiPersonRoom) &&
         room.peopleHeroes.length < 4) {
       unawaited(_loadGroupAvatarMembers(room));
     }

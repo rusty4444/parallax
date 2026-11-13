@@ -42,6 +42,18 @@ extension ParallaxRoomNames on Room {
         displayName: memberInMemory(userId).displayName,
       );
 
+  /// Whether this is a multi-person room for naming and avatar purposes.
+  /// Some bridged groups are incorrectly present in m.direct, so a direct-chat
+  /// marker alone cannot decide between a single DM face and a group collage.
+  bool get isMultiPersonRoom {
+    final joined = summary.mJoinedMemberCount;
+    final invited = summary.mInvitedMemberCount;
+    if (joined != null || invited != null) {
+      return (joined ?? 0) + (invited ?? 0) > 2;
+    }
+    return getParticipants(const [Membership.join]).length > 2;
+  }
+
   /// The other people this room is named and pictured after (the server's
   /// heroes, or the DM partner), without bridge bots unless only bots remain.
   List<String> get peopleHeroes {
@@ -57,7 +69,7 @@ extension ParallaxRoomNames on Room {
       for (final hero in heroes)
         if (hero.isNotEmpty && hero != client.userID) hero,
     ], isBot);
-    if (direct == null) {
+    if (direct == null || isMultiPersonRoom) {
       // m.heroes is optional and is often empty on named/bridged groups. Fill
       // an avatar cluster from the latest sender and other joined members we
       // already know about, rather than falling straight back to a network
@@ -82,12 +94,19 @@ extension ParallaxRoomNames on Room {
       }
 
       addPerson(lastEvent?.senderId);
-      if (groupHeroes.length >= 4) return groupHeroes;
+      List<String> finished() {
+        // A bot-only hero list is just a fallback until a real person is
+        // found; never prefix a bridge bot to the people's names or collage.
+        final people = groupHeroes.where((id) => !isBot(id)).toList();
+        return people.isEmpty ? groupHeroes : people;
+      }
+
+      if (groupHeroes.length >= 4) return finished();
       for (final user in getParticipants(const [Membership.join])) {
         addPerson(user.id);
         if (groupHeroes.length >= 4) break;
       }
-      return groupHeroes;
+      return finished();
     }
     if (result.any((id) => !isBot(id))) return result;
 
@@ -297,11 +316,15 @@ extension ParallaxRoomNames on Room {
     ),
   );
 
-  /// [avatar], except a DM whose partner is a bridge bot shows its people
-  /// (the avatar cluster) instead of the bot's logo.
+  /// [avatar], except a multi-person room without custom art shows its people
+  /// (the avatar cluster), as does a DM whose partner is a bridge bot.
   Uri? get parallaxAvatar {
     final url = getState(EventTypes.RoomAvatar)?.content.tryGet<String>('url');
     if (url != null) return Uri.tryParse(url);
+    // The SDK's direct-chat avatar is a single person's face. That is wrong
+    // for a bridged group incorrectly marked direct: let RoomAvatar build the
+    // joined-member collage instead.
+    if (isMultiPersonRoom) return null;
     final direct = directChatPartner;
     if (direct != null &&
         isBridgeBot(direct) &&

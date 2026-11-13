@@ -222,6 +222,33 @@ void main() {
       expect(r.peopleHeroes, [_alex]);
     });
 
+    test('a multi-person room marked direct uses a member collage', () {
+      final r = room(
+        {
+          _bot: 'Meta bridge bot',
+          _alex: 'Alex',
+          _sam: 'Sam',
+          '@meta_1003:samprim.net': 'Kim',
+          '@meta_1004:samprim.net': 'Pat',
+        },
+        heroes: const [_alex],
+        direct: _alex,
+        roomName: '#FAM',
+        joined: 6,
+      );
+      expect(r.isDirectChat, isTrue);
+      expect(r.isMultiPersonRoom, isTrue);
+      expect(r.peopleHeroes, [
+        _alex,
+        _sam,
+        '@meta_1003:samprim.net',
+        '@meta_1004:samprim.net',
+      ]);
+      // The SDK would otherwise return Alex's single DM avatar.
+      expect(r.avatar, isNotNull);
+      expect(r.parallaxAvatar, isNull);
+    });
+
     test('an ordinary DM keeps its partner name and avatar', () {
       final r = room({_alex: 'Alex'}, direct: _alex);
       expect(r.parallaxName, 'Alex');
