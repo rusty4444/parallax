@@ -921,6 +921,8 @@ void main() {
           heroes: [
             ChatAvatar(name: 'Alice', url: Uri.parse('mxc://s/a')),
             ChatAvatar(name: 'Bob', url: Uri.parse('mxc://s/b')),
+            ChatAvatar(name: 'Carol', url: Uri.parse('mxc://s/c')),
+            ChatAvatar(name: 'Dan', url: Uri.parse('mxc://s/d')),
           ],
         ),
       ];
@@ -937,7 +939,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(RoomAvatar), findsOneWidget);
-    expect(backend.avatarLoads, 2);
+    expect(backend.avatarLoads, 4);
   });
 
   testWidgets('recovery uses an obscured field and refreshes identity', (

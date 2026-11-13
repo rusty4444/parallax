@@ -57,7 +57,39 @@ extension ParallaxRoomNames on Room {
       for (final hero in heroes)
         if (hero.isNotEmpty && hero != client.userID) hero,
     ], isBot);
-    if (direct == null || result.any((id) => !isBot(id))) return result;
+    if (direct == null) {
+      // m.heroes is optional and is often empty on named/bridged groups. Fill
+      // an avatar cluster from the latest sender and other joined members we
+      // already know about, rather than falling straight back to a network
+      // logo or room initial. The projection caps the actual faces at four.
+      final groupHeroes = [...result];
+      void addPerson(String? id) {
+        if (groupHeroes.length >= 4 ||
+            id == null ||
+            id.isEmpty ||
+            id == client.userID ||
+            isBot(id) ||
+            groupHeroes.contains(id)) {
+          return;
+        }
+        final membership = getState(
+          EventTypes.RoomMember,
+          id,
+        )?.content['membership'];
+        if (membership == null || membership == Membership.join.name) {
+          groupHeroes.add(id);
+        }
+      }
+
+      addPerson(lastEvent?.senderId);
+      if (groupHeroes.length >= 4) return groupHeroes;
+      for (final user in getParticipants(const [Membership.join])) {
+        addPerson(user.id);
+        if (groupHeroes.length >= 4) break;
+      }
+      return groupHeroes;
+    }
+    if (result.any((id) => !isBot(id))) return result;
 
     // Some bridge portals incorrectly make the bot the DM partner and provide
     // no person in the summary. Prefer the latest bridged sender, then a person

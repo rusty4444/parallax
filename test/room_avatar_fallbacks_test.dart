@@ -17,7 +17,7 @@ import 'package:parallax/room_pictures.dart';
 import 'package:parallax/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'reactions_fakes.dart';
+import 'widget_test.dart' show FakeBackend;
 
 final palette = paletteFor(VisualTheme.parallax);
 
@@ -339,7 +339,7 @@ void main() {
             child: Center(
               child: RoomAvatar(
                 room: room,
-                backend: PlainBackend(),
+                backend: FakeBackend(),
                 palette: palette,
                 pictures: pictures,
                 logoOverrides: logoOverrides,
@@ -397,6 +397,29 @@ void main() {
       await pictures.remove(room.id);
       await tester.pump();
       expect(find.byType(NetworkLogo), findsOneWidget);
+    });
+
+    testWidgets('a four-person stack replaces the network logo', (
+      tester,
+    ) async {
+      final pictures = _pictures(_MemoryStorage());
+      addTearDown(pictures.dispose);
+      final room = ChatRoom(
+        id: '!family:example.org',
+        name: '#FAM',
+        preview: '',
+        lastActivity: null,
+        network: ChatNetwork.messenger,
+        heroes: [
+          ChatAvatar(name: 'Alice', url: Uri.parse('mxc://s/a')),
+          ChatAvatar(name: 'Bob', url: Uri.parse('mxc://s/b')),
+          ChatAvatar(name: 'Carol', url: Uri.parse('mxc://s/c')),
+          ChatAvatar(name: 'Dan', url: Uri.parse('mxc://s/d')),
+        ],
+      );
+      await pump(tester, room: room, logos: true, pictures: pictures);
+      expect(find.byType(NetworkLogo), findsNothing);
+      expect(find.byType(InitialAvatar), findsNWidgets(4));
     });
 
     testWidgets('a per-room logo choice wins over detection', (tester) async {

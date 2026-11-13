@@ -3765,6 +3765,61 @@ class MatrixBackend extends ChatBackend
       _freshQueue.add((room, id));
     }
     _pumpFresh();
+    if (room.parallaxAvatar == null &&
+        !room.isDirectChatCached &&
+        room.peopleHeroes.length < 4) {
+      unawaited(_loadGroupAvatarMembers(room));
+    }
+  }
+
+  /// Fills a named group's missing avatar cluster when m.heroes is sparse.
+  /// Only the few people needed for the four-face stack are cached in memory;
+  /// the SDK's full participant response itself is not cached wholesale.
+  Future<void> _loadGroupAvatarMembers(matrix.Room room) async {
+    final client = _client;
+    final generation = _securityGeneration;
+    if (client == null) return;
+    try {
+      final participants = await room
+          .requestParticipants(const [matrix.Membership.join], true, false)
+          .timeout(const Duration(seconds: 15));
+      if (_disposed || generation != _securityGeneration || client != _client) {
+        return;
+      }
+      final existing = room.peopleHeroes.toSet();
+      final needed = 4 - existing.length;
+      if (needed <= 0) return;
+      var added = 0;
+      var changed = false;
+      for (final user in participants) {
+        final id = user.id;
+        if (id == client.userID || room.isBridgeBot(id)) continue;
+        final alreadyHero = existing.contains(id);
+        if (alreadyHero) {
+          // A recent sender can be a bare ID-only hero before its profile
+          // arrives. Fill that placeholder from /members too.
+          if (room.getState(matrix.EventTypes.RoomMember, id) == null) {
+            room.setState(user);
+            changed = true;
+          }
+          continue;
+        }
+        if (added >= needed) break;
+        // requestParticipants(cache: false) deliberately leaves server users
+        // out of room state. Cache just the people whose faces will be shown.
+        if (room.getState(matrix.EventTypes.RoomMember, id) == null) {
+          room.setState(user);
+        }
+        _freshQueue.add((room, id));
+        existing.add(id);
+        added++;
+        changed = true;
+      }
+      if (added > 0) _pumpFresh();
+      if (changed) _scheduleRoomUpdate(roomIds: {room.id});
+    } catch (_) {
+      // Offline or a large/slow member request: retain any loaded hero faces.
+    }
   }
 
   void _pumpFresh() {

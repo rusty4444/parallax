@@ -149,6 +149,28 @@ void main() {
       expect(r.parallaxName, 'Alex, Sam and 3 others');
     });
 
+    test('a named group without m.heroes uses four joined people', () {
+      final r = room(
+        {
+          _bot: 'Meta bridge bot',
+          _alex: 'Alex',
+          _sam: 'Sam',
+          '@meta_1003:samprim.net': 'Kim',
+          '@meta_1004:samprim.net': 'Pat',
+        },
+        heroes: const [],
+        roomName: '#FAM',
+        joined: 6,
+      );
+      expect(r.parallaxName, '#FAM');
+      expect(r.peopleHeroes, [
+        _alex,
+        _sam,
+        '@meta_1003:samprim.net',
+        '@meta_1004:samprim.net',
+      ]);
+    });
+
     test('a bot named by m.bridge is left out whatever it is called', () {
       const custom = '@relay:samprim.net';
       final r = room({custom: 'Relay', _alex: 'Alex'}, bridgeBot: custom);

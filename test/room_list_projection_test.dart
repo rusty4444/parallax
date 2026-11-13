@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -11,6 +13,9 @@ class _Database extends Fake implements matrix.DatabaseApi {
 
   @override
   Future<void> close() async {}
+
+  @override
+  Future<List<matrix.User>> getUsers(matrix.Room room) async => [];
 
   @override
   Future<matrix.User?> getUser(String userId, matrix.Room room) async {
@@ -29,6 +34,9 @@ class _Database extends Fake implements matrix.DatabaseApi {
 /// The server's current member names, as GET .../state/m.room.member/{user}.
 final serverNames = <String, String>{};
 
+/// Full /members responses for groups whose avatar heroes must be loaded.
+final serverMembers = <String, List<Map<String, Object?>>>{};
+
 class _Client extends matrix.Client {
   _Client()
     : super(
@@ -36,6 +44,24 @@ class _Client extends matrix.Client {
         database: _Database(),
         httpClient: MockClient((request) async {
           final path = Uri.decodeComponent(request.url.path);
+          if (path.endsWith('/members')) {
+            const prefix = '/rooms/';
+            final start = path.indexOf(prefix);
+            final roomId = start < 0
+                ? null
+                : path.substring(
+                    start + prefix.length,
+                    path.length - '/members'.length,
+                  );
+            final members = serverMembers[roomId];
+            if (members != null) {
+              return http.Response(
+                jsonEncode({'chunk': members}),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }
+          }
           final marker = '/state/m.room.member/';
           final at = path.indexOf(marker);
           final name = at < 0
@@ -321,6 +347,82 @@ void main() {
     expect(a.previewSender, 'Friend Renamed');
     // Only that room was projected again.
     expect(backend.debugRoomProjections, before + 1);
+  });
+
+  test('a shown named group loads its four-person avatar stack', () async {
+    const id = '!group:example.org';
+    final r = matrix.Room(
+      id: id,
+      client: client,
+      summary: matrix.RoomSummary.fromJson({
+        'm.heroes': <String>[],
+        'm.joined_member_count': 5,
+        'm.invited_member_count': 0,
+      }),
+    );
+    r.setState(
+      matrix.Event(
+        type: matrix.EventTypes.RoomName,
+        stateKey: '',
+        senderId: '@meta_1:example.org',
+        content: const {'name': '#FAM'},
+        room: r,
+        eventId: r'$room-name',
+        originServerTs: DateTime(2026, 11, 12),
+      ),
+    );
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@meta_1:example.org',
+      content: const {'msgtype': 'm.text', 'body': 'Hello family'},
+      room: r,
+      eventId: r'$group-message',
+      originServerTs: DateTime(2026, 11, 13),
+    );
+    client.rooms.add(r);
+    serverMembers[id] = [
+      for (var i = 1; i <= 4; i++)
+        {
+          'type': 'm.room.member',
+          'state_key': '@meta_$i:example.org',
+          'sender': '@meta_$i:example.org',
+          'content': {
+            'membership': 'join',
+            'displayname': 'Person $i',
+            'avatar_url': 'mxc://example.org/person$i',
+          },
+          'event_id': '\$member-$i',
+          'origin_server_ts': i,
+        },
+    ];
+    addTearDown(() => serverMembers.remove(id));
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(join: {id: matrix.JoinedRoomUpdate()}),
+      ),
+    );
+    await settle();
+
+    backend.roomShown(id);
+    await settle();
+    await settle();
+    await settle();
+
+    final projected = backend.rooms.firstWhere((room) => room.id == id);
+    expect(projected.name, '#FAM');
+    expect(projected.heroes.map((hero) => hero.name), [
+      'Person 1',
+      'Person 2',
+      'Person 3',
+      'Person 4',
+    ]);
+    expect(projected.heroes.map((hero) => hero.url.toString()), [
+      'mxc://example.org/person1',
+      'mxc://example.org/person2',
+      'mxc://example.org/person3',
+      'mxc://example.org/person4',
+    ]);
   });
 
   test('favourites are read from the room index', () {
