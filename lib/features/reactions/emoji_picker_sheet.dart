@@ -21,12 +21,14 @@ class EmojiRecents {
     : _preferences = preferences ?? SharedPreferences.getInstance;
 
   static const storageKey = 'parallax.recent_emojis';
+  static const usageKey = 'parallax.emoji_usage';
 
   /// App-wide instance; tests may replace it.
   static EmojiRecents instance = EmojiRecents();
 
   final Future<SharedPreferences> Function() _preferences;
   List<String>? _cache;
+  Map<String, int>? _usageCache;
   Future<void>? _writes;
 
   Future<List<String>> load() async {
@@ -45,7 +47,10 @@ class EmojiRecents {
     }
   }
 
-  Future<void> record(String emoji) {
+  /// Records a pick in the recent list. When [reaction] is true (the pick
+  /// was sent as a message reaction, not a composer emoji) it also counts
+  /// towards the most-used tally.
+  Future<void> record(String emoji, {bool reaction = false}) {
     if (!_plausibleEmoji(emoji)) return Future.value();
     final previous = _writes;
     final write = () async {
@@ -56,14 +61,70 @@ class EmojiRecents {
         [emoji, ...current.where((e) => e != emoji)].take(_recentLimit),
       );
       _cache = next;
+      final prefs = await _preferences();
       try {
-        await (await _preferences()).setString(storageKey, jsonEncode(next));
+        await prefs.setString(storageKey, jsonEncode(next));
       } catch (_) {
         // Recents are a convenience; keep the in-memory order.
+      }
+      if (reaction) {
+        final counts = Map<String, int>.of(await loadUsage());
+        counts[emoji] = (counts[emoji] ?? 0) + 1;
+        _usageCache = Map.unmodifiable(counts);
+        try {
+          await prefs.setString(usageKey, jsonEncode(counts));
+        } catch (_) {
+          // Usage counts are a convenience; keep the in-memory tally.
+        }
       }
     }();
     _writes = write;
     return write;
+  }
+
+  /// How many times each emoji has been reacted with on this device.
+  Future<Map<String, int>> loadUsage() async {
+    final cached = _usageCache;
+    if (cached != null) return cached;
+    try {
+      final raw = (await _preferences()).getString(usageKey);
+      final decoded = raw == null ? const {} : jsonDecode(raw);
+      return _usageCache ??= Map.unmodifiable({
+        if (decoded is Map)
+          for (final entry in decoded.entries)
+            if (entry.key is String &&
+                _plausibleEmoji(entry.key as String) &&
+                entry.value is int &&
+                (entry.value as int) > 0)
+              entry.key as String: entry.value as int,
+      });
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Emojis ordered by reaction count, most used first (left to right).
+  /// Ties break by recency, then the default order. Topped up with defaults
+  /// so the row is never short.
+  Future<List<String>> mostUsed() async {
+    final usage = await loadUsage();
+    final recents = await load();
+    final recentRank = {for (final (i, e) in recents.indexed) e: i};
+    final defaultRank = {for (final (i, e) in defaultQuickEmojis.indexed) e: i};
+    const unranked = 1 << 20;
+    final used = usage.keys.toList()
+      ..sort((a, b) {
+        final byCount = usage[b]!.compareTo(usage[a]!);
+        if (byCount != 0) return byCount;
+        final byRecent = (recentRank[a] ?? unranked).compareTo(
+          recentRank[b] ?? unranked,
+        );
+        if (byRecent != 0) return byRecent;
+        return (defaultRank[a] ?? unranked).compareTo(
+          defaultRank[b] ?? unranked,
+        );
+      });
+    return [...{...used, ...defaultQuickEmojis}].take(_quickRowLength).toList();
   }
 
   static bool _plausibleEmoji(String value) =>

@@ -18,6 +18,7 @@ import 'package:parallax/message_image.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/features/reactions/message_action_features.dart';
 import 'package:parallax/features/reactions/emoji_picker_sheet.dart';
+import 'package:parallax/features/reactions/quick_reaction_settings.dart';
 import 'package:parallax/rich_message_composer.dart';
 import 'package:parallax/room_screen.dart';
 import 'package:parallax/space_browser_screen.dart';
@@ -240,6 +241,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     EmojiRecents.instance = EmojiRecents();
+    QuickReactionSettings.instance = QuickReactionSettings();
   });
 
   testWidgets('scoped draft loads, debounces and flushes on route disposal', (
@@ -937,11 +939,12 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('+ picker reaction leads a persisted six-emoji recent row', (
+  testWidgets('recent mode: + picker reaction leads a persisted six-emoji recent row', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
       EmojiRecents.storageKey: '["❤️","👍","😂","🎉","😮","🙏"]',
+      QuickReactionSettings.modeKey: 'recent',
     });
     EmojiRecents.instance = EmojiRecents();
     final backend = FeaturesBackend()
@@ -1010,6 +1013,100 @@ void main() {
     EmojiRecents.instance = EmojiRecents();
     await openActions();
     expectRowOrder(const ['👍', '😀', '❤️', '😂', '🎉', '😮']);
+  });
+
+  testWidgets('default most-used mode orders the quick row by reaction count', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      EmojiRecents.usageKey: '{"😂": 3, "❤️": 2, "👍": 1}',
+    });
+    EmojiRecents.instance = EmojiRecents();
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$most-used-event',
+          sender: '@a:s',
+          body: 'Most used',
+          time: DateTime(2026),
+          mine: false,
+          content: const {'msgtype': 'm.text', 'body': 'Most used'},
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+
+    Future<void> openActions() async {
+      await tester.longPress(find.text('Most used'));
+      await tester.pumpAndSettle();
+    }
+
+    void expectRowOrder(List<String> emojis) {
+      for (var i = 0; i < emojis.length; i++) {
+        expect(
+          find.byTooltip('React ${emojis[i]}'),
+          findsOneWidget,
+          reason: emojis[i],
+        );
+        if (i > 0) {
+          expect(
+            tester.getTopLeft(find.byTooltip('React ${emojis[i - 1]}')).dx,
+            lessThan(
+              tester.getTopLeft(find.byTooltip('React ${emojis[i]}')).dx,
+            ),
+          );
+        }
+      }
+    }
+
+    // Most used first (distinct counts), topped up with defaults.
+    await openActions();
+    expectRowOrder(const ['😂', '❤️', '👍', '😮', '😢', '🎉']);
+
+    // A quick-row reaction counts towards the tally.
+    await tester.tap(find.byTooltip('React 👍'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    final usage = await EmojiRecents.instance.loadUsage();
+    expect(usage['👍'], 2);
+    expect(usage['😂'], 3);
+  });
+
+  testWidgets('manual mode shows exactly the chosen quick reactions', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      QuickReactionSettings.modeKey: 'manual',
+      QuickReactionSettings.manualKey: '["🚀", "🎉", "❤️"]',
+    });
+    EmojiRecents.instance = EmojiRecents();
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$manual-event',
+          sender: '@a:s',
+          body: 'Manual row',
+          time: DateTime(2026),
+          mine: false,
+          content: const {'msgtype': 'm.text', 'body': 'Manual row'},
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Manual row'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('React 🚀'), findsOneWidget);
+    expect(find.byTooltip('React 🎉'), findsOneWidget);
+    expect(find.byTooltip('React ❤️'), findsOneWidget);
+    // The manual list is used as-is: no default top-up.
+    expect(find.byTooltip('React 👍'), findsNothing);
+    expect(
+      tester.getTopLeft(find.byTooltip('React 🚀')).dx,
+      lessThan(tester.getTopLeft(find.byTooltip('React 🎉')).dx),
+    );
   });
 
   testWidgets('thread and receipt actions keep the selected event identity', (

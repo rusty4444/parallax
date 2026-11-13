@@ -13,6 +13,7 @@ import 'forward_content.dart';
 import 'forward_screen.dart';
 import 'message_action_features.dart';
 import 'pinned_messages.dart';
+import 'quick_reaction_settings.dart';
 import 'reaction_summary_sheet.dart';
 import 'remove_message_dialog.dart';
 import 'report_content_screen.dart';
@@ -30,6 +31,13 @@ Future<String?> pickEmoji(
   palette: palette ?? paletteFromTheme(Theme.of(context)),
   forReaction: forReaction,
 );
+
+/// Settings → Chats: quick reaction row order (most used / recent / manual)
+/// and the manual list editor.
+List<Widget> quickReactionSettingsSections(
+  BuildContext context,
+  SettingsHookContext ctx,
+) => [QuickReactionSettingsSection(palette: ctx.palette)];
 
 /// Whether reactions may be sent in this room from the UI.
 ///

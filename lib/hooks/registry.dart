@@ -137,6 +137,7 @@ List<Widget> chatSettingsSectionsFor(
 ) => [
   ...scheduledSettingsSections(context, ctx),
   ...composerSettingsSections(context, ctx),
+  ...quickReactionSettingsSections(context, ctx),
   ...packsSettingsSections(context, ctx),
   ...savedSettingsSections(context, ctx),
 ];

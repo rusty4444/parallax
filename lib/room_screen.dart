@@ -9,6 +9,7 @@ import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'features/reactions/reaction_hooks.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
+import 'features/reactions/quick_reaction_settings.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/scheduled/undo_send.dart';
 import 'hooks/registry.dart';
@@ -673,7 +674,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     Haptics.selection();
     try {
       await widget.backend.react(widget.roomId, entry.id, emoji: emoji);
-      unawaited(EmojiRecents.instance.record(emoji));
+      unawaited(EmojiRecents.instance.record(emoji, reaction: true));
     } catch (_) {
       if (mounted && _owner.isCurrent) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1713,8 +1714,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
 const _moreReactions = '__more_reactions__';
 
-/// Six newest-first reactions, topped up with defaults until enough emojis
-/// have been used. The full picker remains available through the + button.
+/// Six quick reactions, ordered by the user's setting (most used by default,
+/// or recent, or a manual list). The full picker remains available through
+/// the + button.
 class _QuickReactions extends StatefulWidget {
   const _QuickReactions({
     required this.palette,
@@ -1735,13 +1737,13 @@ class _QuickReactionsState extends State<_QuickReactions> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadRecents());
+    unawaited(_loadEmojis());
   }
 
-  Future<void> _loadRecents() async {
-    final recents = await EmojiRecents.instance.load();
+  Future<void> _loadEmojis() async {
+    final emojis = await resolveQuickReactions();
     if (!mounted) return;
-    setState(() => _emojis = quickEmojis(recents).take(6).toList());
+    setState(() => _emojis = emojis.take(6).toList());
   }
 
   @override
