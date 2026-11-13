@@ -124,7 +124,9 @@ class EmojiRecents {
           defaultRank[b] ?? unranked,
         );
       });
-    return [...{...used, ...defaultQuickEmojis}].take(_quickRowLength).toList();
+    return [
+      ...{...used, ...defaultQuickEmojis},
+    ].take(_quickRowLength).toList();
   }
 
   static bool _plausibleEmoji(String value) =>

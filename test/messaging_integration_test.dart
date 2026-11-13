@@ -939,81 +939,82 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('recent mode: + picker reaction leads a persisted six-emoji recent row', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({
-      EmojiRecents.storageKey: '["❤️","👍","😂","🎉","😮","🙏"]',
-      QuickReactionSettings.modeKey: 'recent',
-    });
-    EmojiRecents.instance = EmojiRecents();
-    final backend = FeaturesBackend()
-      ..entries = [
-        ChatEntry(
-          id: r'$recent-reactions-event',
-          sender: '@a:s',
-          body: 'Recent reactions',
-          time: DateTime(2026),
-          mine: false,
-          content: const {'msgtype': 'm.text', 'body': 'Recent reactions'},
-        ),
-      ];
-    await tester.pumpWidget(room(backend, Drafts()));
-    await tester.pumpAndSettle();
-
-    Future<void> openActions() async {
-      await tester.longPress(find.text('Recent reactions'));
+  testWidgets(
+    'recent mode: + picker reaction leads a persisted six-emoji recent row',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        EmojiRecents.storageKey: '["❤️","👍","😂","🎉","😮","🙏"]',
+        QuickReactionSettings.modeKey: 'recent',
+      });
+      EmojiRecents.instance = EmojiRecents();
+      final backend = FeaturesBackend()
+        ..entries = [
+          ChatEntry(
+            id: r'$recent-reactions-event',
+            sender: '@a:s',
+            body: 'Recent reactions',
+            time: DateTime(2026),
+            mine: false,
+            content: const {'msgtype': 'm.text', 'body': 'Recent reactions'},
+          ),
+        ];
+      await tester.pumpWidget(room(backend, Drafts()));
       await tester.pumpAndSettle();
-    }
 
-    void expectRowOrder(List<String> emojis) {
-      for (var i = 0; i < emojis.length; i++) {
-        expect(
-          find.byTooltip('React ${emojis[i]}'),
-          findsOneWidget,
-          reason: emojis[i],
-        );
-        if (i > 0) {
+      Future<void> openActions() async {
+        await tester.longPress(find.text('Recent reactions'));
+        await tester.pumpAndSettle();
+      }
+
+      void expectRowOrder(List<String> emojis) {
+        for (var i = 0; i < emojis.length; i++) {
           expect(
-            tester.getTopLeft(find.byTooltip('React ${emojis[i - 1]}')).dx,
-            lessThan(
-              tester.getTopLeft(find.byTooltip('React ${emojis[i]}')).dx,
-            ),
+            find.byTooltip('React ${emojis[i]}'),
+            findsOneWidget,
+            reason: emojis[i],
           );
+          if (i > 0) {
+            expect(
+              tester.getTopLeft(find.byTooltip('React ${emojis[i - 1]}')).dx,
+              lessThan(
+                tester.getTopLeft(find.byTooltip('React ${emojis[i]}')).dx,
+              ),
+            );
+          }
         }
       }
-    }
 
-    await openActions();
-    expectRowOrder(const ['❤️', '👍', '😂', '🎉', '😮', '🙏']);
-    expect(find.byTooltip('React 😀'), findsNothing);
+      await openActions();
+      expectRowOrder(const ['❤️', '👍', '😂', '🎉', '😮', '🙏']);
+      expect(find.byTooltip('React 😀'), findsNothing);
 
-    await tester.tap(find.byTooltip('More reactions'));
-    await tester.pumpAndSettle();
-    final grinning = find.text('😀');
-    expect(grinning, findsWidgets);
-    await tester.tap(grinning.first);
-    await tester.pumpAndSettle();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 20)),
-    );
+      await tester.tap(find.byTooltip('More reactions'));
+      await tester.pumpAndSettle();
+      final grinning = find.text('😀');
+      expect(grinning, findsWidgets);
+      await tester.tap(grinning.first);
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
 
-    // Force a disk read rather than relying on the previous store's cache.
-    EmojiRecents.instance = EmojiRecents();
-    await openActions();
-    expectRowOrder(const ['😀', '❤️', '👍', '😂', '🎉', '😮']);
-    expect(find.byTooltip('React 🙏'), findsNothing);
+      // Force a disk read rather than relying on the previous store's cache.
+      EmojiRecents.instance = EmojiRecents();
+      await openActions();
+      expectRowOrder(const ['😀', '❤️', '👍', '😂', '🎉', '😮']);
+      expect(find.byTooltip('React 🙏'), findsNothing);
 
-    // A quick-row selection is also a use and moves to the front next time.
-    await tester.tap(find.byTooltip('React 👍'));
-    await tester.pumpAndSettle();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 20)),
-    );
-    EmojiRecents.instance = EmojiRecents();
-    await openActions();
-    expectRowOrder(const ['👍', '😀', '❤️', '😂', '🎉', '😮']);
-  });
+      // A quick-row selection is also a use and moves to the front next time.
+      await tester.tap(find.byTooltip('React 👍'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      EmojiRecents.instance = EmojiRecents();
+      await openActions();
+      expectRowOrder(const ['👍', '😀', '❤️', '😂', '🎉', '😮']);
+    },
+  );
 
   testWidgets('default most-used mode orders the quick row by reaction count', (
     tester,
