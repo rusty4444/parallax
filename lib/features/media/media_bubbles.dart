@@ -183,7 +183,8 @@ class _MediaPreviewImageState extends State<MediaPreviewImage> {
 }
 
 /// Video: decrypted thumbnail until Play is tapped, then inline native
-/// playback with pause/seek controls and a separate full-screen action.
+/// playback with an auto-fading pause overlay, tap-anywhere play/pause, seek
+/// bar, and a separate full-screen action.
 class VideoMessageBody extends StatefulWidget {
   const VideoMessageBody({
     required this.ctx,
@@ -200,12 +201,26 @@ class VideoMessageBody extends StatefulWidget {
 }
 
 class _VideoMessageBodyState extends State<VideoMessageBody>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  static const _controlsFadeTotal = Duration(milliseconds: 800);
+
   late BackendSessionOwner _session = BackendSessionOwner(widget.ctx.backend);
+  late final AnimationController _controlsFade = AnimationController(
+    vsync: this,
+    duration: _controlsFadeTotal,
+  );
+  late final Animation<double> _controlsOpacity =
+      Tween<double>(begin: 1, end: 0).animate(
+        CurvedAnimation(
+          parent: _controlsFade,
+          curve: const Interval(0.55, 1, curve: Curves.easeOut),
+        ),
+      );
   MediaPlayerOwner? _owner;
   MediaPlaybackController? _player;
   bool _loading = false;
   bool _failed = false;
+  bool _wasPlaying = false;
 
   @override
   void initState() {
@@ -222,8 +237,23 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
     // Deliberately do not auto-resume private media.
   }
 
+  bool get _activelyPlaying => !_loading && (_player?.value.playing ?? false);
+
+  void _syncControlsFade() {
+    final playing = _activelyPlaying;
+    if (playing == _wasPlaying) return;
+    _wasPlaying = playing;
+    if (playing) {
+      _controlsFade.forward(from: 0);
+    } else {
+      _controlsFade.value = 0;
+    }
+  }
+
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    _syncControlsFade();
+    setState(() {});
   }
 
   Future<void> _start() async {
@@ -231,6 +261,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
     setState(() {
       _loading = true;
       _failed = false;
+      _syncControlsFade();
     });
     final owner = MediaPlayerOwner(
       loader: mediaLoaderFor(
@@ -244,7 +275,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
     _owner = owner;
     try {
       await owner.load();
-      if (!mounted || !_session.isCurrent) {
+      if (!mounted || !_session.isCurrent || !identical(_owner, owner)) {
         await owner.close();
         return;
       }
@@ -252,15 +283,23 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
       if (player == null) throw StateError('Video is unavailable');
       _player = player..addListener(_changed);
       await owner.play();
-      if (mounted) setState(() => _loading = false);
+      if (!mounted || !_session.isCurrent || !identical(_owner, owner)) {
+        await owner.close();
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _syncControlsFade();
+      });
     } catch (_) {
       await owner.close();
-      if (mounted) {
+      if (mounted && identical(_owner, owner)) {
         setState(() {
           _owner = null;
           _player = null;
           _loading = false;
           _failed = true;
+          _syncControlsFade();
         });
       }
     }
@@ -273,9 +312,16 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
     if (player.value.playing) {
       await owner.pause();
     } else {
+      if (player.value.duration > Duration.zero &&
+          player.value.position >= player.value.duration) {
+        await owner.seek(Duration.zero);
+      }
       await owner.play();
     }
-    if (mounted) setState(() {});
+    if (mounted && identical(_owner, owner)) {
+      _syncControlsFade();
+      setState(() {});
+    }
   }
 
   void _seek(double dx, double width) {
@@ -303,6 +349,8 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
     _owner = null;
     _player?.removeListener(_changed);
     _player = null;
+    _wasPlaying = false;
+    _controlsFade.value = 0;
     if (owner != null) unawaited(owner.close());
   }
 
@@ -324,6 +372,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _discard();
+    _controlsFade.dispose();
     _session.release();
     super.dispose();
   }
@@ -338,7 +387,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
       );
       final p = widget.ctx.palette;
       final player = _player;
-      final playing = player?.value.playing == true;
+      final playing = _activelyPlaying;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -376,29 +425,51 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
                         size: 36,
                       ),
                     ),
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _toggle,
+                    ),
+                  ),
                   if (_loading)
-                    const Center(child: CircularProgressIndicator())
+                    const IgnorePointer(
+                      child: Center(child: CircularProgressIndicator()),
+                    )
                   else if (_failed)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                          'Couldn’t play this video.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white),
+                    const IgnorePointer(
+                      child: Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Couldn’t play this video.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white),
+                          ),
                         ),
                       ),
                     )
                   else
                     Center(
-                      child: IconButton.filled(
-                        tooltip: playing ? 'Pause video' : 'Play video',
-                        onPressed: _toggle,
-                        icon: Icon(
-                          playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          size: 34,
+                      child: AnimatedBuilder(
+                        animation: _controlsOpacity,
+                        builder: (context, child) {
+                          final opacity = playing
+                              ? _controlsOpacity.value
+                              : 1.0;
+                          return IgnorePointer(
+                            ignoring: opacity == 0,
+                            child: Opacity(opacity: opacity, child: child),
+                          );
+                        },
+                        child: IconButton.filled(
+                          tooltip: playing ? 'Pause video' : 'Play video',
+                          onPressed: _toggle,
+                          icon: Icon(
+                            playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            size: 34,
+                          ),
                         ),
                       ),
                     ),
@@ -435,7 +506,11 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
                     Positioned(
                       left: 8,
                       bottom: 8,
-                      child: _Badge(text: formatMediaDuration(info.duration!)),
+                      child: IgnorePointer(
+                        child: _Badge(
+                          text: formatMediaDuration(info.duration!),
+                        ),
+                      ),
                     ),
                 ],
               ),

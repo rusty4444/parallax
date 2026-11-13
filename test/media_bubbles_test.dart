@@ -81,37 +81,118 @@ void main() {
     expect(find.text('none'), findsOneWidget);
   });
 
-  testWidgets('video plays inline and offers full screen', (tester) async {
-    final backend = FakeMediaBackend()
-      ..original = (eventId) => DownloadedAttachment(
-        name: '$eventId.mp4',
-        mimeType: 'video/mp4',
-        bytes: Uint8List.fromList([1, 2, 3]),
-      );
-    await tester.pumpWidget(
-      host(
-        VideoMessageBody(
-          ctx: hookFor(backend, mediaEntry('v', EntryKind.video)),
-          fileFactory: (_) async => FakeTempFile(log),
-          playerFactory: (_, _) => FakePlayer(log),
+  testWidgets(
+    'video plays inline, fades pause control, pauses on tap anywhere, and offers full screen',
+    (tester) async {
+      final backend = FakeMediaBackend()
+        ..original = (eventId) => DownloadedAttachment(
+          name: '$eventId.mp4',
+          mimeType: 'video/mp4',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        );
+      late FakePlayer player;
+      await tester.pumpWidget(
+        host(
+          VideoMessageBody(
+            ctx: hookFor(
+              backend,
+              mediaEntry(
+                'v',
+                EntryKind.video,
+                content: {
+                  'info': {'w': 320, 'h': 180},
+                },
+              ),
+            ),
+            fileFactory: (_) async => FakeTempFile(log),
+            playerFactory: (_, _) => player = FakePlayer(log),
+          ),
         ),
-      ),
-    );
-    expect(find.byTooltip('Play video'), findsOneWidget);
-    expect(find.byTooltip('Full screen video'), findsOneWidget);
+      );
+      expect(find.byTooltip('Play video'), findsOneWidget);
+      expect(find.byTooltip('Full screen video'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Play video'));
-    await settle(tester);
-    expect(find.text('native video'), findsOneWidget);
-    expect(log, contains('initialize'));
-    expect(log, contains('play'));
-    expect(find.byTooltip('Pause video'), findsOneWidget);
+      await tester.tap(find.byTooltip('Play video'));
+      await settle(tester);
+      expect(find.text('native video'), findsOneWidget);
+      expect(log, contains('initialize'));
+      expect(log, contains('play'));
+      expect(find.byTooltip('Pause video'), findsOneWidget);
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Pause video'),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        1,
+      );
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    await settle(tester);
-    expect(log, contains('pause'));
-    expect(find.byTooltip('Play video'), findsOneWidget);
-  });
+      // Once playing, the pause button fades away completely.
+      await tester.pump(const Duration(seconds: 1));
+      expect(player.value.playing, isTrue);
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Pause video'),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        0,
+      );
+      expect(find.byTooltip('Pause video').hitTestable(), findsNothing);
+
+      // Tapping anywhere on the video (away from the center button) pauses it
+      // and brings back the Play control.
+      final topLeft = tester.getTopLeft(find.byType(VideoMessageBody));
+      await tester.tapAt(topLeft + const Offset(16, 16));
+      await settle(tester);
+      expect(player.value.playing, isFalse);
+      expect(find.byTooltip('Play video').hitTestable(), findsOneWidget);
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Play video'),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        1,
+      );
+
+      // Tapping anywhere on the paused video resumes and fades out again.
+      await tester.tapAt(topLeft + const Offset(16, 16));
+      await settle(tester);
+      expect(player.value.playing, isTrue);
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byTooltip('Pause video').hitTestable(), findsNothing);
+
+      // Tapping the center after fade also pauses via the full-bleed target.
+      await tester.tap(find.byType(VideoMessageBody));
+      await settle(tester);
+      expect(player.value.playing, isFalse);
+      expect(find.byTooltip('Play video').hitTestable(), findsOneWidget);
+
+      // Resume, then verify app backgrounding pauses and restores Play.
+      await tester.tap(find.byTooltip('Play video'));
+      await tester.pump(const Duration(seconds: 1));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await settle(tester);
+      expect(log, contains('pause'));
+      expect(find.byTooltip('Play video').hitTestable(), findsOneWidget);
+    },
+  );
 
   testWidgets('every media kind fits a 320 dp phone inside MessageBubble', (
     tester,

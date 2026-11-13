@@ -11,6 +11,7 @@ import 'package:parallax/features/link_previews/link_preview_cache.dart';
 import 'package:parallax/features/link_previews/link_preview_card.dart';
 import 'package:parallax/features/link_previews/link_preview_hooks.dart';
 import 'package:parallax/features/link_previews/link_previews.dart';
+import 'package:parallax/features/link_previews/link_video_player.dart';
 import 'package:parallax/features/rich_timeline/message_actions.dart';
 import 'package:parallax/hooks/registry.dart';
 import 'package:parallax/message_draft_store.dart';
@@ -471,6 +472,7 @@ void main() {
       WidgetTester tester,
       PreviewBackend backend, {
       Uri? uri,
+      LinkVideoControllerFactory? videoControllerFactory,
     }) async {
       final prefs = await preferences();
       await tester.pumpWidget(
@@ -486,6 +488,8 @@ void main() {
                 palette: palette,
                 mine: false,
                 cache: LinkPreviewCache(backend),
+                videoControllerFactory:
+                    videoControllerFactory ?? createNetworkLinkVideoController,
               ),
             ),
           ),
@@ -509,6 +513,14 @@ void main() {
     testWidgets('a playable preview shows a lazy native Play control', (
       tester,
     ) async {
+      final controllers = <_FakeLinkVideoController>[];
+      final opened = <Uri>[];
+      final previous = richTimelineLaunchUrl;
+      richTimelineLaunchUrl = (uri) async {
+        opened.add(uri);
+        return true;
+      };
+      addTearDown(() => richTimelineLaunchUrl = previous);
       final backend = PreviewBackend()
         ..replies[url.toString()] = LinkPreview(
           url: url,
@@ -518,9 +530,84 @@ void main() {
             mimeType: 'video/mp4',
           ),
         );
-      await pump(tester, backend);
+      await pump(
+        tester,
+        backend,
+        videoControllerFactory: (_) {
+          final c = _FakeLinkVideoController();
+          controllers.add(c);
+          return c;
+        },
+      );
       expect(find.byTooltip('Play video'), findsOneWidget);
       expect(find.text('Watch this'), findsOneWidget);
+      expect(controllers, isEmpty, reason: 'lazy until Play is tapped');
+
+      await tester.tap(find.byTooltip('Play video'));
+      await tester.pump();
+      await tester.pump();
+      expect(controllers, hasLength(1));
+      final controller = controllers.single;
+      expect(controller.isPlaying, isTrue);
+      expect(opened, isEmpty);
+      expect(find.byTooltip('Pause video'), findsOneWidget);
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Pause video'),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        1,
+      );
+
+      // Once playing, the pause button fades away completely.
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('Pause video'),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        0,
+      );
+      expect(find.byTooltip('Pause video').hitTestable(), findsNothing);
+
+      // Tapping anywhere on the video pauses it without opening the web link.
+      final topLeft = tester.getTopLeft(find.byType(LinkVideoPlayer));
+      await tester.tapAt(topLeft + const Offset(16, 16));
+      await tester.pump();
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+      expect(opened, isEmpty);
+      expect(find.byTooltip('Play video').hitTestable(), findsOneWidget);
+
+      // Tapping anywhere on the paused video resumes, then center tap after
+      // fade pauses again.
+      await tester.tapAt(topLeft + const Offset(16, 16));
+      await tester.pump();
+      await tester.pump();
+      expect(controller.isPlaying, isTrue);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.byType(LinkVideoPlayer));
+      await tester.pump();
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+      expect(opened, isEmpty);
+
+      // Tapping the preview text below the video still opens the article URL.
+      await tester.tap(find.text('Watch this'));
+      await tester.pump();
+      expect(opened, [url]);
     });
 
     testWidgets('nothing to show means no card', (tester) async {
@@ -639,4 +726,61 @@ void main() {
 class _PlainBackend extends ChatBackend {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeLinkVideoController extends ChangeNotifier
+    implements LinkVideoController {
+  bool _initialized = false;
+  bool _playing = false;
+  Duration _position = Duration.zero;
+
+  @override
+  bool get isInitialized => _initialized;
+
+  @override
+  bool get isPlaying => _playing;
+
+  @override
+  double get aspectRatio => 16 / 9;
+
+  @override
+  Duration get duration => const Duration(seconds: 20);
+
+  @override
+  Duration get position => _position;
+
+  @override
+  Future<void> initialize() async {
+    _initialized = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> play() async {
+    _playing = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    _playing = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    _position = position;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> dispose() async {
+    super.dispose();
+  }
+
+  @override
+  Widget buildVideo(BuildContext context) => const Text('link video');
+
+  @override
+  Widget buildProgress(BuildContext context) => const SizedBox(height: 8);
 }

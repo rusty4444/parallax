@@ -27,6 +27,7 @@ class LinkPreviewCard extends StatefulWidget {
     required this.mine,
     this.cache,
     this.timestamp,
+    this.videoControllerFactory = createNetworkLinkVideoController,
   });
 
   final Uri uri;
@@ -38,6 +39,7 @@ class LinkPreviewCard extends StatefulWidget {
 
   /// Message time, so the server can return the preview as it was then.
   final int? timestamp;
+  final LinkVideoControllerFactory videoControllerFactory;
 
   @override
   State<LinkPreviewCard> createState() => _LinkPreviewCardState();
@@ -94,18 +96,18 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
                 : palette.background,
             borderRadius: BorderRadius.circular(12),
             clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => openTimelineLink(context, widget.uri),
-              child: Container(
-                width: width,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: mine
-                        ? palette.bubbleText.withValues(alpha: 0.25)
-                        : palette.stroke,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
+            child: DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: mine
+                      ? palette.bubbleText.withValues(alpha: 0.25)
+                      : palette.stroke,
                 ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SizedBox(
+                width: width,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -114,74 +116,79 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
                         video: preview.video!,
                         backend: widget.backend,
                         poster: preview.image,
+                        controllerFactory: widget.videoControllerFactory,
                         onFullScreen: () => showLinkVideoFullScreen(
                           context,
                           preview.video!,
                           widget.backend,
                           poster: preview.image,
+                          controllerFactory: widget.videoControllerFactory,
                         ),
                       ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (preview.image != null)
-                          _PreviewImage(
-                            backend: widget.backend,
-                            uri: preview.image!,
-                            size: 64,
-                          ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 9,
-                              vertical: 7,
+                    InkWell(
+                      onTap: () => openTimelineLink(context, widget.uri),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (preview.image != null)
+                            _PreviewImage(
+                              backend: widget.backend,
+                              uri: preview.image!,
+                              size: 64,
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  preview.host,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: muted,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (preview.title != null) ...[
-                                  const SizedBox(height: 2),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 7,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                                   Text(
-                                    preview.title!,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: text,
-                                      fontSize: 13,
-                                      height: 1.25,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                                if (preview.description != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    preview.description!,
-                                    maxLines: 2,
+                                    preview.host,
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: muted,
-                                      fontSize: 12,
-                                      height: 1.25,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
+                                  if (preview.title != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      preview.title!,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: text,
+                                        fontSize: 13,
+                                        height: 1.25,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                  if (preview.description != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      preview.description!,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: muted,
+                                        fontSize: 12,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
