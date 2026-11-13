@@ -16,6 +16,7 @@ import 'media_actions.dart';
 import 'media_content.dart';
 import 'media_features.dart';
 import 'voice_waveform.dart';
+import '../../media_player_owner.dart';
 import '../../media_preview_policy.dart';
 
 bool _autoLoad(BuildContext context, EntryHookContext ctx) =>
@@ -181,94 +182,270 @@ class _MediaPreviewImageState extends State<MediaPreviewImage> {
   );
 }
 
-/// Video: thumbnail (decrypted when encrypted), play badge and duration.
-/// Tapping opens the full-screen viewer, which plays the video.
-class VideoMessageBody extends StatelessWidget {
-  const VideoMessageBody({super.key, required this.ctx});
+/// Video: decrypted thumbnail until Play is tapped, then inline native
+/// playback with pause/seek controls and a separate full-screen action.
+class VideoMessageBody extends StatefulWidget {
+  const VideoMessageBody({
+    required this.ctx,
+    this.fileFactory = createMediaTempFile,
+    this.playerFactory = createNativeMediaPlayer,
+    super.key,
+  });
   final EntryHookContext ctx;
+  final MediaFileFactory fileFactory;
+  final MediaPlayerFactory playerFactory;
+
+  @override
+  State<VideoMessageBody> createState() => _VideoMessageBodyState();
+}
+
+class _VideoMessageBodyState extends State<VideoMessageBody>
+    with WidgetsBindingObserver {
+  late BackendSessionOwner _session = BackendSessionOwner(widget.ctx.backend);
+  MediaPlayerOwner? _owner;
+  MediaPlaybackController? _player;
+  bool _loading = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      final owner = _owner;
+      if (owner != null) unawaited(owner.pause());
+    }
+    // Deliberately do not auto-resume private media.
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _start() async {
+    if (_loading || !_session.isCurrent) return;
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    final owner = MediaPlayerOwner(
+      loader: mediaLoaderFor(
+        widget.ctx.backend,
+        widget.ctx.roomId,
+        widget.ctx.entry.id,
+      ),
+      fileFactory: widget.fileFactory,
+      playerFactory: widget.playerFactory,
+    );
+    _owner = owner;
+    try {
+      await owner.load();
+      if (!mounted || !_session.isCurrent) {
+        await owner.close();
+        return;
+      }
+      final player = owner.player;
+      if (player == null) throw StateError('Video is unavailable');
+      _player = player..addListener(_changed);
+      await owner.play();
+      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      await owner.close();
+      if (mounted) {
+        setState(() {
+          _owner = null;
+          _player = null;
+          _loading = false;
+          _failed = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggle() async {
+    final owner = _owner;
+    final player = _player;
+    if (owner == null || player == null) return _start();
+    if (player.value.playing) {
+      await owner.pause();
+    } else {
+      await owner.play();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _seek(double dx, double width) {
+    final owner = _owner;
+    final player = _player;
+    if (owner == null || player == null || width <= 0) return;
+    final duration = player.value.duration;
+    if (duration == Duration.zero) return;
+    final fraction = (dx / width).clamp(0.0, 1.0);
+    unawaited(
+      owner.seek(
+        Duration(milliseconds: (duration.inMilliseconds * fraction).round()),
+      ),
+    );
+  }
+
+  void _fullScreen() {
+    final owner = _owner;
+    if (owner != null) unawaited(owner.pause());
+    _open(context, widget.ctx);
+  }
+
+  void _discard() {
+    final owner = _owner;
+    _owner = null;
+    _player?.removeListener(_changed);
+    _player = null;
+    if (owner != null) unawaited(owner.close());
+  }
+
+  @override
+  void didUpdateWidget(VideoMessageBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.ctx.backend != widget.ctx.backend ||
+        oldWidget.ctx.roomId != widget.ctx.roomId ||
+        oldWidget.ctx.entry.id != widget.ctx.entry.id) {
+      _discard();
+      _session.release();
+      _session = BackendSessionOwner(widget.ctx.backend);
+      _loading = false;
+      _failed = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _discard();
+    _session.release();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => _video(
-      context,
-      MediaInfo.fromEntry(ctx.entry),
-      math.min(240, constraints.maxWidth),
-    ),
-  );
-
-  Widget _video(BuildContext context, MediaInfo info, double maxWidth) {
-    final size = mediaPreviewSize(info, maxWidth: maxWidth);
-    final p = ctx.palette;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Semantics(
-          button: true,
-          label: 'Video: ${info.name}. Double tap to play.',
-          child: GestureDetector(
-            onTap: () => _open(context, ctx),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: size.width,
-                height: size.height,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (info.hasThumbnail)
-                      MediaPreviewImage(
-                        backend: ctx.backend,
-                        roomId: ctx.roomId,
-                        eventId: ctx.entry.id,
-                        palette: p,
-                        placeholderIcon: Icons.movie_outlined,
-                        width: size.width,
-                        height: size.height,
-                        enabled: _autoLoad(context, ctx),
-                      )
-                    else
-                      ColoredBox(
-                        color: p.raised,
-                        child: Icon(
-                          Icons.movie_outlined,
-                          color: p.muted,
-                          size: 36,
+    builder: (context, constraints) {
+      final info = MediaInfo.fromEntry(widget.ctx.entry);
+      final size = mediaPreviewSize(
+        info,
+        maxWidth: math.min(240, constraints.maxWidth),
+      );
+      final p = widget.ctx.palette;
+      final player = _player;
+      final playing = player?.value.playing == true;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: size.width,
+              height: size.height,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (player != null)
+                    ColoredBox(
+                      color: Colors.black,
+                      child: player.buildVideo(context),
+                    )
+                  else if (info.hasThumbnail)
+                    MediaPreviewImage(
+                      backend: widget.ctx.backend,
+                      roomId: widget.ctx.roomId,
+                      eventId: widget.ctx.entry.id,
+                      palette: p,
+                      placeholderIcon: Icons.movie_outlined,
+                      width: size.width,
+                      height: size.height,
+                      enabled: _autoLoad(context, widget.ctx),
+                    )
+                  else
+                    ColoredBox(
+                      color: p.raised,
+                      child: Icon(
+                        Icons.movie_outlined,
+                        color: p.muted,
+                        size: 36,
+                      ),
+                    ),
+                  if (_loading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_failed)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'Couldn’t play this video.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white),
                         ),
                       ),
+                    )
+                  else
                     Center(
-                      child: Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.55),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          color: Colors.white,
+                      child: IconButton.filled(
+                        tooltip: playing ? 'Pause video' : 'Play video',
+                        onPressed: _toggle,
+                        icon: Icon(
+                          playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
                           size: 34,
                         ),
                       ),
                     ),
-                    if (info.duration != null)
-                      Positioned(
-                        left: 8,
-                        bottom: 8,
-                        child: _Badge(
-                          text: formatMediaDuration(info.duration!),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Full screen video',
+                      onPressed: _fullScreen,
+                      icon: const Icon(Icons.fullscreen_rounded),
+                    ),
+                  ),
+                  if (player != null)
+                    Positioned(
+                      left: 6,
+                      right: 6,
+                      bottom: 5,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (details) =>
+                            _seek(details.localPosition.dx, size.width - 12),
+                        child: LinearProgressIndicator(
+                          value: player.value.duration == Duration.zero
+                              ? 0
+                              : player.value.position.inMilliseconds /
+                                    player.value.duration.inMilliseconds,
+                          backgroundColor: Colors.white30,
+                          color: Colors.white,
+                          minHeight: 5,
                         ),
                       ),
-                  ],
-                ),
+                    )
+                  else if (info.duration != null)
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: _Badge(text: formatMediaDuration(info.duration!)),
+                    ),
+                ],
               ),
             ),
           ),
-        ),
-        _caption(ctx, info.caption),
-      ],
-    );
-  }
+          _caption(widget.ctx, info.caption),
+        ],
+      );
+    },
+  );
 }
 
 class _Badge extends StatelessWidget {

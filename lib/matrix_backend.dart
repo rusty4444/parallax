@@ -1711,24 +1711,16 @@ class MatrixBackend extends ChatBackend
         (url.scheme != 'https' && url.scheme != 'http')) {
       return null;
     }
+    final directVideo = playableLinkVideo(url);
+    if (directVideo != null) {
+      return LinkPreview(url: url, video: directVideo);
+    }
     final response = await client.getUrlPreview(url, ts: timestamp);
     if (_disposed || !identical(client, _client)) return null;
-    final fields = response.additionalProperties;
-    String? text(String key, int limit) {
-      final value = fields[key];
-      if (value is! String) return null;
-      final trimmed = value.trim();
-      if (trimmed.isEmpty) return null;
-      return trimmed.length <= limit ? trimmed : trimmed.substring(0, limit);
-    }
-
-    final image = response.ogImage;
-    return LinkPreview(
-      url: url,
-      title: text('og:title', 300),
-      description: text('og:description', 500),
-      siteName: text('og:site_name', 120),
-      image: image != null && image.scheme == 'mxc' ? image : null,
+    return linkPreviewFromOpenGraph(
+      url,
+      response.additionalProperties,
+      image: response.ogImage,
     );
   }
 

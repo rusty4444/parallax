@@ -9,6 +9,7 @@ import '../../chat_backend.dart';
 import '../rich_timeline/message_actions.dart';
 import 'link_preview_cache.dart';
 import 'link_previews.dart';
+import 'link_video_player.dart';
 
 /// Widest a preview card gets inside a bubble.
 const maxLinkPreviewWidth = 264.0;
@@ -105,65 +106,82 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
                   ),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (preview.image != null)
-                      _PreviewImage(
+                    if (preview.video != null)
+                      LinkVideoPlayer(
+                        video: preview.video!,
                         backend: widget.backend,
-                        uri: preview.image!,
-                        size: 64,
-                      ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 7,
+                        poster: preview.image,
+                        onFullScreen: () => showLinkVideoFullScreen(
+                          context,
+                          preview.video!,
+                          widget.backend,
+                          poster: preview.image,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              preview.host,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: muted,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
+                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (preview.image != null)
+                          _PreviewImage(
+                            backend: widget.backend,
+                            uri: preview.image!,
+                            size: 64,
+                          ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 7,
                             ),
-                            if (preview.title != null) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                preview.title!,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: text,
-                                  fontSize: 13,
-                                  height: 1.25,
-                                  fontWeight: FontWeight.w700,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  preview.host,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: muted,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                            ],
-                            if (preview.description != null) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                preview.description!,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: muted,
-                                  fontSize: 12,
-                                  height: 1.25,
-                                ),
-                              ),
-                            ],
-                          ],
+                                if (preview.title != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    preview.title!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: text,
+                                      fontSize: 13,
+                                      height: 1.25,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                                if (preview.description != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    preview.description!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: muted,
+                                      fontSize: 12,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),

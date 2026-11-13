@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/chat_backend.dart';
@@ -77,6 +79,38 @@ void main() {
       body(backend, mediaEntry('r', EntryKind.image, redacted: true)),
     );
     expect(find.text('none'), findsOneWidget);
+  });
+
+  testWidgets('video plays inline and offers full screen', (tester) async {
+    final backend = FakeMediaBackend()
+      ..original = (eventId) => DownloadedAttachment(
+        name: '$eventId.mp4',
+        mimeType: 'video/mp4',
+        bytes: Uint8List.fromList([1, 2, 3]),
+      );
+    await tester.pumpWidget(
+      host(
+        VideoMessageBody(
+          ctx: hookFor(backend, mediaEntry('v', EntryKind.video)),
+          fileFactory: (_) async => FakeTempFile(log),
+          playerFactory: (_, _) => FakePlayer(log),
+        ),
+      ),
+    );
+    expect(find.byTooltip('Play video'), findsOneWidget);
+    expect(find.byTooltip('Full screen video'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Play video'));
+    await settle(tester);
+    expect(find.text('native video'), findsOneWidget);
+    expect(log, contains('initialize'));
+    expect(log, contains('play'));
+    expect(find.byTooltip('Pause video'), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await settle(tester);
+    expect(log, contains('pause'));
+    expect(find.byTooltip('Play video'), findsOneWidget);
   });
 
   testWidgets('every media kind fits a 320 dp phone inside MessageBubble', (

@@ -145,6 +145,65 @@ void main() {
     });
   });
 
+  group('playable link video', () {
+    test('accepts public direct media and Open Graph video', () {
+      final direct = playableLinkVideo(
+        Uri.parse('https://cdn.example.com/video.mp4?token=abc'),
+        mimeType: 'application/octet-stream',
+      );
+      expect(direct, isNotNull);
+      expect(direct!.mimeType, 'video/mp4');
+
+      final preview = linkPreviewFromOpenGraph(
+        Uri.parse('https://www.facebook.com/watch/?v=123'),
+        {
+          'og:title': 'A video',
+          'og:video:secure_url': 'https://video.example.com/v.mp4',
+          'og:video:type': 'video/mp4',
+        },
+      );
+      expect(preview.video, isNotNull);
+      expect(preview.video!.url.host, 'video.example.com');
+      expect(preview.isEmpty, isFalse);
+    });
+
+    test('rejects HTML embeds and private or local targets', () {
+      final embed = linkPreviewFromOpenGraph(
+        Uri.parse('https://www.facebook.com/watch/?v=123'),
+        {
+          'og:title': 'A video',
+          'og:video': 'https://www.facebook.com/video/embed?video_id=123',
+          'og:video:type': 'text/html',
+        },
+      );
+      expect(embed.video, isNull);
+      expect(embed.title, 'A video');
+      expect(
+        playableLinkVideo(Uri.parse('https://192.168.1.20/video.mp4')),
+        isNull,
+      );
+      expect(
+        playableLinkVideo(Uri.parse('https://localhost/video.mp4')),
+        isNull,
+      );
+    });
+
+    test('video survives preview cache serialization', () {
+      final original = LinkPreview(
+        url: url,
+        title: 'Video',
+        video: LinkVideo(
+          url: Uri.parse('https://cdn.example.com/video.mp4'),
+          mimeType: 'video/mp4',
+        ),
+      );
+      final restored = LinkPreview.fromJson(original.toJson())!;
+      expect(restored.video, isNotNull);
+      expect(restored.video!.mimeType, 'video/mp4');
+      expect(restored.isEmpty, isFalse);
+    });
+  });
+
   group('LinkPreviewCache', () {
     late PreviewBackend backend;
     late Directory directory;
@@ -445,6 +504,23 @@ void main() {
       // Rebuilding doesn't fetch again.
       await pump(tester, backend);
       expect(backend.calls, hasLength(1));
+    });
+
+    testWidgets('a playable preview shows a lazy native Play control', (
+      tester,
+    ) async {
+      final backend = PreviewBackend()
+        ..replies[url.toString()] = LinkPreview(
+          url: url,
+          title: 'Watch this',
+          video: LinkVideo(
+            url: Uri.parse('https://cdn.example.com/video.mp4'),
+            mimeType: 'video/mp4',
+          ),
+        );
+      await pump(tester, backend);
+      expect(find.byTooltip('Play video'), findsOneWidget);
+      expect(find.text('Watch this'), findsOneWidget);
     });
 
     testWidgets('nothing to show means no card', (tester) async {
