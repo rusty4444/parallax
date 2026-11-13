@@ -22,8 +22,9 @@ class MentionSuggestion {
   final String label;
   final String? subtitle;
 
-  /// Text that replaces the typed `@query` (a user ID or `@room`, followed by
-  /// a space). User IDs become pills and `m.mentions` at send time.
+  /// Text that replaces the typed `@query`: a unique display name followed by
+  /// a space, or the user ID when names are ambiguous. IDs are restored before
+  /// sending so HTML pills and `m.mentions` always address the right person.
   final String insertText;
   final Widget? leading;
 }
@@ -149,6 +150,15 @@ MentionSource? roomMentionSource({
   if (features == null) return null;
   return (query) {
     final needle = query.toLowerCase();
+    // Ranking already scans cached membership; retain the full result here so
+    // duplicate display names can safely keep their unambiguous Matrix IDs.
+    final allMembers = features.searchMembers(roomId, '', limit: 1000000);
+    final labelCounts = <String, int>{};
+    for (final member in allMembers) {
+      final label = member.label.toLowerCase();
+      labelCounts[label] = (labelCounts[label] ?? 0) + 1;
+    }
+    final members = rankMembers(allMembers, query);
     return [
       if (features.canMentionRoom(roomId) &&
           ('room'.startsWith(needle) || 'everyone'.startsWith(needle)))
@@ -167,12 +177,16 @@ MentionSource? roomMentionSource({
             ),
           ),
         ),
-      for (final member in features.searchMembers(roomId, query))
+      for (final member in members)
         MentionSuggestion(
           id: member.userId,
           label: member.label,
           subtitle: member.userId,
-          insertText: mentionInsertText(member.userId),
+          insertText:
+              member.displayName != null &&
+                  labelCounts[member.label.toLowerCase()] == 1
+              ? '@${member.label} '
+              : mentionInsertText(member.userId),
           leading: UserAvatar(
             name: member.label,
             url: member.avatar,

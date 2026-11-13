@@ -599,7 +599,7 @@ void main() {
     expect(find.text('Bob'), findsOneWidget);
   });
 
-  testWidgets('composer offers @-mentions and inserts the user ID', (
+  testWidgets('composer offers @-mentions and inserts the display name', (
     tester,
   ) async {
     final backend = _Backend();
@@ -628,10 +628,27 @@ void main() {
     expect(find.text('Bob'), findsNothing);
     await tester.tap(find.text('Alice'));
     await tester.pump();
-    expect(controller.text, 'hi @alice:example.org ');
+    expect(controller.text, 'hi @Alice ');
     expect(find.text('Alice'), findsNothing);
     await tester.enterText(find.byType(TextField), '@ro');
     await tester.pump();
     expect(find.text('Everyone'), findsOneWidget);
+  });
+
+  test('duplicate mention display names keep unambiguous user IDs', () {
+    final backend = _Backend();
+    backend.members['@alice-two:example.org'] = const MemberProfile(
+      userId: '@alice-two:example.org',
+      displayName: 'Alice',
+    );
+    final suggestions = roomMentionSource(
+      backend: backend,
+      roomId: '!room:example.org',
+      palette: palette,
+    )!('al');
+    expect(
+      suggestions.map((suggestion) => suggestion.insertText),
+      unorderedEquals(['@alice:example.org ', '@alice-two:example.org ']),
+    );
   });
 }

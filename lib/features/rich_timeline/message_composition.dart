@@ -1,6 +1,7 @@
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:matrix/matrix.dart' show MatrixIdExtension;
+import 'package:matrix/matrix.dart' as matrix show Room, EventTypes;
 // The SDK's own Matrix-flavoured markdown (pills, spoilers, strikethrough),
 // exactly as Room.sendTextEvent(parseMarkdown: true) uses it. Pinned SDK.
 // ignore: implementation_imports
@@ -16,9 +17,9 @@ import 'permalinks.dart';
 ///
 /// * `/me text` becomes an `m.emote` (not for edits).
 /// * Markdown becomes `formatted_body` only when it adds formatting.
-/// * `m.mentions` lists matrix.to / `matrix:u/` user links and bare user IDs
-///   (as inserted by mention autocomplete), `@room`, and the replied-to
-///   sender. Your own ID is never mentioned.
+/// * `m.mentions` lists matrix.to / `matrix:u/` user links and bare user IDs,
+///   unique display-name labels resolved through [mentionLabels], `@room`, and
+///   the replied-to sender. Your own ID is never mentioned.
 /// * For [editEventId] the content is an `m.replace` with `m.new_content`;
 ///   the top-level `m.mentions` only lists users not in [previousMentions].
 Map<String, Object?> composeTextMessage(
@@ -27,8 +28,9 @@ Map<String, Object?> composeTextMessage(
   String? replyToSender,
   String? editEventId,
   Iterable<String> previousMentions = const [],
+  Map<String, String> mentionLabels = const {},
 }) {
-  var body = text;
+  var body = restoreMentionLabels(text, mentionLabels);
   var msgtype = 'm.text';
   if (editEventId == null && body.startsWith('/me ')) {
     body = body.substring(4);
@@ -196,6 +198,58 @@ List<String> mentionedUserIds(Map<String, Object?>? content) {
   final mentions = content?['m.mentions'];
   final ids = mentions is Map ? mentions['user_ids'] : null;
   return ids is List ? ids.whereType<String>().toList() : const [];
+}
+
+/// Unique display-name labels from cached joined/invited room membership.
+/// Labels shared by more than one person are omitted so they can never resolve
+/// to the wrong user; autocomplete inserts the raw ID for those people instead.
+Map<String, String> mentionLabelsForRoom(matrix.Room room) {
+  final members = room.states[matrix.EventTypes.RoomMember];
+  if (members == null) return const {};
+  final groups = <String, Map<String, Set<String>>>{};
+  for (final entry in members.entries) {
+    final content = entry.value.content;
+    final membership = content['membership'];
+    if (membership != 'join' && membership != 'invite') continue;
+    final name = content['displayname'];
+    if (name is! String) continue;
+    final label = name.trim();
+    if (label.isEmpty || label.contains('\n') || label.contains('\r')) {
+      continue;
+    }
+    groups
+        .putIfAbsent(label.toLowerCase(), () => <String, Set<String>>{})
+        .putIfAbsent(label, () => <String>{})
+        .add(entry.key);
+  }
+  final labels = <String, String>{};
+  for (final group in groups.values) {
+    final ids = group.values.expand((ids) => ids).toSet();
+    if (ids.length != 1) continue;
+    for (final label in group.keys) {
+      labels[label] = ids.single;
+    }
+  }
+  return labels;
+}
+
+/// Converts display-name mention text inserted by autocomplete back to the
+/// Matrix IDs required by plaintext, HTML pills and `m.mentions`.
+String restoreMentionLabels(String text, Map<String, String> labels) {
+  if (labels.isEmpty) return text;
+  final entries = labels.entries.toList()
+    ..sort((a, b) => b.key.length.compareTo(a.key.length));
+  var result = text;
+  for (final entry in entries) {
+    final label = entry.key.trim();
+    if (label.isEmpty || label == entry.value) continue;
+    final pattern = RegExp('(^|[\\s(])@${RegExp.escape(label)}(?=\$|[^\\w@])');
+    result = result.replaceAllMapped(
+      pattern,
+      (match) => '${match[1]}${entry.value}',
+    );
+  }
+  return result;
 }
 
 /// The plain-text pill label for a user, for composer insertion.

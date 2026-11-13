@@ -353,6 +353,9 @@ class MatrixScheduledMessages extends ChangeNotifier
         composeTextMessage(
           text,
           ownUserId: client.userID,
+          mentionLabels: text.contains('@')
+              ? mentionLabelsForRoom(room)
+              : const {},
           replyToSender: replySender,
         ),
       ),

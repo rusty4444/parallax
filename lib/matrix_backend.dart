@@ -768,6 +768,9 @@ class MatrixBackend extends ChatBackend
                   composeTextMessage(
                     record.body,
                     ownUserId: client.userID,
+                    mentionLabels: record.body.contains('@')
+                        ? mentionLabelsForRoom(room)
+                        : const {},
                     replyToSender: reply?.senderId,
                     editEventId: record.editEventId,
                     previousMentions: mentionedUserIds(edited?.content),
@@ -1442,6 +1445,9 @@ class MatrixBackend extends ChatBackend
           composeTextMessage(
             text.trim(),
             ownUserId: client.userID,
+            mentionLabels: text.contains('@')
+                ? mentionLabelsForRoom(room)
+                : const {},
             replyToSender: reply?.senderId,
             editEventId: editEventId,
             previousMentions: mentionedUserIds(edited?.content),

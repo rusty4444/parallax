@@ -126,6 +126,27 @@ void main() {
       );
     });
 
+    test('display-name mentions resolve to IDs and intentional mentions', () {
+      final content = composeTextMessage(
+        '@Quinn Harper next time we should play a board game',
+        ownUserId: me,
+        mentionLabels: const {
+          'Quinn Harper': '@meta_555000111:samprim.net',
+        },
+      );
+      expect(
+        content['body'],
+        '@meta_555000111:samprim.net next time we should play a board game',
+      );
+      expect(content['m.mentions'], {
+        'user_ids': ['@meta_555000111:samprim.net'],
+      });
+      expect(
+        content['formatted_body'],
+        contains('https://matrix.to/#/@meta_555000111:samprim.net'),
+      );
+    });
+
     test('email addresses and @roomful are not mentions', () {
       final content = composeTextMessage('mail sam@example.org about @roomful');
       expect(content['m.mentions'], <String, Object?>{});
