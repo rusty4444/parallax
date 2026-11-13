@@ -104,11 +104,12 @@ class NotificationMediaLoader {
     }
   }
 
-  /// A square PNG avatar for [mxc], cached by URI.
+  /// A circular PNG avatar for [mxc], cached by URI. The `a_c_` cache version
+  /// avoids reusing square avatars written by earlier app versions.
   Future<String?> avatar(Uri? mxc) async {
     if (mxc == null || validMxc(mxc.toString()) == null) return null;
     try {
-      final name = 'a_${_hash(mxc.toString())}.png';
+      final name = 'a_c_${_hash(mxc.toString())}.png';
       final existing = File(p.join(_directory.path, name));
       if (await existing.exists()) return existing.path;
       final bytes = await _fetch(
@@ -271,7 +272,7 @@ class NotificationImageJob {
 }
 
 /// Decodes untrusted image bytes with dimension/pixel bounds and re-encodes
-/// them (JPEG preview or PNG square avatar). Drops all metadata. Returns null
+/// them (JPEG preview or circular PNG avatar). Drops all metadata. Returns null
 /// for unreadable, unsupported or oversized images.
 Uint8List? processNotificationImage(NotificationImageJob job) {
   try {
@@ -305,6 +306,7 @@ Uint8List? processNotificationImage(NotificationImageJob job) {
         size: math.min(job.edge, math.min(image.width, image.height)),
         interpolation: img.Interpolation.average,
       );
+      image = img.copyCropCircle(image.convert(numChannels: 4));
       image.exif = img.ExifData();
       return img.encodePng(image, singleFrame: true);
     }

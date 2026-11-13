@@ -494,6 +494,7 @@ void main() {
       final decoded = img.decodeJpg(preview.readAsBytesSync())!;
       expect(decoded.width, notificationPreviewEdge);
       expect(File(resolved.line.senderAvatarPath!).existsSync(), isTrue);
+      expect(p(resolved.line.senderAvatarPath!), contains('/a_c_'));
       final thumbnailRequest = requests.firstWhere(
         (r) => r.url.path.contains('/photo'),
       );
@@ -615,12 +616,19 @@ void main() {
         ),
         isNull,
       );
+      final source = img.Image(width: 300, height: 200, numChannels: 4);
+      img.fill(source, color: img.ColorRgba8(40, 80, 120, 255));
       final avatar = processNotificationImage(
-        NotificationImageJob(_png(300, 200), edge: 128, square: true),
+        NotificationImageJob(img.encodePng(source), edge: 128, square: true),
       )!;
       final decoded = img.decodePng(avatar)!;
       expect(decoded.width, decoded.height);
       expect(decoded.width, 128);
+      expect(decoded.getPixel(0, 0).a, 0);
+      expect(decoded.getPixel(127, 0).a, 0);
+      expect(decoded.getPixel(0, 127).a, 0);
+      expect(decoded.getPixel(127, 127).a, 0);
+      expect(decoded.getPixel(64, 64).a, 255);
       final small = processNotificationImage(
         NotificationImageJob(_png(100, 50), edge: 640),
       )!;

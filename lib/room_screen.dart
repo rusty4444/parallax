@@ -94,10 +94,43 @@ class _OwnedRoomScreen extends StatefulWidget {
   State<_OwnedRoomScreen> createState() => _RoomScreenState();
 }
 
+class _RoomTimelineScope {
+  _RoomTimelineOwner? current;
+}
+
+/// The newest mounted route for one room owns its shared backend timeline.
+/// Replacing a room route can mount the new state before the old state is
+/// disposed; the old state must not close the replacement's timeline.
+class _RoomTimelineOwner {
+  _RoomTimelineOwner._(this._key, this._scope);
+
+  factory _RoomTimelineOwner.claim(BackendSessionOwner session, String roomId) {
+    final key = (session.backend, session.accountKey, session.userId, roomId);
+    final scope = _scopes.putIfAbsent(key, _RoomTimelineScope.new);
+    final owner = _RoomTimelineOwner._(key, scope);
+    scope.current = owner;
+    return owner;
+  }
+
+  static final _scopes =
+      <(ChatBackend, String?, String?, String), _RoomTimelineScope>{};
+  final (ChatBackend, String?, String?, String) _key;
+  final _RoomTimelineScope _scope;
+
+  bool get isCurrent => identical(_scope.current, this);
+
+  void release() {
+    if (!isCurrent) return;
+    _scope.current = null;
+    _scopes.remove(_key);
+  }
+}
+
 class _RoomScreenState extends State<_OwnedRoomScreen>
     with WidgetsBindingObserver {
   final _draft = TextEditingController();
   late final _owner = BackendSessionOwner(widget.backend);
+  late final _timelineOwner = _RoomTimelineOwner.claim(_owner, widget.roomId);
   MessageDraftStore? _draftStore;
   RoomDraftOwner? _draftOwner;
   Future<void>? _draftLoading;
@@ -145,7 +178,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       _bubbleStore.load(widget.roomId).then((_) => _bubbleColoursChanged()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _owner.isCurrent) unawaited(_open());
+      if (mounted && _owner.isCurrent && _timelineOwner.isCurrent) {
+        unawaited(_open());
+      }
     });
   }
 
@@ -419,6 +454,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   }
 
   Future<void> _open() async {
+    if (!_timelineOwner.isCurrent) return;
     try {
       await widget.backend.openRoom(widget.roomId);
     } catch (_) {
@@ -449,7 +485,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     _draftOwner?.release();
     _typingStopTimer?.cancel();
     _stopTyping();
-    if (_owner.isCurrent) widget.backend.closeRoom(widget.roomId);
+    if (_owner.isCurrent && _timelineOwner.isCurrent) {
+      widget.backend.closeRoom(widget.roomId);
+    }
+    _timelineOwner.release();
     _owner.release();
     _draft.removeListener(_draftChanged);
     _draft.dispose();

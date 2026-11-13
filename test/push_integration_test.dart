@@ -497,11 +497,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(RoomScreen), findsOneWidget);
     expect(h.backend.openedRooms, [_previousRoomId, _roomId]);
+    expect(h.backend.activeRoomId, _roomId);
 
     await tester.tap(find.byTooltip('Back to rooms'));
     await tester.pumpAndSettle();
     expect(find.byType(InboxScreen), findsOneWidget);
     expect(find.byType(RoomScreen, skipOffstage: false), findsNothing);
+    expect(h.backend.activeRoomId, isNull);
+    await h.close(tester);
+  });
+
+  testWidgets('notification for the open room keeps its timeline active', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.backend.roomList = [_joined];
+    await h.boot(tester);
+    await h.enable(tester);
+    await tester.tap(find.text('Notification room'));
+    await tester.pumpAndSettle();
+    expect(h.backend.activeRoomId, _roomId);
+
+    h.tapNotification();
+    await _join(tester, h.push.settle);
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomScreen), findsOneWidget);
+    expect(h.backend.activeRoomId, _roomId);
+
+    await tester.tap(find.byTooltip('Back to rooms'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InboxScreen), findsOneWidget);
     expect(h.backend.activeRoomId, isNull);
     await h.close(tester);
   });
