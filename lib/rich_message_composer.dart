@@ -17,6 +17,7 @@ import 'messaging_features.dart';
 import 'voice_recorder.dart';
 import 'haptics.dart';
 import 'features/media/video_prep.dart';
+import 'features/media/image_editor_screen.dart';
 
 typedef MediaPicker = Future<MediaSelection?> Function();
 
@@ -1102,6 +1103,21 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     });
   }
 
+  Future<void> _editAttachment() async {
+    final media = _media;
+    if (!_alive || media == null || !media.mimeType.startsWith('image/')) {
+      return;
+    }
+    final edited = await showImageEditor(context, media);
+    if (!_alive || edited == null || !identical(_media, media)) return;
+    final error = _validate(edited);
+    if (error != null) {
+      _showError(error);
+      return;
+    }
+    setState(() => _assignMedia(edited));
+  }
+
   void _removeAttachment() {
     if (!_alive) return;
     if (_voiceMedia) {
@@ -1270,6 +1286,12 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                     ? Icons.stop_circle_outlined
                     : Icons.play_circle_outline,
               ),
+            ),
+          if (media.mimeType.startsWith('image/'))
+            IconButton(
+              tooltip: 'Edit image',
+              onPressed: _editAttachment,
+              icon: const Icon(Icons.edit_outlined),
             ),
           IconButton(
             tooltip: 'Replace attachment',
