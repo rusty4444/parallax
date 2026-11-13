@@ -24,9 +24,14 @@ class MessageSearchScreen extends StatefulWidget {
     super.key,
     required this.backend,
     required this.palette,
+    this.initialQuery = '',
   });
   final ChatBackend backend;
   final AppPalette palette;
+
+  /// Pre-filled query (from the home search bar); searched on open when it
+  /// is at least two characters.
+  final String initialQuery;
 
   @override
   State<MessageSearchScreen> createState() => _MessageSearchScreenState();
@@ -58,6 +63,11 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
   void initState() {
     super.initState();
     _bind();
+    final initial = widget.initialQuery.trim();
+    if (initial.length >= 2) {
+      _queryController.text = widget.initialQuery;
+      _onChanged(widget.initialQuery);
+    }
   }
 
   void _bind() {

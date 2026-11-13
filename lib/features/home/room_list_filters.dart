@@ -88,10 +88,7 @@ List<ChatRoom> filterRoomList(
       if (!room.isSpace &&
           (context.spaceRooms?.contains(room.id) ?? true) &&
           filters.every((filter) => _matches(room, filter, context)) &&
-          (query.isEmpty ||
-              room.name.toLowerCase().contains(query) ||
-              room.id.toLowerCase().contains(query) ||
-              (room.canonicalAlias?.toLowerCase().contains(query) ?? false)))
+          (query.isEmpty || _roomMatchesQuery(room, query)))
         room,
   ];
   int rank(ChatRoom room) => room.invited
@@ -106,6 +103,23 @@ List<ChatRoom> filterRoomList(
     return byRank != 0 ? byRank : order[a.id]!.compareTo(order[b.id]!);
   });
   return result;
+}
+
+/// Whether a room matches a lower-cased search [query] by name, address or
+/// people. A DM carries the person's name as the room name; a group room also
+/// matches its members' display names ([ChatRoom.heroes]) and the last
+/// sender, so searching a person finds the groups they are in.
+bool _roomMatchesQuery(ChatRoom room, String query) {
+  if (room.name.toLowerCase().contains(query) ||
+      room.id.toLowerCase().contains(query) ||
+      (room.canonicalAlias?.toLowerCase().contains(query) ?? false)) {
+    return true;
+  }
+  for (final hero in room.heroes) {
+    if (hero.name.toLowerCase().contains(query)) return true;
+  }
+  final sender = room.previewSender;
+  return sender != null && sender.toLowerCase().contains(query);
 }
 
 /// Element X empty-state copy for the current selection, or null when no

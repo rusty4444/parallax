@@ -170,6 +170,27 @@ void main() {
       );
     });
 
+    test('query matches people in group rooms, not just room names', () {
+      final rooms = [
+        ChatRoom(
+          id: '!g:x',
+          name: 'Project',
+          preview: '',
+          lastActivity: null,
+          heroes: const [ChatAvatar(name: 'Mia Chen')],
+        ),
+        _room('!d:x', name: 'Alex', direct: true),
+        _room('!other:x', name: 'Other', sender: 'Bob'),
+      ];
+      List<String> run(String query) =>
+          _ids(filterRoomList(rooms, const {}, RoomListContext(query: query)));
+      expect(run('mia'), ['!g:x']); // member name in a group
+      expect(run('alex'), ['!d:x']); // DM name
+      expect(run('bob'), ['!other:x']); // last sender
+      expect(run('project'), ['!g:x']); // room name still works
+      expect(run('zzz'), isEmpty);
+    });
+
     test('matrix.to links encode IDs and add a via server', () {
       expect(
         matrixToRoomLink('!abc:example.org', viaServer: 'example.org'),
@@ -423,7 +444,7 @@ void main() {
         await tester.tap(find.byTooltip('Search conversations'));
         await tester.pumpAndSettle();
         expect(search, findsOneWidget);
-        expect(find.text('Find a conversation'), findsOneWidget);
+        expect(find.text('Search people, rooms and messages'), findsOneWidget);
         expect(FocusScope.of(tester.element(search)).hasFocus, isTrue);
         expect(
           tester.getTopLeft(search).dy,
@@ -466,6 +487,32 @@ void main() {
         expect(find.byTooltip('Show options'), findsOneWidget);
       },
     );
+
+    testWidgets('home search lists message matches from the visible rooms', (
+      tester,
+    ) async {
+      // FakeBackend.searchMessages returns "Found it in a room" in
+      // !r:example.org; make that room visible so the hit is in scope.
+      backend.roomList = [
+        ...backend.roomList,
+        _room('!r:example.org', name: 'General'),
+      ];
+      await pump(tester);
+      await tester.tap(find.byTooltip('Search conversations'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('home.conversation_search')),
+        'zzz',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.text('Found it in a room'), findsOneWidget);
+      expect(find.text('MESSAGE MATCHES'), findsOneWidget);
+      expect(find.text('See all message results'), findsOneWidget);
+      // No room name matches "zzz": the room list is empty, only messages.
+      expect(find.text('Team'), findsNothing);
+      expect(find.text('Alex'), findsNothing);
+    });
 
     testWidgets('a collapsed menu says what narrows the list and can clear', (
       tester,
@@ -512,7 +559,7 @@ void main() {
       await pump(tester, prefs: prefs);
       expect(find.byTooltip('Show options'), findsNothing);
       expect(find.text('Messages'), findsOneWidget);
-      expect(find.text('Find a conversation'), findsNothing);
+      expect(find.text('Search people, rooms and messages'), findsNothing);
       expect(find.text('Explore rooms'), findsOneWidget);
       expect(find.text('Favourites'), findsOneWidget);
       expect(find.text('4 ROOMS'), findsOneWidget);
@@ -520,7 +567,7 @@ void main() {
       // Search remains an independent pop-in even in the expanded layout.
       await tester.tap(find.byTooltip('Search conversations'));
       await tester.pumpAndSettle();
-      expect(find.text('Find a conversation'), findsOneWidget);
+      expect(find.text('Search people, rooms and messages'), findsOneWidget);
       await tester.tap(find.byTooltip('Hide conversation search'));
       await tester.pumpAndSettle();
 
