@@ -69,7 +69,10 @@ extension ParallaxRoomNames on Room {
       for (final hero in heroes)
         if (hero.isNotEmpty && hero != client.userID) hero,
     ], isBot);
-    if (direct == null || isMultiPersonRoom) {
+    // Always supplement heroes from joined members. A true DM naturally ends
+    // with one person, while a bridged group gets a collage even when its
+    // direct flag and summary member counts are missing or wrong.
+    {
       // m.heroes is optional and is often empty on named/bridged groups. Fill
       // an avatar cluster from the latest sender and other joined members we
       // already know about, rather than falling straight back to a network
@@ -108,20 +111,6 @@ extension ParallaxRoomNames on Room {
       }
       return finished();
     }
-    if (result.any((id) => !isBot(id))) return result;
-
-    // Some bridge portals incorrectly make the bot the DM partner and provide
-    // no person in the summary. Prefer the latest bridged sender, then a person
-    // already present in member state; _needMembers will load their avatar.
-    final recent = lastEvent?.senderId;
-    if (recent != null && recent != client.userID && !isBot(recent)) {
-      return [recent];
-    }
-    final loadedPeople = [
-      for (final id in states[EventTypes.RoomMember]?.keys ?? const <String>[])
-        if (id != client.userID && !isBot(id)) id,
-    ];
-    return loadedPeople.isEmpty ? result : loadedPeople.take(4).toList();
   }
 
   /// [getLocalizedDisplayname] without bridge bots and without "Group
@@ -316,21 +305,11 @@ extension ParallaxRoomNames on Room {
     ),
   );
 
-  /// [avatar], except a multi-person room without custom art shows its people
-  /// (the avatar cluster), as does a DM whose partner is a bridge bot.
+  /// The room's explicit avatar, or null so `RoomAvatar` can use its people.
+  /// Returning the SDK's direct-chat avatar here would pin a single person even
+  /// before the joined-member list has loaded, hiding a group's collage.
   Uri? get parallaxAvatar {
     final url = getState(EventTypes.RoomAvatar)?.content.tryGet<String>('url');
-    if (url != null) return Uri.tryParse(url);
-    // The SDK's direct-chat avatar is a single person's face. That is wrong
-    // for a bridged group incorrectly marked direct: let RoomAvatar build the
-    // joined-member collage instead.
-    if (isMultiPersonRoom) return null;
-    final direct = directChatPartner;
-    if (direct != null &&
-        isBridgeBot(direct) &&
-        peopleHeroes.any((hero) => hero != direct)) {
-      return null;
-    }
-    return avatar;
+    return url == null ? null : Uri.tryParse(url);
   }
 }

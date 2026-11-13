@@ -249,11 +249,13 @@ void main() {
       expect(r.parallaxAvatar, isNull);
     });
 
-    test('an ordinary DM keeps its partner name and avatar', () {
+    test('an ordinary DM keeps its partner name and single avatar', () {
       final r = room({_alex: 'Alex'}, direct: _alex);
       expect(r.parallaxName, 'Alex');
-      expect(r.parallaxAvatar, r.avatar);
-      expect(r.parallaxAvatar, isNotNull);
+      expect(r.peopleHeroes, [_alex]);
+      // The SDK avatar and the one-person RoomAvatar are equivalent here.
+      expect(r.avatar, isNotNull);
+      expect(r.parallaxAvatar, isNull);
     });
   });
 }

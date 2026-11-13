@@ -37,6 +37,9 @@ final serverNames = <String, String>{};
 /// Full /members responses for groups whose avatar heroes must be loaded.
 final serverMembers = <String, List<Map<String, Object?>>>{};
 
+/// Rooms whose SDK participant request must fail so full state is exercised.
+final serverParticipantFailures = <String>{};
+
 class _Client extends matrix.Client {
   _Client()
     : super(
@@ -54,9 +57,30 @@ class _Client extends matrix.Client {
                     path.length - '/members'.length,
                   );
             final members = serverMembers[roomId];
+            if (serverParticipantFailures.contains(roomId)) {
+              return http.Response('{"errcode":"M_UNKNOWN"}', 500);
+            }
             if (members != null) {
               return http.Response(
                 jsonEncode({'chunk': members}),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }
+          }
+          if (path.endsWith('/state')) {
+            const prefix = '/rooms/';
+            final start = path.indexOf(prefix);
+            final roomId = start < 0
+                ? null
+                : path.substring(
+                    start + prefix.length,
+                    path.length - '/state'.length,
+                  );
+            final members = serverMembers[roomId];
+            if (members != null) {
+              return http.Response(
+                jsonEncode(members),
                 200,
                 headers: {'content-type': 'application/json'},
               );
@@ -356,11 +380,7 @@ void main() {
       final r = matrix.Room(
         id: id,
         client: client,
-        summary: matrix.RoomSummary.fromJson({
-          'm.heroes': <String>[],
-          'm.joined_member_count': 5,
-          'm.invited_member_count': 0,
-        }),
+        summary: matrix.RoomSummary.fromJson({'m.heroes': <String>[]}),
       );
       r.setState(
         matrix.Event(
@@ -403,7 +423,11 @@ void main() {
             'origin_server_ts': i,
           },
       ];
-      addTearDown(() => serverMembers.remove(id));
+      serverParticipantFailures.add(id);
+      addTearDown(() {
+        serverMembers.remove(id);
+        serverParticipantFailures.remove(id);
+      });
       backend.debugRoomsSynced(
         matrix.SyncUpdate(
           nextBatch: '2',

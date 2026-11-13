@@ -3765,9 +3765,7 @@ class MatrixBackend extends ChatBackend
       _freshQueue.add((room, id));
     }
     _pumpFresh();
-    if (room.parallaxAvatar == null &&
-        (!room.isDirectChatCached || room.isMultiPersonRoom) &&
-        room.peopleHeroes.length < 4) {
+    if (room.parallaxAvatar == null && room.peopleHeroes.length < 4) {
       unawaited(_loadGroupAvatarMembers(room));
     }
   }
@@ -3780,12 +3778,48 @@ class MatrixBackend extends ChatBackend
     final generation = _securityGeneration;
     if (client == null) return;
     try {
-      final participants = await room
-          .requestParticipants(const [matrix.Membership.join], true, false)
-          .timeout(const Duration(seconds: 15));
-      if (_disposed || generation != _securityGeneration || client != _client) {
-        return;
+      var participants = <matrix.User>[];
+      try {
+        participants = await room
+            .requestParticipants(const [matrix.Membership.join], true, false)
+            .timeout(const Duration(seconds: 15));
+      } catch (_) {
+        // Try the authoritative full-state endpoint below.
       }
+      bool current() =>
+          !_disposed &&
+          generation == _securityGeneration &&
+          identical(client, _client);
+      if (!current()) return;
+      final usefulParticipants = participants
+          .where(
+            (user) => user.id != client.userID && !room.isBridgeBot(user.id),
+          )
+          .length;
+      if (usefulParticipants < 4) {
+        // Some bridges give sparse/stale participant results. Full room state
+        // is authoritative and also covers rooms whose SDK database lookup
+        // failed before /members could be reached.
+        try {
+          final state = await client
+              .getRoomState(room.id)
+              .timeout(const Duration(seconds: 15));
+          if (!current()) return;
+          final byId = {for (final user in participants) user.id: user};
+          for (final event in state) {
+            if (event.type != matrix.EventTypes.RoomMember ||
+                event.content['membership'] != matrix.Membership.join.name) {
+              continue;
+            }
+            final user = matrix.Event.fromMatrixEvent(event, room).asUser;
+            byId[user.id] = user;
+          }
+          participants = byId.values.toList(growable: false);
+        } catch (_) {
+          // Use whatever the participant request did return.
+        }
+      }
+      if (!current()) return;
       final existing = room.peopleHeroes.toSet();
       final needed = 4 - existing.length;
       if (needed <= 0) return;
