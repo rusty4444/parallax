@@ -173,93 +173,87 @@ class MessageBubble extends StatelessWidget {
                   textWidthBasis: TextWidthBasis.longestLine,
                   child: BubbleColumn(
                     children: [
-                      // The bubble's top and side padding are part of the
-                      // double-tap target too (short messages are small).
-                      DoubleTapReact(
-                        onDoubleTap: onHeart,
-                        onLongPress: onAction,
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            14,
-                            compact ? 6 : 10,
-                            14,
-                            0,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (!mine && sender) ...[
-                                Text(
-                                  entry.senderLabel,
-                                  maxLines: 1,
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          14,
+                          compact ? 6 : 10,
+                          14,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (!mine && sender) ...[
+                              Text(
+                                entry.senderLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: palette.secondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                            ],
+                            if (entry.replyToId != null) ...[
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: palette.secondary,
+                                      width: 3,
+                                    ),
+                                  ),
+                                ),
+                                child: Text(
+                                  replyPreview == null
+                                      ? 'In reply to an earlier message'
+                                      : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: palette.secondary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
+                                    color: mine
+                                        ? palette.bubbleText
+                                        : palette.muted,
+                                    fontSize: 12,
                                   ),
                                 ),
-                                const SizedBox(height: 5),
-                              ],
-                              if (entry.replyToId != null) ...[
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      left: BorderSide(
-                                        color: palette.secondary,
-                                        width: 3,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    replyPreview == null
-                                        ? 'In reply to an earlier message'
-                                        : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: mine
-                                          ? palette.bubbleText
-                                          : palette.muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                              ],
-                              if (special != null)
-                                special
-                              else ...[
-                                if (entry.isImage) ...[
-                                  MessageImage(
-                                    backend: backend,
-                                    palette: palette,
-                                    roomId: roomId,
-                                    eventId: entry.id,
-                                  ),
-                                  const SizedBox(height: 4),
-                                ],
-                                if (entry.isAttachment)
-                                  _AttachmentRow(
-                                    entry: entry,
-                                    backend: backend,
-                                    roomId: roomId,
-                                    palette: palette,
-                                  )
-                                else if (entry.body.isNotEmpty)
-                                  buildMessageText(
-                                    context,
-                                    hook,
-                                    style: TextStyle(
-                                      color: textColor,
-                                      fontSize: 15,
-                                      height: 1.35,
-                                    ),
-                                  ),
-                              ],
+                              ),
+                              const SizedBox(height: 5),
                             ],
-                          ),
+                            if (special != null)
+                              special
+                            else ...[
+                              if (entry.isImage) ...[
+                                MessageImage(
+                                  backend: backend,
+                                  palette: palette,
+                                  roomId: roomId,
+                                  eventId: entry.id,
+                                ),
+                                const SizedBox(height: 4),
+                              ],
+                              if (entry.isAttachment)
+                                _AttachmentRow(
+                                  entry: entry,
+                                  backend: backend,
+                                  roomId: roomId,
+                                  palette: palette,
+                                )
+                              else if (entry.body.isNotEmpty)
+                                buildMessageText(
+                                  context,
+                                  hook,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 15,
+                                    height: 1.35,
+                                  ),
+                                ),
+                            ],
+                          ],
                         ),
                       ),
                       for (final footer in footers)
@@ -328,14 +322,22 @@ class MessageBubble extends StatelessWidget {
                 ),
             ],
           );
+    // The entire padded bubble is a reply/reaction target, not just its text.
+    // Reaction pills deliberately stay outside this gesture area so one tap
+    // toggles them without also triggering a double-tap or long-press action.
+    final gestureBubble = DoubleTapReact(
+      onDoubleTap: onHeart,
+      onLongPress: onAction,
+      child: bubble,
+    );
     final reacted = reactions == null
-        ? bubble
+        ? gestureBubble
         : Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: mine
                 ? CrossAxisAlignment.end
                 : CrossAxisAlignment.start,
-            children: [bubble, reactions],
+            children: [gestureBubble, reactions],
           );
     final row = avatars
         ? Row(

@@ -714,6 +714,17 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     );
   }
 
+  void _replyToEntry(ChatEntry entry) {
+    if (!mounted || !_owner.isCurrent || entry.redacted) return;
+    Haptics.selection();
+    setState(() {
+      _advanceComposerContext();
+      if (_editing != null) _setDraft(_normalDraft);
+      _replyingTo = entry;
+      _editing = null;
+    });
+  }
+
   Future<void> _showActions(ChatEntry entry) async {
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
     Haptics.longPress();
@@ -917,12 +928,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         }
       }
     } else if (choice == 'reply') {
-      setState(() {
-        _advanceComposerContext();
-        if (_editing != null) _setDraft(_normalDraft);
-        _replyingTo = entry;
-        _editing = null;
-      });
+      _replyToEntry(entry);
     } else if (choice == 'edit') {
       unawaited(_flushDraft());
       setState(() {
@@ -1494,6 +1500,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                   onHeart: _heart,
                                   onAction: _showActions,
                                   onReaction: _react,
+                                  onReply: _replyToEntry,
                                   onLoadOlder: _loadOlder,
                                 ),
                           // Chat effects and other full-screen overlays.

@@ -24,6 +24,28 @@ Map<String, Object?> _event(
   'status': ?status,
 };
 
+Map<String, Object?> _reaction(
+  String id,
+  String target,
+  String key,
+  int ts, {
+  int? status,
+}) => {
+  'event_id': id,
+  'type': 'm.reaction',
+  'sender': _me,
+  'origin_server_ts': ts,
+  'room_id': _roomId,
+  'content': {
+    'm.relates_to': {
+      'rel_type': 'm.annotation',
+      'event_id': target,
+      'key': key,
+    },
+  },
+  'status': ?status,
+};
+
 class _Database extends Fake implements matrix.DatabaseApi {
   /// Locally cached timeline, newest first (as the SDK stores it).
   List<Map<String, Object?>> cached = const [];
@@ -64,6 +86,10 @@ class _Database extends Fake implements matrix.DatabaseApi {
     String roomId,
     matrix.BasicEvent event,
   ) async {}
+
+  @override
+  Future<({Map<String, Object?> content, DateTime savedAt})?>
+  getCustomCacheObject(String cacheKey) async => null;
 
   @override
   Future<void> removeEvent(String eventId, String roomId) async {
@@ -336,6 +362,47 @@ void main() {
     );
     expect(
       h.requests.where((request) => request.path.contains('/redact')),
+      isEmpty,
+    );
+  });
+
+  test('tapping a synced own reaction hides it while redacting', () async {
+    final h = _Harness(
+      cached: [
+        _reaction(r'$own-reaction', r'$message', '❤️', 10000),
+        _event(r'$message', 9000),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+    await h.backend.openRoom(_roomId);
+    expect(h.backend.messages.single.reactions.single.mine, isTrue);
+
+    await h.backend.react(_roomId, r'$message', emoji: '❤️');
+
+    expect(h.backend.messages.single.reactions, isEmpty);
+    expect(
+      h.requests.where((request) => request.path.contains('/redact/')),
+      isNotEmpty,
+    );
+  });
+
+  test('an unsent own reaction is cancelled and removed locally', () async {
+    final h = _Harness(
+      cached: [
+        _reaction('txn-reaction', r'$message', '❤️', 10000, status: -2),
+        _event(r'$message', 9000),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+    await h.backend.openRoom(_roomId);
+    expect(h.backend.messages.single.reactions.single.mine, isTrue);
+
+    await h.backend.react(_roomId, r'$message', emoji: '❤️');
+
+    expect(h.db.removed, [('txn-reaction', _roomId)]);
+    expect(h.backend.messages.single.reactions, isEmpty);
+    expect(
+      h.requests.where((request) => request.path.contains('/redact/')),
       isEmpty,
     );
   });

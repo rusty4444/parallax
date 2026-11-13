@@ -7,6 +7,7 @@ import 'chat_backend.dart';
 import 'message_image.dart';
 import 'timeline/double_tap_react.dart';
 import 'timeline/reaction_pills.dart';
+import 'timeline/swipe_reply.dart';
 import 'features/appearance/bubble_colours.dart';
 
 class GalleryBubble extends StatelessWidget {
@@ -19,6 +20,7 @@ class GalleryBubble extends StatelessWidget {
     required this.onHeart,
     required this.onAction,
     required this.onReaction,
+    this.onReply,
   });
 
   final List<ChatEntry> entries;
@@ -28,19 +30,25 @@ class GalleryBubble extends StatelessWidget {
   final ValueChanged<ChatEntry> onHeart;
   final ValueChanged<ChatEntry> onAction;
   final void Function(ChatEntry, String) onReaction;
+  final ValueChanged<ChatEntry>? onReply;
 
-  Widget _photo(ChatEntry entry, double width, double height) => DoubleTapReact(
-    onDoubleTap: () => onHeart(entry),
-    onLongPress: () => onAction(entry),
-    child: MessageImage(
-      key: ValueKey(entry.id),
-      backend: backend,
-      palette: palette,
-      roomId: roomId,
-      eventId: entry.id,
-      entry: entry,
-      width: width,
-      height: height,
+  Widget _photo(ChatEntry entry, double width, double height) => SwipeReply(
+    key: ValueKey('swipe-photo-${entry.id}'),
+    palette: palette,
+    onReply: entry.redacted || onReply == null ? null : () => onReply!(entry),
+    child: DoubleTapReact(
+      onDoubleTap: () => onHeart(entry),
+      onLongPress: () => onAction(entry),
+      child: MessageImage(
+        key: ValueKey(entry.id),
+        backend: backend,
+        palette: palette,
+        roomId: roomId,
+        eventId: entry.id,
+        entry: entry,
+        width: width,
+        height: height,
+      ),
     ),
   );
 

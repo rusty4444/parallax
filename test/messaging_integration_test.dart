@@ -9,6 +9,7 @@ import 'package:parallax/appearance_preferences.dart';
 import 'package:parallax/appearance_settings_screen.dart';
 import 'package:parallax/chat_backend.dart';
 import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/gallery_bubble.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/main.dart';
 import 'package:parallax/media_viewer.dart';
@@ -21,6 +22,7 @@ import 'package:parallax/rich_message_composer.dart';
 import 'package:parallax/room_screen.dart';
 import 'package:parallax/space_browser_screen.dart';
 import 'package:parallax/thread_screen.dart';
+import 'package:parallax/timeline/message_bubble.dart';
 import 'package:parallax/user_directory_screen.dart';
 
 import 'widget_test.dart' show FakeBackend, FakeBackgroundStore;
@@ -351,6 +353,116 @@ void main() {
     expect(drafts.values['account-a/$roomId'], '');
     expect(backend.queuedText, 'Queue this');
     expect(backend.lastMessage, isNull);
+  });
+
+  testWidgets(
+    'right swipe replies immediately without dismissing the message',
+    (tester) async {
+      final backend = FeaturesBackend()
+        ..entries = [
+          ChatEntry(
+            id: r'$swipe-reply-target',
+            sender: '@alice:s',
+            senderName: 'Alice',
+            body: 'Swipe reply target',
+            time: DateTime(2026),
+            mine: false,
+          ),
+        ];
+      await tester.pumpWidget(room(backend, Drafts()));
+      await tester.pumpAndSettle();
+
+      await tester.drag(find.text('Swipe reply target'), const Offset(400, 0));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Replying to Alice: Swipe reply target'),
+        findsOneWidget,
+      );
+      expect(find.text('Swipe reply target'), findsOneWidget);
+      expect(find.text('Forward'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('gallery swipe replies to the specific photo', (tester) async {
+    final backend = FeaturesBackend();
+    String? replied;
+    final entries = [
+      for (final id in [r'$gallery-one', r'$gallery-two'])
+        ChatEntry(
+          id: id,
+          sender: '@alice:s',
+          body: '',
+          time: DateTime(2026),
+          mine: false,
+          isImage: true,
+        ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GalleryBubble(
+            entries: entries,
+            backend: backend,
+            roomId: roomId,
+            palette: paletteFor(VisualTheme.parallax),
+            onHeart: (_) {},
+            onAction: (_) {},
+            onReaction: (_, _) {},
+            onReply: (entry) => replied = entry.id,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Dismissible &&
+            widget.key == const ValueKey('swipe-photo-\$gallery-two'),
+      ),
+      const Offset(240, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(replied, r'$gallery-two');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('bubble bottom padding accepts long press and double tap', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$padded-gesture-target',
+          sender: '@alice:s',
+          body: 'Padded gesture target',
+          time: DateTime(2026),
+          mine: false,
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    final bubble = tester.getRect(find.byType(MessageBubble));
+    final point = Offset(bubble.center.dx, bubble.bottom - 3);
+
+    await tester.longPressAt(point);
+    await tester.pumpAndSettle();
+    expect(find.text('Reply'), findsOneWidget);
+    Navigator.pop(tester.element(find.text('Reply')));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(point);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(point);
+    await tester.pumpAndSettle();
+    expect(backend.lastReaction, '❤️');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 
   testWidgets(

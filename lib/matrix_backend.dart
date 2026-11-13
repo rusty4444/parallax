@@ -236,6 +236,7 @@ class MatrixBackend extends ChatBackend
   final _avatarWaiters = Queue<Completer<void>>();
   int _avatarActive = 0;
   final _reactionInFlight = <String>{};
+  final _reactionRemovalIds = <String>{};
 
   @override
   SessionStatus get connection => _connection;
@@ -1907,7 +1908,23 @@ class MatrixBackend extends ChatBackend
         );
         if (sentId == null) throw StateError('Reaction was not sent');
       } else {
-        await room.redactEvent(ownReaction.eventId);
+        // Remove the pill immediately. Unsent reactions use local cancellation;
+        // server events are redacted. A failed redaction restores the pill.
+        _reactionRemovalIds.add(ownReaction.eventId);
+        _refreshMessages(timeline);
+        try {
+          if (!ownReaction.status.isSent) {
+            await ownReaction.cancelSend();
+          } else {
+            await room.redactEvent(ownReaction.eventId);
+          }
+        } catch (_) {
+          _reactionRemovalIds.remove(ownReaction.eventId);
+          if (identical(_timeline, timeline) && _activeRoomId == roomId) {
+            _refreshMessages(timeline);
+          }
+          rethrow;
+        }
       }
     } finally {
       _reactionInFlight.remove(inFlightKey);
@@ -3863,20 +3880,33 @@ class MatrixBackend extends ChatBackend
     final replyToId = event.inReplyToEventId(includingFallback: false);
     final reactions = event.redacted || timeline == null
         ? const <ChatReaction>[]
-        : summarizeReactions(
-            event
+        : () {
+            final events = event
                 .aggregatedEvents(timeline, matrix.RelationshipTypes.reaction)
-                .where((reaction) => !reaction.redacted)
-                .map(
-                  (reaction) => ReactionVote(
-                    ((reaction.content['m.relates_to'] as Map?)?['key']
-                            as String?) ??
-                        '',
-                    reaction.senderId,
+                .toList();
+            if (_reactionRemovalIds.isNotEmpty) {
+              for (final reaction in events.where((event) => event.redacted)) {
+                _reactionRemovalIds.remove(reaction.eventId);
+              }
+            }
+            return summarizeReactions(
+              events
+                  .where(
+                    (reaction) =>
+                        !reaction.redacted &&
+                        !_reactionRemovalIds.contains(reaction.eventId),
+                  )
+                  .map(
+                    (reaction) => ReactionVote(
+                      ((reaction.content['m.relates_to'] as Map?)?['key']
+                              as String?) ??
+                          '',
+                      reaction.senderId,
+                    ),
                   ),
-                ),
-            client.userID,
-          );
+              client.userID,
+            );
+          }();
     final kind = entryKindFor(
       type: display.type,
       msgtype: display.messageType,

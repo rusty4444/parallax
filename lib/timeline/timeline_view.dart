@@ -10,6 +10,7 @@ import '../features/rich_timeline/timeline_widgets.dart';
 import '../gallery_bubble.dart';
 import '../message_receipts_sheet.dart';
 import 'message_bubble.dart';
+import 'swipe_reply.dart';
 
 /// Distance from the newest message before the jump-to-bottom button shows.
 const jumpToBottomThreshold = 320.0;
@@ -30,6 +31,7 @@ class TimelineView extends StatefulWidget {
     required this.onReaction,
     required this.onLoadOlder,
     this.room,
+    this.onReply,
   });
 
   final ChatBackend backend;
@@ -44,6 +46,7 @@ class TimelineView extends StatefulWidget {
   final void Function(ChatEntry entry, String emoji) onReaction;
   final VoidCallback onLoadOlder;
   final ChatRoom? room;
+  final ValueChanged<ChatEntry>? onReply;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -258,25 +261,32 @@ class _TimelineViewState extends State<TimelineView> {
       ChatEntry entry, {
       required bool group,
       required bool showSender,
-    }) => MessageBubble(
-      key: ValueKey(entry.id),
-      entry: entry,
-      backend: backend,
-      roomId: widget.roomId,
+    }) => SwipeReply(
+      key: ValueKey('swipe-reply-${entry.id}'),
       palette: palette,
-      group: group,
-      showSender: showSender,
-      // Pictures beside others' messages in every room, DMs included.
-      showAvatars: true,
-      room: widget.room,
-      entries: entries,
-      receipts: receipts[entry.id] ?? const [],
-      sent: entry.id == lastOwn?.id && (receipts[entry.id]?.isEmpty ?? true),
-      onReceipts: () => _openReceipts(entry.id),
-      onHeart: () => widget.onHeart(entry),
-      onAction: () => widget.onAction(entry),
-      onReaction: (emoji) => widget.onReaction(entry, emoji),
-      replyPreview: entry.replyToId == null ? null : byId[entry.replyToId],
+      onReply: entry.redacted || widget.onReply == null
+          ? null
+          : () => widget.onReply!(entry),
+      child: MessageBubble(
+        key: ValueKey(entry.id),
+        entry: entry,
+        backend: backend,
+        roomId: widget.roomId,
+        palette: palette,
+        group: group,
+        showSender: showSender,
+        // Pictures beside others' messages in every room, DMs included.
+        showAvatars: true,
+        room: widget.room,
+        entries: entries,
+        receipts: receipts[entry.id] ?? const [],
+        sent: entry.id == lastOwn?.id && (receipts[entry.id]?.isEmpty ?? true),
+        onReceipts: () => _openReceipts(entry.id),
+        onHeart: () => widget.onHeart(entry),
+        onAction: () => widget.onAction(entry),
+        onReaction: (emoji) => widget.onReaction(entry, emoji),
+        replyPreview: entry.replyToId == null ? null : byId[entry.replyToId],
+      ),
     );
 
     Widget buildItem(_Item item) {
@@ -318,6 +328,7 @@ class _TimelineViewState extends State<TimelineView> {
               onHeart: widget.onHeart,
               onAction: widget.onAction,
               onReaction: widget.onReaction,
+              onReply: widget.onReply,
             ),
             receiptRow(entries),
           ],
