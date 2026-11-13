@@ -476,6 +476,10 @@ abstract class ChatBackend extends ChangeNotifier {
   String? get activeRoomId;
   List<ChatEntry> get messages;
   bool get sending;
+
+  /// Whether a direct non-queued send (such as a gallery upload) is active in
+  /// [roomId]. Queued outbox sends sit in the pending panel without blocking.
+  bool isRoomSending(String roomId) => sending;
   bool get canLoadOlder;
   bool get loadingHistory;
   List<String> get typingUsers;

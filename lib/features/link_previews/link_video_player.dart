@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../chat_backend.dart';
+import '../../media_player_owner.dart';
+import '../media/media_content.dart';
 import 'link_previews.dart';
 
 typedef LinkVideoControllerFactory = LinkVideoController Function(Uri url);
@@ -53,7 +55,14 @@ class _NetworkLinkVideoController implements LinkVideoController {
   bool get isPlaying => _controller.value.isPlaying;
 
   @override
-  double get aspectRatio => _controller.value.aspectRatio;
+  double get aspectRatio {
+    final v = _controller.value;
+    if (v.isInitialized) {
+      final corrected = videoDisplayAspectRatio(v.size, v.rotationCorrection);
+      if (corrected != null) return corrected;
+    }
+    return v.aspectRatio;
+  }
 
   @override
   Duration get duration => _controller.value.duration;
@@ -95,6 +104,9 @@ class LinkVideoPlayer extends StatefulWidget {
     required this.video,
     required this.backend,
     this.poster,
+    this.posterLoader,
+    this.initialAspectRatio,
+    this.fullScreen = false,
     this.onFullScreen,
     this.autoPlay = false,
     this.controllerFactory = createNetworkLinkVideoController,
@@ -103,6 +115,9 @@ class LinkVideoPlayer extends StatefulWidget {
   final LinkVideo video;
   final ChatBackend backend;
   final Uri? poster;
+  final Future<Uint8List?> Function(Uri)? posterLoader;
+  final double? initialAspectRatio;
+  final bool fullScreen;
   final VoidCallback? onFullScreen;
   final bool autoPlay;
   final LinkVideoControllerFactory controllerFactory;
@@ -117,6 +132,8 @@ Future<void> showLinkVideoFullScreen(
   LinkVideo video,
   ChatBackend backend, {
   Uri? poster,
+  Future<Uint8List?> Function(Uri)? posterLoader,
+  double? initialAspectRatio,
   LinkVideoControllerFactory controllerFactory =
       createNetworkLinkVideoController,
 }) => Navigator.of(context).push<void>(
@@ -139,6 +156,9 @@ Future<void> showLinkVideoFullScreen(
             video: video,
             backend: backend,
             poster: poster,
+            posterLoader: posterLoader,
+            initialAspectRatio: initialAspectRatio,
+            fullScreen: true,
             autoPlay: true,
             controllerFactory: controllerFactory,
           ),
@@ -165,6 +185,7 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
       );
   LinkVideoController? _controller;
   Future<Uint8List?>? _posterBytes;
+  double? _posterAspect;
   bool _starting = false;
   bool _failed = false;
   bool _wasPlaying = false;
@@ -178,7 +199,9 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
 
   void _loadPoster() {
     final poster = widget.poster;
-    _posterBytes = poster == null ? null : widget.backend.loadAvatar(poster);
+    _posterAspect = null;
+    final loader = widget.posterLoader ?? widget.backend.loadAvatar;
+    _posterBytes = poster == null ? null : loader(poster);
   }
 
   @override
@@ -191,7 +214,10 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
       _wasPlaying = false;
       _controlsFade.value = 0;
     }
-    if (oldWidget.poster != widget.poster) _loadPoster();
+    if (oldWidget.poster != widget.poster ||
+        oldWidget.posterLoader != widget.posterLoader) {
+      _loadPoster();
+    }
   }
 
   bool get _activelyPlaying =>
@@ -301,13 +327,40 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
     super.dispose();
   }
 
+  double _effectiveAspectRatio() {
+    final controller = _controller;
+    if (controller != null && controller.isInitialized) {
+      final ratio = controller.aspectRatio;
+      if (ratio.isFinite && ratio > 0) return ratio;
+    }
+    final declared = widget.initialAspectRatio;
+    final poster = _posterAspect;
+    if (poster != null &&
+        poster.isFinite &&
+        poster > 0 &&
+        (declared == null ||
+            !declared.isFinite ||
+            declared <= 0 ||
+            (declared > 1) != (poster > 1))) {
+      return poster;
+    }
+    if (declared != null && declared.isFinite && declared > 0) {
+      return declared;
+    }
+    return 16 / 9;
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
     final ready = controller?.isInitialized == true;
     final playing = _activelyPlaying;
+    final rawAspect = _effectiveAspectRatio();
+    final boxAspect = widget.fullScreen
+        ? rawAspect.clamp(0.2, 5.0)
+        : rawAspect.clamp(9 / 16, 21 / 9);
     return AspectRatio(
-      aspectRatio: 16 / 9,
+      aspectRatio: boxAspect,
       child: Container(
         color: Colors.black,
         child: Stack(
@@ -321,7 +374,16 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
                 ),
               )
             else
-              _Poster(bytes: _posterBytes),
+              _Poster(
+                bytes: _posterBytes,
+                fit: widget.fullScreen ? BoxFit.contain : BoxFit.cover,
+                onImageSize: (imgSize) {
+                  final ratio = imgSize.width / imgSize.height;
+                  if (ratio.isFinite && ratio > 0 && _posterAspect != ratio) {
+                    setState(() => _posterAspect = ratio);
+                  }
+                },
+              ),
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -390,20 +452,80 @@ class _LinkVideoPlayerState extends State<LinkVideoPlayer>
   }
 }
 
-class _Poster extends StatelessWidget {
-  const _Poster({required this.bytes});
+class _Poster extends StatefulWidget {
+  const _Poster({
+    required this.bytes,
+    this.fit = BoxFit.cover,
+    this.onImageSize,
+  });
   final Future<Uint8List?>? bytes;
+  final BoxFit fit;
+  final ValueChanged<Size>? onImageSize;
+
+  @override
+  State<_Poster> createState() => _PosterState();
+}
+
+class _PosterState extends State<_Poster> {
+  Uint8List? _sizedBytes;
+  ImageStream? _sizeStream;
+  ImageStreamListener? _sizeListener;
+
+  void _untrackSize() {
+    final stream = _sizeStream;
+    final listener = _sizeListener;
+    _sizeStream = null;
+    _sizeListener = null;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_Poster oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bytes != widget.bytes) {
+      _untrackSize();
+      _sizedBytes = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _untrackSize();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final future = bytes;
+    final future = widget.bytes;
     if (future == null) return const SizedBox.expand();
     return FutureBuilder<Uint8List?>(
       future: future,
       builder: (context, snapshot) {
         final data = snapshot.data;
         if (data == null || data.isEmpty) return const SizedBox.expand();
-        return Image.memory(data, fit: BoxFit.cover, gaplessPlayback: true);
+        final provider = boundedMemoryImage(data, maxEdge: 768);
+        if (widget.onImageSize != null && !identical(_sizedBytes, data)) {
+          _untrackSize();
+          _sizedBytes = data;
+          final stream = provider.resolve(ImageConfiguration.empty);
+          late final ImageStreamListener listener;
+          listener = ImageStreamListener((info, _) {
+            final w = info.image.width.toDouble();
+            final h = info.image.height.toDouble();
+            _untrackSize();
+            if (mounted && w > 0 && h > 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) widget.onImageSize?.call(Size(w, h));
+              });
+            }
+          }, onError: (_, _) => _untrackSize());
+          _sizeStream = stream;
+          _sizeListener = listener;
+          stream.addListener(listener);
+        }
+        return Image(image: provider, fit: widget.fit, gaplessPlayback: true);
       },
     );
   }

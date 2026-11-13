@@ -29,11 +29,13 @@ class MediaPlaybackValue {
     this.duration = Duration.zero,
     this.position = Duration.zero,
     this.playing = false,
+    this.aspectRatio,
     this.error,
   });
   final Duration duration;
   final Duration position;
   final bool playing;
+  final double? aspectRatio;
   final String? error;
 }
 
@@ -280,6 +282,22 @@ MediaPlaybackController createNativeMediaPlayer(
     ? _NativeVideoPlayer(file.path)
     : _NativeAudioPlayer(file.path, mime);
 
+/// Display aspect ratio (`width / height`) for a native video frame after
+/// applying [rotationCorrection] degrees clockwise.
+///
+/// Android's `video_player` reports coded stream dimensions in `value.size`
+/// alongside a 90/270-degree `rotationCorrection` when `RotatedBox` handles
+/// rotation in Dart, leaving `value.aspectRatio` inverted for portrait videos.
+double? videoDisplayAspectRatio(Size size, int rotationCorrection) {
+  if (size.width <= 0 || size.height <= 0) return null;
+  final turns = ((rotationCorrection % 360) + 360) % 360;
+  final swapped = turns == 90 || turns == 270;
+  final width = swapped ? size.height : size.width;
+  final height = swapped ? size.width : size.height;
+  final ratio = width / height;
+  return ratio.isFinite && ratio > 0 ? ratio : null;
+}
+
 class _NativeVideoPlayer extends MediaPlaybackController {
   _NativeVideoPlayer(String path)
     : _controller = VideoPlayerController.file(
@@ -290,11 +308,18 @@ class _NativeVideoPlayer extends MediaPlaybackController {
     _controller.addListener(notifyListeners);
   }
   final VideoPlayerController _controller;
+  double? get _displayAspectRatio {
+    final v = _controller.value;
+    if (!v.isInitialized) return null;
+    return videoDisplayAspectRatio(v.size, v.rotationCorrection);
+  }
+
   @override
   MediaPlaybackValue get value => MediaPlaybackValue(
     duration: _controller.value.duration,
     position: _controller.value.position,
     playing: _controller.value.isPlaying,
+    aspectRatio: _displayAspectRatio,
     error: _controller.value.errorDescription,
   );
   @override
@@ -308,9 +333,11 @@ class _NativeVideoPlayer extends MediaPlaybackController {
   @override
   Future<void> setSpeed(double speed) => _controller.setPlaybackSpeed(speed);
   @override
-  Widget buildVideo(BuildContext context) => AspectRatio(
-    aspectRatio: _controller.value.aspectRatio,
-    child: VideoPlayer(_controller),
+  Widget buildVideo(BuildContext context) => Center(
+    child: AspectRatio(
+      aspectRatio: _displayAspectRatio ?? _controller.value.aspectRatio,
+      child: VideoPlayer(_controller),
+    ),
   );
   @override
   Future<void> disposePlayer() async {

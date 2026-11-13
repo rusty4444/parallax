@@ -18,9 +18,17 @@ const maxPreviewUrlLength = 2048;
 /// A native-playable video or stream linked by a page's Open Graph metadata.
 @immutable
 class LinkVideo {
-  const LinkVideo({required this.url, this.mimeType});
+  const LinkVideo({required this.url, this.mimeType, this.width, this.height});
   final Uri url;
   final String? mimeType;
+  final int? width;
+  final int? height;
+
+  double? get aspectRatio {
+    final w = width, h = height;
+    if (w == null || h == null || w <= 0 || h <= 0) return null;
+    return w / h;
+  }
 }
 
 /// What a page's Open Graph tags say about it.
@@ -32,6 +40,8 @@ class LinkPreview {
     this.description,
     this.siteName,
     this.image,
+    this.imageWidth,
+    this.imageHeight,
     this.video,
   });
 
@@ -43,9 +53,17 @@ class LinkPreview {
 
   /// `mxc://` URI of the page's image, hosted by the homeserver.
   final Uri? image;
+  final int? imageWidth;
+  final int? imageHeight;
 
   /// Optional direct video/stream for native in-app playback.
   final LinkVideo? video;
+
+  double? get imageAspectRatio {
+    final w = imageWidth, h = imageHeight;
+    if (w == null || h == null || w <= 0 || h <= 0) return null;
+    return w / h;
+  }
 
   /// Nothing worth showing: no title, text, image or playable video.
   bool get isEmpty =>
@@ -68,8 +86,12 @@ class LinkPreview {
     if (description != null) 'description': description,
     if (siteName != null) 'siteName': siteName,
     if (image != null) 'image': image.toString(),
+    if (imageWidth != null) 'imageWidth': imageWidth,
+    if (imageHeight != null) 'imageHeight': imageHeight,
     if (video != null) 'videoUrl': video!.url.toString(),
     if (video?.mimeType != null) 'videoMimeType': video!.mimeType,
+    if (video?.width != null) 'videoWidth': video!.width,
+    if (video?.height != null) 'videoHeight': video!.height,
   };
 
   /// Tolerates missing and wrongly typed fields; throws only on a missing
@@ -83,17 +105,34 @@ class LinkPreview {
       return value is String && value.isNotEmpty ? value : null;
     }
 
+    int? dimension(String key) {
+      final value = json[key];
+      final parsed = switch (value) {
+        final int n => n,
+        final num n => n.round(),
+        final String s => int.tryParse(s.trim()),
+        _ => null,
+      };
+      return parsed != null && parsed > 0 && parsed <= 32768 ? parsed : null;
+    }
+
     final image = Uri.tryParse(text('image') ?? '');
     final video = playableLinkVideo(
       Uri.tryParse(text('videoUrl') ?? ''),
       mimeType: text('videoMimeType'),
+      width: dimension('videoWidth'),
+      height: dimension('videoHeight'),
     );
     return LinkPreview(
       url: url,
       title: text('title'),
       description: text('description'),
       siteName: text('siteName'),
-      image: image != null && image.scheme == 'mxc' ? image : null,
+      image: image != null && image.scheme == 'mxc' && image.host.isNotEmpty
+          ? image
+          : null,
+      imageWidth: dimension('imageWidth'),
+      imageHeight: dimension('imageHeight'),
       video: video,
     );
   }
@@ -117,7 +156,12 @@ const _videoExtensions = {
 
 /// Returns a native-playable public HTTPS video, or null for HTML embeds,
 /// unsupported formats and local/private-network targets.
-LinkVideo? playableLinkVideo(Uri? url, {String? mimeType}) {
+LinkVideo? playableLinkVideo(
+  Uri? url, {
+  String? mimeType,
+  int? width,
+  int? height,
+}) {
   if (url == null ||
       url.scheme != 'https' ||
       url.host.isEmpty ||
@@ -125,6 +169,8 @@ LinkVideo? playableLinkVideo(Uri? url, {String? mimeType}) {
       !_publicVideoHost(url.host.toLowerCase())) {
     return null;
   }
+  final validWidth = width != null && width > 0 ? width : null;
+  final validHeight = height != null && height > 0 ? height : null;
   final mime = mimeType?.split(';').first.trim().toLowerCase();
   if (mime == 'text/html') return null;
   final extension = url.pathSegments.isEmpty
@@ -132,9 +178,21 @@ LinkVideo? playableLinkVideo(Uri? url, {String? mimeType}) {
       : url.pathSegments.last.split('.').last.toLowerCase();
   final inferred = _videoExtensions[extension];
   if (mime != null && _playableVideoMimes.contains(mime)) {
-    return LinkVideo(url: url, mimeType: mime);
+    return LinkVideo(
+      url: url,
+      mimeType: mime,
+      width: validWidth,
+      height: validHeight,
+    );
   }
-  if (inferred != null) return LinkVideo(url: url, mimeType: inferred);
+  if (inferred != null) {
+    return LinkVideo(
+      url: url,
+      mimeType: inferred,
+      width: validWidth,
+      height: validHeight,
+    );
+  }
   return null;
 }
 
@@ -174,6 +232,30 @@ bool _publicVideoHost(String host) {
   return true;
 }
 
+/// Unwraps known redirect wrappers (such as Facebook's `l.php?u=...`) so the
+/// homeserver previews the destination page or photo instead of an interstitial.
+Uri unwrapLinkRedirect(Uri url) {
+  final host = url.host.toLowerCase();
+  if (host == 'l.facebook.com' ||
+      host == 'lm.facebook.com' ||
+      ((host == 'm.facebook.com' ||
+              host == 'www.facebook.com' ||
+              host == 'facebook.com') &&
+          (url.path == '/l.php' || url.path.startsWith('/flx/warn')))) {
+    final rawTarget = url.queryParameters['u'];
+    if (rawTarget != null && rawTarget.isNotEmpty) {
+      final target = Uri.tryParse(rawTarget);
+      if (target != null &&
+          (target.scheme == 'https' || target.scheme == 'http') &&
+          target.host.isNotEmpty &&
+          target.toString().length <= maxPreviewUrlLength) {
+        return target;
+      }
+    }
+  }
+  return url;
+}
+
 /// Maps a Matrix `preview_url` response's Open Graph fields to a preview,
 /// retaining native video only when it is directly playable.
 LinkPreview linkPreviewFromOpenGraph(
@@ -189,6 +271,18 @@ LinkPreview linkPreviewFromOpenGraph(
     return trimmed.length <= limit ? trimmed : trimmed.substring(0, limit);
   }
 
+  int? dimension(String key) {
+    final value = fields[key];
+    final parsed = switch (value) {
+      final int n => n,
+      final num n => n.round(),
+      final String s => int.tryParse(s.trim()),
+      _ => null,
+    };
+    return parsed != null && parsed > 0 && parsed <= 32768 ? parsed : null;
+  }
+
+  final resolvedImage = image ?? Uri.tryParse(text('og:image', 2048) ?? '');
   final videoUrl =
       text('og:video:secure_url', 2048) ??
       text('og:video:url', 2048) ??
@@ -200,8 +294,20 @@ LinkPreview linkPreviewFromOpenGraph(
     title: text('og:title', 300),
     description: text('og:description', 500),
     siteName: text('og:site_name', 120),
-    image: image != null && image.scheme == 'mxc' ? image : null,
-    video: playableLinkVideo(Uri.tryParse(videoUrl ?? ''), mimeType: videoType),
+    image:
+        resolvedImage != null &&
+            resolvedImage.scheme == 'mxc' &&
+            resolvedImage.host.isNotEmpty
+        ? resolvedImage
+        : null,
+    imageWidth: dimension('og:image:width'),
+    imageHeight: dimension('og:image:height'),
+    video: playableLinkVideo(
+      Uri.tryParse(videoUrl ?? ''),
+      mimeType: videoType,
+      width: dimension('og:video:width'),
+      height: dimension('og:video:height'),
+    ),
   );
 }
 
@@ -215,6 +321,13 @@ abstract interface class LinkPreviewSource {
   /// May throw; failures are remembered briefly so a failing site isn't
   /// refetched on every rebuild.
   Future<LinkPreview?> fetchLinkPreview(Uri url, {int? timestamp});
+}
+
+/// Optional higher-resolution `mxc://` preview image loader for link cards
+/// (photos and video posters). Backends without it fall back to avatars.
+abstract interface class LinkPreviewImageSource {
+  Uint8List? cachedPreviewImage(Uri mxc);
+  Future<Uint8List?> loadPreviewImage(Uri mxc);
 }
 
 /// The first web link in [body] worth a preview, if any. Matrix permalinks

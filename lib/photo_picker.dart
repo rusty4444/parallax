@@ -30,7 +30,7 @@ Future<void> pickAndSendImages(
   String roomId, {
   @visibleForTesting Future<List<XFile>> Function()? picker,
 }) async {
-  if (backend.sending) return;
+  if (backend.isRoomSending(roomId)) return;
   try {
     final images =
         await (picker ??

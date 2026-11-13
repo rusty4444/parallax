@@ -721,6 +721,107 @@ void main() {
     expect(prefs.linkPreviews, isFalse);
     expect(tester.widget<SwitchListTile>(encrypted).onChanged, isNull);
   });
+
+  group('unwrapLinkRedirect', () {
+    test('unwraps Facebook l.php redirect to the destination', () {
+      final wrapped = Uri.parse(
+        'https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com%2Fphoto&h=abc',
+      );
+      expect(
+        unwrapLinkRedirect(wrapped),
+        Uri.parse('https://example.com/photo'),
+      );
+    });
+
+    test('unwraps lm.facebook.com and m.facebook.com/flx/warn', () {
+      final lm = Uri.parse(
+        'https://lm.facebook.com/l.php?u=https%3A%2F%2Fcdn.example.com%2Fimg.jpg',
+      );
+      expect(unwrapLinkRedirect(lm).host, 'cdn.example.com');
+      final warn = Uri.parse(
+        'https://m.facebook.com/flx/warn/?u=https%3A%2F%2Fexample.com%2Fpage',
+      );
+      expect(unwrapLinkRedirect(warn), Uri.parse('https://example.com/page'));
+    });
+
+    test('passes through non-redirect URLs unchanged', () {
+      final normal = Uri.parse('https://example.com/article');
+      expect(unwrapLinkRedirect(normal), normal);
+      final fb = Uri.parse('https://www.facebook.com/photo/?fbid=123');
+      expect(unwrapLinkRedirect(fb), fb);
+    });
+
+    test('rejects non-http targets and oversized URLs', () {
+      final ftp = Uri.parse(
+        'https://l.facebook.com/l.php?u=ftp%3A%2F%2Fexample.com%2Ffile',
+      );
+      expect(unwrapLinkRedirect(ftp), ftp);
+      final long = Uri.parse(
+        'https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com%2F${'a' * 3000}',
+      );
+      expect(unwrapLinkRedirect(long), long);
+    });
+  });
+
+  group('LinkPreview image dimensions', () {
+    test('serializes and deserializes image width/height', () {
+      final withDims = LinkPreview(
+        url: url,
+        title: 'Photo',
+        image: Uri(scheme: 'mxc', host: 'example.org', path: '/img'),
+        imageWidth: 1200,
+        imageHeight: 800,
+      );
+      final restored = LinkPreview.fromJson(withDims.toJson())!;
+      expect(restored.imageWidth, 1200);
+      expect(restored.imageHeight, 800);
+      expect(restored.imageAspectRatio, closeTo(1200 / 800, 0.001));
+    });
+
+    test('reads og:image dimensions from Open Graph', () {
+      final preview = linkPreviewFromOpenGraph(
+        Uri.parse('https://example.com/photo'),
+        {
+          'og:title': 'A photo',
+          'og:image': 'mxc://example.org/img',
+          'og:image:width': '1080',
+          'og:image:height': '1920',
+        },
+        image: Uri(scheme: 'mxc', host: 'example.org', path: '/img'),
+      );
+      expect(preview.imageWidth, 1080);
+      expect(preview.imageHeight, 1920);
+      expect(preview.imageAspectRatio, closeTo(1080 / 1920, 0.001));
+    });
+
+    test('rejects invalid dimensions', () {
+      final preview = LinkPreview.fromJson({
+        'url': 'https://example.com/a',
+        'imageWidth': -5,
+        'imageHeight': 0,
+      })!;
+      expect(preview.imageWidth, isNull);
+      expect(preview.imageHeight, isNull);
+      expect(preview.imageAspectRatio, isNull);
+    });
+
+    test('video dimensions survive serialization', () {
+      final withVideo = LinkPreview(
+        url: url,
+        title: 'Clip',
+        video: LinkVideo(
+          url: Uri.parse('https://cdn.example.com/v.mp4'),
+          mimeType: 'video/mp4',
+          width: 1080,
+          height: 1920,
+        ),
+      );
+      final restored = LinkPreview.fromJson(withVideo.toJson())!;
+      expect(restored.video!.width, 1080);
+      expect(restored.video!.height, 1920);
+      expect(restored.video!.aspectRatio, closeTo(1080 / 1920, 0.001));
+    });
+  });
 }
 
 class _PlainBackend extends ChatBackend {

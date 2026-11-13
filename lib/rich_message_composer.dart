@@ -51,6 +51,7 @@ class RichMessageComposer extends StatefulWidget {
     this.hookContext,
     this.replyToId,
     this.editing = false,
+    this.contextLabel,
     this.sendOptions,
     this.suggestionSources,
   });
@@ -96,6 +97,9 @@ class RichMessageComposer extends StatefulWidget {
 
   /// Whether the draft is an edit of an existing message.
   final bool editing;
+
+  /// Reply or edit label attached directly to the top of the compose bubble.
+  final String? contextLabel;
 
   /// Long-press send options. When null, [composerSendOptionsFor] supplies
   /// them for [hookContext].
@@ -1400,30 +1404,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: TextField(
-                  controller: _input,
-                  focusNode: _focus,
-                  minLines: 1,
-                  maxLines: formatting ? 8 : 5,
-                  textCapitalization: TextCapitalization.sentences,
-                  keyboardType: TextInputType.multiline,
-                  inputFormatters: formatting
-                      ? const [_ListContinuationFormatter()]
-                      : null,
-                  contentInsertionConfiguration: ContentInsertionConfiguration(
-                    allowedMimeTypes: const ['image/*'],
-                    onContentInserted: _insertContent,
-                  ),
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(
-                    hintText: _media == null
-                        ? 'Write a message…'
-                        : 'Add a caption…',
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                  ),
+                child: _composeField(
+                  context,
+                  colors: colors,
+                  formatting: formatting,
                 ),
               ),
               const SizedBox(width: 6),
@@ -1487,7 +1471,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                     icon: const Icon(Icons.mic_none_rounded),
                   ),
                 const Spacer(),
-                if (widget.onCancel != null)
+                if (widget.onCancel != null && widget.contextLabel == null)
                   IconButton(
                     tooltip: 'Cancel',
                     visualDensity: VisualDensity.compact,
@@ -1509,6 +1493,118 @@ class _RichMessageComposerState extends State<RichMessageComposer>
             ),
         ],
       ),
+    );
+  }
+
+  Widget _composeField(
+    BuildContext context, {
+    required ColorScheme colors,
+    required bool formatting,
+  }) {
+    final contextLabel = widget.contextLabel;
+    final hasContext = contextLabel != null;
+    const attachedBottom = BorderRadius.vertical(bottom: Radius.circular(18));
+    final field = TextField(
+      controller: _input,
+      focusNode: _focus,
+      minLines: 1,
+      maxLines: formatting ? 8 : 5,
+      textCapitalization: TextCapitalization.sentences,
+      keyboardType: TextInputType.multiline,
+      inputFormatters: formatting ? const [_ListContinuationFormatter()] : null,
+      contentInsertionConfiguration: ContentInsertionConfiguration(
+        allowedMimeTypes: const ['image/*'],
+        onContentInserted: _insertContent,
+      ),
+      onSubmitted: (_) => _send(),
+      decoration: InputDecoration(
+        hintText: _media == null ? 'Write a message…' : 'Add a caption…',
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+        border: hasContext
+            ? OutlineInputBorder(
+                borderRadius: attachedBottom,
+                borderSide: BorderSide(color: colors.outline),
+              )
+            : null,
+        enabledBorder: hasContext
+            ? OutlineInputBorder(
+                borderRadius: attachedBottom,
+                borderSide: BorderSide(color: colors.outline),
+              )
+            : null,
+        focusedBorder: hasContext
+            ? OutlineInputBorder(
+                borderRadius: attachedBottom,
+                borderSide: BorderSide(color: colors.primary, width: 2),
+              )
+            : null,
+      ),
+    );
+    if (!hasContext) return field;
+    final fill =
+        Theme.of(context).inputDecorationTheme.fillColor ?? colors.surface;
+    return Column(
+      key: const ValueKey('composer-context-bubble'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListenableBuilder(
+          listenable: _focus,
+          builder: (context, child) {
+            final focused = _focus.hasFocus;
+            final side = BorderSide(
+              color: focused ? colors.primary : colors.outline,
+              width: focused ? 2 : 1,
+            );
+            return Container(
+              key: const ValueKey('composer-context-bar'),
+              padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+              decoration: BoxDecoration(
+                color: fill,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(18),
+                ),
+                border: Border(top: side, left: side, right: side),
+              ),
+              child: child,
+            );
+          },
+          child: Row(
+            children: [
+              Icon(
+                widget.editing ? Icons.edit_outlined : Icons.reply_rounded,
+                size: 18,
+                color: colors.secondary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  contextLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.onSurface, fontSize: 13),
+                ),
+              ),
+              if (widget.onCancel != null)
+                IconButton(
+                  tooltip: 'Cancel reply or edit',
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  padding: EdgeInsets.zero,
+                  onPressed: _cancel,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+            ],
+          ),
+        ),
+        field,
+      ],
     );
   }
 }

@@ -49,6 +49,9 @@ class MediaCacheUsage {
 /// Cache key for an avatar as the app draws it (a 96 px server thumbnail).
 String avatarCacheKey(Uri mxc) => 'avatar96:$mxc';
 
+/// Cache key for a high-resolution link-preview photo or video poster.
+String previewImageCacheKey(Uri mxc) => 'preview800:$mxc';
+
 /// Cache key for the media a download URL serves: its `mxc://` URI. Works
 /// for `/_matrix/client/v1/media/download/…` and `/_matrix/media/v3/…`.
 String? mediaCacheKeyForDownload(Uri download) {

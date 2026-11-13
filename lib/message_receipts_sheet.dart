@@ -2,20 +2,27 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
 import 'chat_backend.dart';
 import 'messaging_features.dart';
+import 'room_avatar.dart';
 
 Future<void> showMessageReceipts(
   BuildContext context, {
   required ChatBackend backend,
   required String roomId,
   required String eventId,
+  AppPalette? palette,
 }) => showModalBottomSheet<void>(
   context: context,
   showDragHandle: true,
   isScrollControlled: true,
-  builder: (_) =>
-      _MessageReceiptsSheet(backend: backend, roomId: roomId, eventId: eventId),
+  builder: (_) => _MessageReceiptsSheet(
+    backend: backend,
+    roomId: roomId,
+    eventId: eventId,
+    palette: palette,
+  ),
 );
 
 class _MessageReceiptsSheet extends StatefulWidget {
@@ -23,10 +30,12 @@ class _MessageReceiptsSheet extends StatefulWidget {
     required this.backend,
     required this.roomId,
     required this.eventId,
+    this.palette,
   });
   final ChatBackend backend;
   final String roomId;
   final String eventId;
+  final AppPalette? palette;
 
   @override
   State<_MessageReceiptsSheet> createState() => _MessageReceiptsSheetState();
@@ -175,15 +184,30 @@ class _MessageReceiptsSheetState extends State<_MessageReceiptsSheet> {
                       final reader = _readers[index];
                       final time = reader.time?.toLocal();
                       final localizations = MaterialLocalizations.of(context);
+                      final palette =
+                          widget.palette ?? paletteFor(VisualTheme.parallax);
+                      final details = [
+                        if (reader.name != reader.userId) reader.userId,
+                        if (time != null)
+                          '${localizations.formatMediumDate(time)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(time))}',
+                      ];
                       return ListTile(
-                        leading: const Icon(Icons.done_all),
+                        leading: UserAvatar(
+                          key: ValueKey('receipt-avatar-${reader.userId}'),
+                          name: reader.name,
+                          url: reader.avatar,
+                          backend: widget.backend,
+                          palette: palette,
+                          size: 36,
+                        ),
                         title: Text(reader.name),
-                        subtitle: Text(
-                          [
-                            reader.userId,
-                            if (time != null)
-                              '${localizations.formatMediumDate(time)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(time))}',
-                          ].join('\n'),
+                        subtitle: details.isEmpty
+                            ? null
+                            : Text(details.join('\n')),
+                        trailing: Icon(
+                          Icons.done_all,
+                          size: 18,
+                          color: palette.secondary,
                         ),
                       );
                     },

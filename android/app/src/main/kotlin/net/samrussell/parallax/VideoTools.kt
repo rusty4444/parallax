@@ -91,7 +91,8 @@ object VideoTools {
             fun number(key: Int) = retriever.extractMetadata(key)?.toLongOrNull()
             var width = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt()
             var height = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt()
-            val rotation = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val rawRotation = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val rotation = ((rawRotation % 360) + 360) % 360
             if (rotation == 90 || rotation == 270) {
                 val swap = width
                 width = height
@@ -109,6 +110,11 @@ object VideoTools {
             var thumbWidth: Int? = null
             var thumbHeight: Int? = null
             if (frame != null) {
+                if (width != null && height != null && width != height && frame.width != frame.height && (width > height) != (frame.width > frame.height)) {
+                    val swap = width
+                    width = height
+                    height = swap
+                }
                 val scale = THUMBNAIL_SIDE.toFloat() / max(frame.width, frame.height)
                 val scaled = if (scale < 1f) {
                     Bitmap.createScaledBitmap(

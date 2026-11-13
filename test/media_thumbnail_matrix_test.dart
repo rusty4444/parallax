@@ -150,7 +150,7 @@ void main() {
     if (root.existsSync()) root.deleteSync(recursive: true);
   });
 
-  (matrix.Client, MatrixBackend) session() {
+  (matrix.Client, MatrixBackend) session({bool missingHeroAvatar = false}) {
     final client = matrix.Client(
       'thumbnail-sync-test',
       database: _Database(),
@@ -159,6 +159,27 @@ void main() {
         if (path.contains('/versions')) {
           return http.Response(
             '{"versions":["v1.11"]}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (missingHeroAvatar &&
+            path.contains('/state/m.room.member/') &&
+            Uri.decodeComponent(request.url.pathSegments.last) ==
+                '@alice:example.org') {
+          return http.Response(
+            '{"membership":"join","displayname":"Alice"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (missingHeroAvatar &&
+            path.contains('/profile/') &&
+            Uri.decodeComponent(request.url.pathSegments.last) ==
+                '@alice:example.org') {
+          return http.Response(
+            '{"displayname":"Alice",'
+            '"avatar_url":"mxc://example.org/alice"}',
             200,
             headers: {'content-type': 'application/json'},
           );
@@ -177,7 +198,16 @@ void main() {
       }),
     )..homeserver = Uri.parse('https://matrix.example');
     client.accessToken = 'token';
-    final room = matrix.Room(id: _roomId, client: client);
+    final room = matrix.Room(
+      id: _roomId,
+      client: client,
+      summary: missingHeroAvatar
+          ? matrix.RoomSummary.fromJson({
+              'm.heroes': ['@alice:example.org'],
+              'm.joined_member_count': 2,
+            })
+          : null,
+    );
     room.setState(
       matrix.Event(
         type: matrix.EventTypes.RoomMember,
@@ -185,7 +215,8 @@ void main() {
         senderId: '@alice:example.org',
         content: {
           'membership': 'join',
-          'avatar_url': 'mxc://example.org/alice',
+          'displayname': 'Alice',
+          if (!missingHeroAvatar) 'avatar_url': 'mxc://example.org/alice',
         },
         room: room,
         eventId: r'$member',
@@ -268,6 +299,36 @@ void main() {
     );
     expect(downloads, isEmpty);
   });
+
+  test(
+    'offline sync refreshes a named hero whose membership has no avatar',
+    () async {
+      final (_, backend) = session(missingHeroAvatar: true);
+      addTearDown(backend.dispose);
+      final inbox = _Inbox(backend)
+        ..roomList = [
+          ChatRoom(
+            id: _roomId,
+            name: 'Alice',
+            preview: '',
+            lastActivity: null,
+            heroes: const [ChatAvatar(name: 'Alice')],
+          ),
+        ];
+      final sync = ThumbnailSync(MatrixThumbnailSyncSource(inbox));
+      addTearDown(sync.dispose);
+
+      await sync.start();
+
+      expect(sync.state.failed, 0);
+      expect(downloads.where((path) => path.endsWith('/alice')), isNotEmpty);
+      final store = await backend.thumbnailStore();
+      expect(
+        await store?.read(avatarCacheKey(Uri.parse('mxc://example.org/alice'))),
+        'ali'.codeUnits,
+      );
+    },
+  );
 
   test('previews seen in the app are saved for the next launch', () async {
     final (_, first) = session();

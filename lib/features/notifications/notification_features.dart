@@ -220,7 +220,7 @@ class MatrixNotificationFeatures implements NotificationFeatures {
     }
     // The backend allows one send at a time; wait for the composer's.
     final deadline = DateTime.now().add(sendWait);
-    while (_backend.sending) {
+    while (_backend.isRoomSending(roomId)) {
       if (DateTime.now().isAfter(deadline)) {
         throw StateError('Another message is still sending');
       }

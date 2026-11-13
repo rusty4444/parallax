@@ -60,6 +60,10 @@ class Drafts extends MessageDraftStore {
 class FeaturesBackend extends FakeBackend
     implements MessagingFeatures, MessageActionFeatures {
   String account = 'account-a';
+  String? busyRoom;
+  void Function(String)? onQueue;
+  @override
+  bool isRoomSending(String roomId) => busyRoom == roomId || sending;
   SessionStatus status = SessionStatus.ready;
   Completer<void>? queueGate;
   List<PendingSend> outbox = [];
@@ -92,6 +96,7 @@ class FeaturesBackend extends FakeBackend
     queuedText = text;
     queuedReply = replyToId;
     queuedEdit = editEventId;
+    onQueue?.call(text);
     await queueGate?.future;
   }
 
@@ -387,6 +392,42 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets('left swipe replies to your own message without dismissing it', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$own-swipe-reply-target',
+          sender: '@me:s',
+          senderName: 'Me',
+          body: 'Own swipe reply target',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.text('Own swipe reply target'),
+      const Offset(-400, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Replying to Me: Own swipe reply target'), findsOneWidget);
+    expect(find.text('Own swipe reply target'), findsOneWidget);
+    final gallery = tester.getRect(find.text('Send a photo gallery'));
+    final replyBar = tester.getRect(
+      find.byKey(const ValueKey('composer-context-bar')),
+    );
+    final field = tester.getRect(find.byType(TextField).last);
+    expect(replyBar.top, greaterThanOrEqualTo(gallery.bottom));
+    expect(field.top, closeTo(replyBar.bottom, 0.01));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 
   testWidgets('gallery swipe replies to the specific photo', (tester) async {
     final backend = FeaturesBackend();
@@ -1384,4 +1425,74 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'multiple messages queue in one room while earlier ones are pending',
+    (tester) async {
+      final backend = FeaturesBackend();
+      final queued = <String>[];
+      backend.onQueue = (text) => queued.add(text);
+      final drafts = Drafts();
+      await tester.pumpWidget(room(backend, drafts));
+      await tester.pumpAndSettle();
+
+      // First message accepted into the outbox.
+      await tester.enterText(find.byType(TextField).last, 'First');
+      await tester.pump();
+      final send = tester.widget<IconButton>(
+        find.byWidgetPredicate(
+          (w) => w is IconButton && w.tooltip == 'Send message',
+        ),
+      );
+      send.onPressed!();
+      await tester.pumpAndSettle();
+      expect(queued, ['First']);
+
+      // Second message: the composer accepts it while the first is still pending.
+      await tester.enterText(find.byType(TextField).last, 'Second');
+      await tester.pump();
+      send.onPressed!();
+      await tester.pumpAndSettle();
+      expect(queued, ['First', 'Second']);
+
+      // Third message in the same room.
+      await tester.enterText(find.byType(TextField).last, 'Third');
+      await tester.pump();
+      send.onPressed!();
+      await tester.pumpAndSettle();
+      expect(queued, ['First', 'Second', 'Third']);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('a send in one room does not block the composer in another', (
+    tester,
+  ) async {
+    final backend = FeaturesBackend();
+    final drafts = Drafts();
+    await tester.pumpWidget(room(backend, drafts));
+    await tester.pumpAndSettle();
+
+    // Simulate a direct send in a DIFFERENT room.
+    backend.busyRoom = '!other:example.org';
+    backend.notifyListeners();
+    await tester.pump();
+
+    // The composer in THIS room must still accept a message.
+    await tester.enterText(find.byType(TextField).last, 'Not blocked');
+    await tester.pump();
+    final send = tester.widget<IconButton>(
+      find.byWidgetPredicate(
+        (w) => w is IconButton && w.tooltip == 'Send message',
+      ),
+    );
+    send.onPressed!();
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(backend.queuedText, 'Not blocked');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 }

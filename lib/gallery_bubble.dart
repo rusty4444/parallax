@@ -35,6 +35,7 @@ class GalleryBubble extends StatelessWidget {
   Widget _photo(ChatEntry entry, double width, double height) => SwipeReply(
     key: ValueKey('swipe-photo-${entry.id}'),
     palette: palette,
+    mine: entry.mine,
     onReply: entry.redacted || onReply == null ? null : () => onReply!(entry),
     child: DoubleTapReact(
       onDoubleTap: () => onHeart(entry),

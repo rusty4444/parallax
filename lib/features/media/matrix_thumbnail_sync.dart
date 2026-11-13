@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:matrix/matrix.dart' as matrix;
 
 import '../../chat_backend.dart';
+import '../../matrix_room_names.dart';
 import '../../media_disk_cache.dart';
 import '../../media_download.dart';
 import '../../room_events.dart';
@@ -97,6 +98,33 @@ class _MatrixThumbnailSyncPass implements ThumbnailSyncPass {
     ];
     final room = client.getRoomById(roomId);
     if (room == null) return jobs;
+    if (summary.avatarUrl == null) {
+      final heroes = room.peopleHeroes.take(4).toList(growable: false);
+      if (heroes.isNotEmpty) {
+        await room.loadMissingMembers(heroes);
+        if (!isCurrent) return jobs;
+        for (final heroId in heroes) {
+          Uri? memberAvatar() {
+            final avatar = room
+                .getState(matrix.EventTypes.RoomMember, heroId)
+                ?.content['avatar_url'];
+            final url = avatar is String ? Uri.tryParse(avatar) : null;
+            return url?.scheme == 'mxc' ? url : null;
+          }
+
+          var url = memberAvatar();
+          if (url == null) {
+            // A cached membership can have a display name but no avatar. The
+            // bridged contact's public profile often has the missing photo;
+            // merely calling loadMissingMembers is a no-op in this case.
+            await room.refreshMemberFromServer(heroId);
+            if (!isCurrent) return jobs;
+            url = memberAvatar();
+          }
+          if (url != null) jobs.add(_avatar(url));
+        }
+      }
+    }
     final List<matrix.Event> events;
     try {
       events = await client.database.getEventList(

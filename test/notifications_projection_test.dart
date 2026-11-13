@@ -304,7 +304,10 @@ void main() {
       // @a was forgotten, @c is still known.
       await ledger.refresh(room, '@c:example.org');
       await ledger.refresh(room, '@a:example.org');
-      expect(checked, [...people, '@a:example.org']);
+      // Each refresh fetches member state then profile (name/avatar absent).
+      expect(checked, [
+        for (final id in [...people, '@a:example.org']) ...[id, id],
+      ]);
     },
   );
 

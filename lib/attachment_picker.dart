@@ -17,7 +17,7 @@ Future<void> pickAndSendAttachment(
   ChatBackend backend,
   String roomId,
 ) async {
-  if (backend.sending) return;
+  if (backend.isRoomSending(roomId)) return;
   try {
     final file = await FilePicker.pickFile(type: FileType.any);
     if (file == null || !context.mounted) return;

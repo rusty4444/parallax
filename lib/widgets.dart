@@ -151,6 +151,17 @@ class AccentButton extends StatelessWidget {
   );
 }
 
+/// Picks a single initial for [name], skipping a leading Matrix `@` sigil so
+/// unresolved user IDs show the localpart's letter instead of `@`.
+String avatarInitial(String name) {
+  var trimmed = name.trim();
+  if (trimmed.startsWith('@') && trimmed.length > 1) {
+    trimmed = trimmed.substring(1).trimLeft();
+  }
+  if (trimmed.isEmpty) return '?';
+  return trimmed.characters.first.toUpperCase();
+}
+
 class InitialAvatar extends StatelessWidget {
   const InitialAvatar({
     super.key,
@@ -180,7 +191,7 @@ class InitialAvatar extends StatelessWidget {
     ),
     alignment: Alignment.center,
     child: Text(
-      name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase(),
+      avatarInitial(name),
       style: TextStyle(
         color: palette.foreground,
         fontSize: size * 0.38,

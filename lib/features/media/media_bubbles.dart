@@ -94,6 +94,7 @@ class MediaPreviewImage extends StatefulWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.enabled = true,
+    this.onImageSize,
   });
   final ChatBackend backend;
   final String roomId;
@@ -107,6 +108,9 @@ class MediaPreviewImage extends StatefulWidget {
   /// False shows only the placeholder (auto-load media is off).
   final bool enabled;
 
+  /// Reports the decoded preview image dimensions once resolved.
+  final ValueChanged<Size>? onImageSize;
+
   @override
   State<MediaPreviewImage> createState() => _MediaPreviewImageState();
 }
@@ -114,6 +118,19 @@ class MediaPreviewImage extends StatefulWidget {
 class _MediaPreviewImageState extends State<MediaPreviewImage> {
   late BackendSessionOwner _owner = BackendSessionOwner(widget.backend);
   Future<Uint8List?>? _preview;
+  Uint8List? _sizedBytes;
+  ImageStream? _sizeStream;
+  ImageStreamListener? _sizeListener;
+
+  void _untrackSize() {
+    final stream = _sizeStream;
+    final listener = _sizeListener;
+    _sizeStream = null;
+    _sizeListener = null;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+  }
 
   Future<Uint8List?> _load() async {
     final owner = _owner;
@@ -146,12 +163,15 @@ class _MediaPreviewImageState extends State<MediaPreviewImage> {
         oldWidget.roomId != widget.roomId ||
         oldWidget.eventId != widget.eventId ||
         oldWidget.enabled != widget.enabled) {
+      _untrackSize();
+      _sizedBytes = null;
       _preview = widget.enabled ? _load() : null;
     }
   }
 
   @override
   void dispose() {
+    _untrackSize();
     _owner.release();
     super.dispose();
   }
@@ -170,8 +190,28 @@ class _MediaPreviewImageState extends State<MediaPreviewImage> {
     builder: (context, snapshot) {
       final bytes = snapshot.data;
       if (bytes == null || !_owner.isCurrent) return _placeholder();
+      final provider = boundedMemoryImage(bytes, maxEdge: 768);
+      if (widget.onImageSize != null && !identical(_sizedBytes, bytes)) {
+        _untrackSize();
+        _sizedBytes = bytes;
+        final stream = provider.resolve(ImageConfiguration.empty);
+        late final ImageStreamListener listener;
+        listener = ImageStreamListener((info, _) {
+          final w = info.image.width.toDouble();
+          final h = info.image.height.toDouble();
+          _untrackSize();
+          if (mounted && w > 0 && h > 0) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) widget.onImageSize?.call(Size(w, h));
+            });
+          }
+        }, onError: (_, _) => _untrackSize());
+        _sizeStream = stream;
+        _sizeListener = listener;
+        stream.addListener(listener);
+      }
       return Image(
-        image: boundedMemoryImage(bytes, maxEdge: 768),
+        image: provider,
         width: widget.width,
         height: widget.height,
         fit: widget.fit,
@@ -218,6 +258,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
       );
   MediaPlayerOwner? _owner;
   MediaPlaybackController? _player;
+  double? _posterAspect;
   bool _loading = false;
   bool _failed = false;
   bool _wasPlaying = false;
@@ -363,6 +404,7 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
       _discard();
       _session.release();
       _session = BackendSessionOwner(widget.ctx.backend);
+      _posterAspect = null;
       _loading = false;
       _failed = false;
     }
@@ -381,12 +423,21 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final info = MediaInfo.fromEntry(widget.ctx.entry);
-      final size = mediaPreviewSize(
-        info,
+      final player = _player;
+      final declaredAspect = info.aspectRatio;
+      final posterAspect = _posterAspect;
+      final effectiveAspect =
+          player?.value.aspectRatio ??
+          (posterAspect != null &&
+                  (declaredAspect == null ||
+                      (declaredAspect > 1) != (posterAspect > 1))
+              ? posterAspect
+              : declaredAspect);
+      final size = mediaPreviewSizeForAspect(
+        effectiveAspect,
         maxWidth: math.min(240, constraints.maxWidth),
       );
       final p = widget.ctx.palette;
-      final player = _player;
       final playing = _activelyPlaying;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -415,6 +466,14 @@ class _VideoMessageBodyState extends State<VideoMessageBody>
                       width: size.width,
                       height: size.height,
                       enabled: _autoLoad(context, widget.ctx),
+                      onImageSize: (imgSize) {
+                        final ratio = imgSize.width / imgSize.height;
+                        if (ratio.isFinite &&
+                            ratio > 0 &&
+                            _posterAspect != ratio) {
+                          setState(() => _posterAspect = ratio);
+                        }
+                      },
                     )
                   else
                     ColoredBox(

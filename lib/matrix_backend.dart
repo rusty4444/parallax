@@ -66,7 +66,8 @@ class MatrixBackend extends ChatBackend
         DelayedRoomEventSender,
         UndoSendFeatures,
         MediaCacheAccess,
-        LinkPreviewSource {
+        LinkPreviewSource,
+        LinkPreviewImageSource {
   MatrixBackend({
     bool Function()? sendReadReceipts,
     bool Function()? sendTypingNotifications,
@@ -138,7 +139,7 @@ class MatrixBackend extends ChatBackend
   // lane that lets several held sends fall due together.
   final Future<Duration> Function() _undoSendDelay;
   AppLifecycleListener? _heldSendLifecycle;
-  Future<void> _queuedTransmitTail = Future<void>.value();
+  final _queuedTransmitTails = <String, Future<void>>{};
   String? _outboxAccount;
   Future<void>? _outboxRestoring;
   late final MessageOutbox _outbox = MessageOutbox(
@@ -181,7 +182,7 @@ class MatrixBackend extends ChatBackend
   bool _refreshingRooms = false;
   bool _firstSyncCompleted = false;
   int _successfulSyncs = 0;
-  bool _sending = false;
+  final _directSendingRooms = <String>{};
   bool _loadingHistory = false;
   int _visibleMessageLimit = 100;
   String? _activeRoomId;
@@ -228,11 +229,14 @@ class MatrixBackend extends ChatBackend
   int _imageCacheBytes = 0;
   final _avatarCache = <Uri, Uint8List>{};
   static const _maxCachedAvatars = 400;
+  final _previewImageCache = <Uri, Uint8List>{};
+  static const _maxCachedPreviewImages = 64;
 
   /// Thumbnails and avatars on disk for the signed-in session.
   Future<MediaDiskCache?>? _mediaCache;
   String? _mediaCacheAccount;
   final _avatarInFlight = <Uri, Future<Uint8List?>>{};
+  final _previewImageInFlight = <Uri, Future<Uint8List?>>{};
   final _avatarWaiters = Queue<Completer<void>>();
   int _avatarActive = 0;
   final _reactionInFlight = <String>{};
@@ -255,7 +259,9 @@ class MatrixBackend extends ChatBackend
   @override
   List<ChatEntry> get messages => _messages;
   @override
-  bool get sending => _sending;
+  bool get sending => _directSendingRooms.isNotEmpty;
+  @override
+  bool isRoomSending(String roomId) => _directSendingRooms.contains(roomId);
   @override
   bool get canLoadOlder =>
       (_timeline?.events.length ?? 0) > _visibleMessageLimit ||
@@ -655,14 +661,17 @@ class MatrixBackend extends ChatBackend
     SendCancellation cancellation,
     void Function(double) onProgress,
   ) async {
-    // Held sends can fall due together (deadline or app pause): queue their
-    // transmissions behind each other instead of failing later ones as busy.
-    final previous = _queuedTransmitTail;
+    // Same-room sends transmit in order; different rooms send concurrently.
+    final roomId = record.roomId;
+    final previous = _queuedTransmitTails[roomId] ?? Future<void>.value();
     final turn = Completer<void>();
-    _queuedTransmitTail = Future.wait<void>([
-      previous,
-      turn.future,
-    ]).then((_) {});
+    late final Future<void> tail;
+    tail = Future.wait<void>([previous, turn.future]).then((_) {
+      if (identical(_queuedTransmitTails[roomId], tail)) {
+        _queuedTransmitTails.remove(roomId);
+      }
+    });
+    _queuedTransmitTails[roomId] = tail;
     try {
       await Future.any<void>([previous, cancellation.whenCancelled]);
       await _transmitQueuedNow(record, cancellation, onProgress);
@@ -697,7 +706,7 @@ class MatrixBackend extends ChatBackend
     // hold the lock for their whole upload. A held message falling due then
     // must wait its turn, not fail (and fail again on Retry).
     final busyUntil = DateTime.now().add(queuedSendLockWait);
-    while (_sending || _cryptoSetupBusy) {
+    while (_directSendingRooms.contains(record.roomId) || _cryptoSetupBusy) {
       if (DateTime.now().isAfter(busyUntil)) {
         throw StateError('Another secure operation is running');
       }
@@ -711,8 +720,6 @@ class MatrixBackend extends ChatBackend
     if (room == null || room.membership != matrix.Membership.join) {
       throw StateError('Room is no longer joined');
     }
-    _sending = true;
-    notifyListeners();
     try {
       await MatrixSendGuard.cancellable(cancellation, () async {
         final reply = record.replyToId == null
@@ -793,11 +800,6 @@ class MatrixBackend extends ChatBackend
     } catch (_) {
       if (cancellation.isCancelled) throw const SendCancelled();
       rethrow;
-    } finally {
-      if (!_disposed && generation == _securityGeneration) {
-        _sending = false;
-        notifyListeners();
-      }
     }
   }
 
@@ -1091,7 +1093,8 @@ class MatrixBackend extends ChatBackend
       await _outbox.closeAccount();
       _outboxAccount = null;
       _outboxRestoring = null;
-      _sending = false;
+      _directSendingRooms.clear();
+      _queuedTransmitTails.clear();
       await beforeLogout?.call();
       if (_disposed || !identical(client, _client)) {
         throw StateError('Session changed during logout');
@@ -1382,7 +1385,9 @@ class MatrixBackend extends ChatBackend
     String? replyToId,
     String? editEventId,
   }) async {
-    if (_sending) throw StateError('A send is already in progress');
+    if (_directSendingRooms.contains(roomId)) {
+      throw StateError('A send is already in progress');
+    }
     if (text.trim().isEmpty) return;
     final client = _requireClient();
     final room = client.getRoomById(roomId);
@@ -1399,7 +1404,7 @@ class MatrixBackend extends ChatBackend
     }
     final generation = _securityGeneration;
     final owner = _sendOwnership(client, room, generation);
-    _sending = true;
+    _directSendingRooms.add(roomId);
     notifyListeners();
     try {
       await MatrixSendGuard.owned(owner, () async {
@@ -1466,7 +1471,7 @@ class MatrixBackend extends ChatBackend
       });
     } finally {
       if (_securityGeneration == generation) {
-        _sending = false;
+        _directSendingRooms.remove(roomId);
         if (!_disposed) notifyListeners();
       }
     }
@@ -1474,7 +1479,9 @@ class MatrixBackend extends ChatBackend
 
   @override
   Future<void> sendImages(String roomId, List<XFile> images) async {
-    if (_sending) throw StateError('A send is already in progress');
+    if (_directSendingRooms.contains(roomId)) {
+      throw StateError('A send is already in progress');
+    }
     if (images.isEmpty || images.length > 10) {
       throw ArgumentError('Select between 1 and 10 images');
     }
@@ -1488,7 +1495,7 @@ class MatrixBackend extends ChatBackend
     }
     final generation = _securityGeneration;
     final owner = _sendOwnership(client, room, generation);
-    _sending = true;
+    _directSendingRooms.add(roomId);
     notifyListeners();
     try {
       await MatrixSendGuard.owned(owner, () async {
@@ -1536,7 +1543,7 @@ class MatrixBackend extends ChatBackend
       });
     } finally {
       if (_securityGeneration == generation) {
-        _sending = false;
+        _directSendingRooms.remove(roomId);
         if (!_disposed) notifyListeners();
       }
     }
@@ -1544,7 +1551,9 @@ class MatrixBackend extends ChatBackend
 
   @override
   Future<void> sendAttachment(String roomId, XFile file) async {
-    if (_sending) throw StateError('A send is already in progress');
+    if (_directSendingRooms.contains(roomId)) {
+      throw StateError('A send is already in progress');
+    }
     final client = _requireClient();
     final room = client.getRoomById(roomId);
     if (room == null || room.membership != matrix.Membership.join) {
@@ -1555,7 +1564,7 @@ class MatrixBackend extends ChatBackend
     }
     final generation = _securityGeneration;
     final owner = _sendOwnership(client, room, generation);
-    _sending = true;
+    _directSendingRooms.add(roomId);
     notifyListeners();
     try {
       await MatrixSendGuard.owned(owner, () async {
@@ -1597,7 +1606,7 @@ class MatrixBackend extends ChatBackend
       });
     } finally {
       if (_securityGeneration == generation) {
-        _sending = false;
+        _directSendingRooms.remove(roomId);
         if (!_disposed) notifyListeners();
       }
     }
@@ -1711,17 +1720,127 @@ class MatrixBackend extends ChatBackend
         (url.scheme != 'https' && url.scheme != 'http')) {
       return null;
     }
-    final directVideo = playableLinkVideo(url);
+    final target = unwrapLinkRedirect(url);
+    final directVideo = playableLinkVideo(target);
     if (directVideo != null) {
       return LinkPreview(url: url, video: directVideo);
     }
-    final response = await client.getUrlPreview(url, ts: timestamp);
+    final response = await client.getUrlPreview(target, ts: timestamp);
     if (_disposed || !identical(client, _client)) return null;
     return linkPreviewFromOpenGraph(
       url,
       response.additionalProperties,
       image: response.ogImage,
     );
+  }
+
+  @override
+  Uint8List? cachedPreviewImage(Uri url) =>
+      _disposed ? null : _previewImageCache[url];
+
+  @override
+  Future<Uint8List?> loadPreviewImage(Uri url) async {
+    if (url.scheme != 'mxc' || _disposed) return null;
+    final cached = _previewImageCache.remove(url);
+    if (cached != null) {
+      _previewImageCache[url] = cached;
+      return cached;
+    }
+    final existing = _previewImageInFlight[url];
+    if (existing != null) return existing;
+    final pending = _fetchPreviewImage(url);
+    _previewImageInFlight[url] = pending;
+    try {
+      return await pending;
+    } finally {
+      _previewImageInFlight.remove(url);
+    }
+  }
+
+  void _rememberPreviewImage(Uri url, Uint8List bytes) {
+    _previewImageCache[url] = bytes;
+    if (_previewImageCache.length > _maxCachedPreviewImages) {
+      _previewImageCache.remove(_previewImageCache.keys.first);
+    }
+  }
+
+  Future<Uint8List?> _fetchPreviewImage(Uri url) async {
+    final generation = _securityGeneration;
+    final store = await thumbnailStore();
+    final saved = await store?.read(previewImageCacheKey(url));
+    if (_disposed || generation != _securityGeneration) return null;
+    if (saved != null) {
+      _rememberPreviewImage(url, saved);
+      return saved;
+    }
+    if (_avatarActive >= 4) {
+      final waiter = Completer<void>();
+      _avatarWaiters.add(waiter);
+      await waiter.future;
+    } else {
+      _avatarActive++;
+    }
+    try {
+      final client = _client;
+      if (client == null ||
+          !client.isLogged() ||
+          _disposed ||
+          generation != _securityGeneration) {
+        return null;
+      }
+      final homeserver = client.homeserver;
+      final token = client.accessToken;
+      if (homeserver == null || token == null) return null;
+      Uint8List? bytes;
+      try {
+        final thumbnail = await matrix.MxcUriExtension(url).getThumbnailUri(
+          client,
+          width: 800,
+          height: 800,
+          method: matrix.ThumbnailMethod.scale,
+        );
+        bytes = await downloadMatrixMedia(
+          httpClient: client.httpClient,
+          homeserver: homeserver,
+          uri: thumbnail,
+          accessToken: token,
+          maxBytes: MediaDiskCache.defaultMaxFileBytes,
+        );
+      } catch (_) {}
+      if ((bytes == null || bytes.isEmpty) &&
+          _client == client &&
+          client.isLogged() &&
+          !_disposed &&
+          generation == _securityGeneration) {
+        final full = await matrix.MxcUriExtension(url).getDownloadUri(client);
+        bytes = await downloadMatrixMedia(
+          httpClient: client.httpClient,
+          homeserver: homeserver,
+          uri: full,
+          accessToken: token,
+          maxBytes: MediaDiskCache.defaultMaxFileBytes,
+        );
+      }
+      if (_client != client ||
+          !client.isLogged() ||
+          _disposed ||
+          generation != _securityGeneration ||
+          bytes == null ||
+          bytes.isEmpty) {
+        return null;
+      }
+      _rememberPreviewImage(url, bytes);
+      unawaited(store?.write(previewImageCacheKey(url), bytes));
+      return bytes;
+    } catch (_) {
+      return null;
+    } finally {
+      if (_avatarWaiters.isNotEmpty) {
+        _avatarWaiters.removeFirst().complete();
+      } else {
+        _avatarActive--;
+      }
+    }
   }
 
   @override
@@ -1779,26 +1898,43 @@ class MatrixBackend extends ChatBackend
           generation != _securityGeneration) {
         return null;
       }
-      final thumbnail = await matrix.MxcUriExtension(
-        url,
-      ).getThumbnailUri(client, width: 96, height: 96);
       final homeserver = client.homeserver;
       final token = client.accessToken;
       if (homeserver == null || token == null) return null;
-      final bytes = await downloadMatrixMedia(
-        httpClient: client.httpClient,
-        homeserver: homeserver,
-        uri: thumbnail,
-        accessToken: token,
-        maxBytes: 1024 * 1024,
-      );
+      Uint8List? bytes;
+      try {
+        final thumbnail = await matrix.MxcUriExtension(
+          url,
+        ).getThumbnailUri(client, width: 96, height: 96);
+        bytes = await downloadMatrixMedia(
+          httpClient: client.httpClient,
+          homeserver: homeserver,
+          uri: thumbnail,
+          accessToken: token,
+          maxBytes: 1024 * 1024,
+        );
+      } catch (_) {}
+      if ((bytes == null || bytes.isEmpty) &&
+          _client == client &&
+          client.isLogged() &&
+          !_disposed &&
+          generation == _securityGeneration) {
+        final full = await matrix.MxcUriExtension(url).getDownloadUri(client);
+        bytes = await downloadMatrixMedia(
+          httpClient: client.httpClient,
+          homeserver: homeserver,
+          uri: full,
+          accessToken: token,
+          maxBytes: MediaDiskCache.defaultMaxFileBytes,
+        );
+      }
       if (_client != client ||
           !client.isLogged() ||
           _disposed ||
           generation != _securityGeneration) {
         return null;
       }
-      if (bytes.isEmpty) return null;
+      if (bytes == null || bytes.isEmpty) return null;
       _rememberAvatar(url, bytes);
       unawaited(store?.write(avatarCacheKey(url), bytes));
       return bytes;
@@ -3051,12 +3187,14 @@ class MatrixBackend extends ChatBackend
     _freshRooms.clear();
     _freshQueue.clear();
     _messages = const [];
-    _sending = false;
+    _directSendingRooms.clear();
+    _queuedTransmitTails.clear();
     _loadingHistory = false;
     _refreshingRooms = false;
     _imageCache.clear();
     _imageCacheBytes = 0;
     _avatarCache.clear();
+    _previewImageCache.clear();
     _dropMediaCache();
     _reactionInFlight.clear();
     _validatedRoster.clear();
@@ -3785,16 +3923,26 @@ class MatrixBackend extends ChatBackend
     final client = _client;
     final room = timeline.room;
     if (client == null) return;
+    final visibleEvents = events.toList(growable: false);
+    final visibleIds = {for (final event in visibleEvents) event.eventId};
+    final candidates = <String>[
+      for (final event in visibleEvents) event.senderId,
+      for (final receiptTimeline in [
+        room.receiptState.global,
+        ?room.receiptState.mainThread,
+      ])
+        for (final entry in receiptTimeline.otherUsers.entries)
+          if (visibleIds.contains(entry.value.eventId)) entry.key,
+    ];
     final senders = <String>[];
-    for (final event in events) {
-      final id = event.senderId;
+    for (final id in candidates) {
       if (id == client.userID ||
           !id.isValidMatrixIdStrict() ||
           !_requestedSenders.add(id)) {
         continue;
       }
       senders.add(id);
-      if (senders.length >= 20) break;
+      if (senders.length >= 24) break;
     }
     if (senders.isEmpty) return;
     final generation = _roomGeneration;

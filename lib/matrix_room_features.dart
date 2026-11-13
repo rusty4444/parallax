@@ -272,38 +272,79 @@ class MatrixRoomFeatures {
       _owned(() async {
         final room = _room(roomId);
         final state = room.receiptState;
-        final readers = <String, MessageReader>{};
+        final latestByUser = <String, DateTime>{};
         for (final timeline in [
           state.global,
           ?state.mainThread,
           ...state.byThread.values,
         ]) {
-          void add(String userId, LatestReceiptStateData receipt) {
+          void record(String userId, LatestReceiptStateData receipt) {
             if (receipt.eventId != eventId) return;
-            final previous = readers[userId];
-            if (previous?.time != null &&
-                !receipt.timestamp.isAfter(previous!.time!)) {
+            final previous = latestByUser[userId];
+            if (previous != null && !receipt.timestamp.isAfter(previous)) {
               return;
             }
-            final displayName = room
-                .getState(EventTypes.RoomMember, userId)
-                ?.content['displayname'];
-            readers[userId] = MessageReader(
-              userId: userId,
-              name: displayName is String && displayName.trim().isNotEmpty
-                  ? displayName
-                  : userId,
-              time: receipt.timestamp,
-            );
+            latestByUser[userId] = receipt.timestamp;
           }
 
           for (final entry in timeline.otherUsers.entries) {
-            add(entry.key, entry.value);
+            record(entry.key, entry.value);
           }
-          if (timeline.latestOwnReceipt case final own?) add(_userId!, own);
+          if (timeline.latestOwnReceipt case final own?) record(_userId!, own);
         }
-        return readers.values.toList()
-          ..sort((a, b) => b.time!.compareTo(a.time!));
+        if (latestByUser.isNotEmpty) {
+          final missing = <String>[];
+          final incomplete = <String>[];
+          for (final userId in latestByUser.keys) {
+            final member = room.getState(EventTypes.RoomMember, userId);
+            if (member == null) {
+              missing.add(userId);
+            } else {
+              final name = member.content['displayname'];
+              final avatar = member.content['avatar_url'];
+              final hasName = name is String && name.trim().isNotEmpty;
+              final hasAvatar = avatar is String && avatar.startsWith('mxc://');
+              if (!hasName || !hasAvatar) incomplete.add(userId);
+            }
+          }
+          if (missing.isNotEmpty) {
+            await room.loadMissingMembers(missing, fromServer: true);
+            _checkOwner();
+          }
+          if (incomplete.isNotEmpty) {
+            try {
+              await Future.wait([
+                for (final userId in incomplete.take(6))
+                  room.refreshMemberFromServer(userId),
+              ]).timeout(const Duration(seconds: 4));
+            } catch (_) {}
+            _checkOwner();
+          }
+        }
+        final readers = <MessageReader>[
+          for (final entry in latestByUser.entries) ...[
+            () {
+              final member = room.getState(EventTypes.RoomMember, entry.key);
+              final displayName = member?.content['displayname'];
+              final avatarUrl = member?.content['avatar_url'];
+              final parsedAvatar =
+                  avatarUrl is String && avatarUrl.startsWith('mxc://')
+                  ? Uri.tryParse(avatarUrl)
+                  : null;
+              return MessageReader(
+                userId: entry.key,
+                name: displayName is String && displayName.trim().isNotEmpty
+                    ? displayName.trim()
+                    : entry.key,
+                time: entry.value,
+                avatar: parsedAvatar != null && parsedAvatar.host.isNotEmpty
+                    ? parsedAvatar
+                    : null,
+              );
+            }(),
+          ],
+        ]..sort((a, b) => b.time!.compareTo(a.time!));
+        return readers;
       });
 
   bool isFavourite(String roomId) => _room(roomId).isFavourite;

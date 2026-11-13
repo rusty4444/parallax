@@ -48,12 +48,35 @@ class MediaInfo {
     final durationMs =
         _boundedInt(info['duration'], 24 * 60 * 60 * 1000) ??
         _boundedInt(audio['duration'], 24 * 60 * 60 * 1000);
+    final rawThumbInfo = info['thumbnail_info'];
+    final thumbInfo = rawThumbInfo is Map ? rawThumbInfo : const {};
+    var width = _boundedInt(info['w'], 100000, min: 1);
+    var height = _boundedInt(info['h'], 100000, min: 1);
+    final thumbW = _boundedInt(thumbInfo['w'], 100000, min: 1);
+    final thumbH = _boundedInt(thumbInfo['h'], 100000, min: 1);
+    if (width == null || height == null) {
+      if (thumbW != null && thumbH != null) {
+        width = thumbW;
+        height = thumbH;
+      }
+    } else if (thumbW != null &&
+        thumbH != null &&
+        width != height &&
+        thumbW != thumbH &&
+        (width > height) != (thumbW > thumbH) &&
+        ((height / width) - (thumbW / thumbH)).abs() < 0.15) {
+      // Senders that probe coded stream dimensions without rotation metadata
+      // write landscape w/h alongside an auto-rotated portrait thumbnail.
+      final swap = width;
+      width = height;
+      height = swap;
+    }
     return MediaInfo(
       name: _safeName(filename ?? (text.isEmpty ? 'Attachment' : text)),
       mimeType: _mime(mime) ?? _mime(fileMime),
       size: _boundedInt(info['size'], 1 << 40),
-      width: _boundedInt(info['w'], 100000, min: 1),
-      height: _boundedInt(info['h'], 100000, min: 1),
+      width: width,
+      height: height,
       duration: durationMs == null ? null : Duration(milliseconds: durationMs),
       caption: caption,
       hasThumbnail:
@@ -226,9 +249,15 @@ bool isMediaKind(EntryKind kind) =>
 
 /// Display size for a media preview inside a bubble, from declared
 /// dimensions. Hostile ratios are clamped so one event cannot dominate.
-Size mediaPreviewSize(MediaInfo info, {double maxWidth = 240}) {
+Size mediaPreviewSize(MediaInfo info, {double maxWidth = 240}) =>
+    mediaPreviewSizeForAspect(info.aspectRatio, maxWidth: maxWidth);
+
+/// Display size for a media preview from an aspect ratio (`width / height`).
+Size mediaPreviewSizeForAspect(double? aspectRatio, {double maxWidth = 240}) {
   final limit = maxWidth.isFinite ? math.max(80.0, maxWidth) : 240.0;
-  final ratio = info.aspectRatio;
+  final ratio = aspectRatio != null && aspectRatio.isFinite && aspectRatio > 0
+      ? aspectRatio.clamp(0.2, 5.0)
+      : null;
   if (ratio == null) return Size(limit, limit * 0.72);
   var width = limit;
   var height = width / ratio;

@@ -147,6 +147,7 @@ class _TimelineViewState extends State<TimelineView> {
     backend: widget.backend,
     roomId: widget.roomId,
     eventId: eventId,
+    palette: widget.palette,
   );
 
   List<_Item> _items(List<TimelineRow> rows) {
@@ -264,6 +265,7 @@ class _TimelineViewState extends State<TimelineView> {
     }) => SwipeReply(
       key: ValueKey('swipe-reply-${entry.id}'),
       palette: palette,
+      mine: entry.mine,
       onReply: entry.redacted || widget.onReply == null
           ? null
           : () => widget.onReply!(entry),

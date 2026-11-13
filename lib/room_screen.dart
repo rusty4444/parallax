@@ -512,7 +512,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         !_owner.isCurrent ||
         !(_draftOwner?.isCurrent ?? true) ||
         _sending ||
-        widget.backend.sending ||
+        widget.backend.isRoomSending(widget.roomId) ||
         (body.isEmpty && media == null)) {
       // A completed Future<void> means acceptance to RichMessageComposer.
       // Busy, stale and empty submissions must never acknowledge its buffer.
@@ -542,7 +542,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       // restore an already accepted outgoing message as a fresh draft.
       if (features != null && _draftLoading != null) await _draftLoading;
       if (!owner.isCurrent) throw StateError('This session has ended.');
-      if (backend.sending || !(draftOwner?.isCurrent ?? true)) {
+      if (backend.isRoomSending(roomId) || !(draftOwner?.isCurrent ?? true)) {
         throw StateError(
           'Message not accepted: the room is busy or unavailable.',
         );
@@ -908,6 +908,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         backend: widget.backend,
         roomId: widget.roomId,
         eventId: entry.id,
+        palette: widget.palette,
       );
     } else if (choice == 'media') {
       await openMediaViewer(
@@ -1540,47 +1541,13 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           ),
                         ),
                       ),
-                    if (_replyingTo != null || _editing != null)
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
-                        decoration: BoxDecoration(
-                          color: p.surface,
-                          border: Border(top: BorderSide(color: p.stroke)),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _editing == null
-                                  ? Icons.reply_rounded
-                                  : Icons.edit_outlined,
-                              color: p.secondary,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                _editing == null
-                                    ? 'Replying to ${_replyingTo!.senderLabel}: ${_replyingTo!.body}'
-                                    : 'Editing: ${_editing!.body}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: p.foreground),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Cancel reply or edit',
-                              onPressed: _cancelComposerContext,
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ],
-                        ),
-                      ),
                     if (_features != null) ...[
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton.icon(
                           onPressed:
                               _sending ||
-                                  widget.backend.sending ||
+                                  widget.backend.isRoomSending(widget.roomId) ||
                                   _editing != null
                               ? null
                               : () => pickAndSendImages(
@@ -1601,18 +1568,21 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         hookContext: roomCtx,
                         replyToId: _replyingTo?.id,
                         editing: _editing != null,
+                        contextLabel: _editing != null
+                            ? 'Editing: ${_editing!.body}'
+                            : _replyingTo != null
+                            ? 'Replying to ${_replyingTo!.senderLabel}: ${_replyingTo!.body}'
+                            : null,
                         controller: _draft,
                         sendContext: _sendContext,
                         onAcknowledged: (textCleared) =>
                             _acknowledgeComposer(composerContext, textCleared),
                         sending:
                             _sending ||
-                            widget.backend.sending ||
+                            widget.backend.isRoomSending(widget.roomId) ||
                             !_owner.isCurrent,
                         onChanged: _onDraftChanged,
                         onSend: _sendContent,
-                        // The ✕ only appears while there is a reply or edit
-                        // to cancel; the banner above has its own too.
                         onCancel: _replyingTo != null || _editing != null
                             ? _cancelComposerContext
                             : null,
@@ -1630,10 +1600,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           12 + MediaQuery.paddingOf(context).bottom * 0.25,
                         ),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             IconButton(
                               tooltip: 'Attach file',
-                              onPressed: widget.backend.sending
+                              onPressed:
+                                  widget.backend.isRoomSending(widget.roomId)
                                   ? null
                                   : () => pickAndSendAttachment(
                                       context,
@@ -1647,7 +1619,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                             ),
                             IconButton(
                               tooltip: 'Attach photos',
-                              onPressed: widget.backend.sending
+                              onPressed:
+                                  widget.backend.isRoomSending(widget.roomId)
                                   ? null
                                   : () => pickAndSendImages(
                                       context,
@@ -1660,22 +1633,131 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                               ),
                             ),
                             Expanded(
-                              child: TextField(
-                                controller: _draft,
-                                onChanged: _onDraftChanged,
-                                minLines: 1,
-                                maxLines: 5,
-                                textCapitalization:
-                                    TextCapitalization.sentences,
-                                keyboardType: TextInputType.multiline,
-                                onSubmitted: (_) => _send(),
-                                decoration: const InputDecoration(
-                                  hintText: 'Write a message…',
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 13,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (_replyingTo != null || _editing != null)
+                                    Container(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        12,
+                                        6,
+                                        4,
+                                        6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: p.surface,
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                              top: Radius.circular(18),
+                                            ),
+                                        border: Border(
+                                          top: BorderSide(color: p.stroke),
+                                          left: BorderSide(color: p.stroke),
+                                          right: BorderSide(color: p.stroke),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            _editing == null
+                                                ? Icons.reply_rounded
+                                                : Icons.edit_outlined,
+                                            size: 18,
+                                            color: p.secondary,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              _editing == null
+                                                  ? 'Replying to ${_replyingTo!.senderLabel}: ${_replyingTo!.body}'
+                                                  : 'Editing: ${_editing!.body}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: p.foreground,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Cancel reply or edit',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            constraints:
+                                                const BoxConstraints.tightFor(
+                                                  width: 32,
+                                                  height: 32,
+                                                ),
+                                            padding: EdgeInsets.zero,
+                                            onPressed: _cancelComposerContext,
+                                            icon: const Icon(
+                                              Icons.close_rounded,
+                                              size: 18,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  TextField(
+                                    controller: _draft,
+                                    onChanged: _onDraftChanged,
+                                    minLines: 1,
+                                    maxLines: 5,
+                                    textCapitalization:
+                                        TextCapitalization.sentences,
+                                    keyboardType: TextInputType.multiline,
+                                    onSubmitted: (_) => _send(),
+                                    decoration: InputDecoration(
+                                      hintText: 'Write a message…',
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 13,
+                                          ),
+                                      border:
+                                          _replyingTo != null ||
+                                              _editing != null
+                                          ? OutlineInputBorder(
+                                              borderRadius:
+                                                  const BorderRadius.vertical(
+                                                    bottom: Radius.circular(18),
+                                                  ),
+                                              borderSide: BorderSide(
+                                                color: p.stroke,
+                                              ),
+                                            )
+                                          : null,
+                                      enabledBorder:
+                                          _replyingTo != null ||
+                                              _editing != null
+                                          ? OutlineInputBorder(
+                                              borderRadius:
+                                                  const BorderRadius.vertical(
+                                                    bottom: Radius.circular(18),
+                                                  ),
+                                              borderSide: BorderSide(
+                                                color: p.stroke,
+                                              ),
+                                            )
+                                          : null,
+                                      focusedBorder:
+                                          _replyingTo != null ||
+                                              _editing != null
+                                          ? OutlineInputBorder(
+                                              borderRadius:
+                                                  const BorderRadius.vertical(
+                                                    bottom: Radius.circular(18),
+                                                  ),
+                                              borderSide: BorderSide(
+                                                color: p.accent,
+                                                width: 1.4,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
                             ),
                             const SizedBox(width: 9),

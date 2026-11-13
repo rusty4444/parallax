@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/chat_backend.dart';
 import 'package:parallax/features/media/media_content.dart';
+import 'package:parallax/media_player_owner.dart';
 import 'package:parallax/features/media/voice_waveform.dart';
 
 void main() {
@@ -190,6 +191,107 @@ void main() {
       );
       expect(VoiceMessageRegistry.isRecorderName('voice-notes.m4a'), isFalse);
       expect(VoiceMessageRegistry.isRecorderName('song.mp3'), isFalse);
+    });
+  });
+
+  group('videoDisplayAspectRatio', () {
+    test('swaps coded dimensions for 90/270 rotation', () {
+      // Portrait video: coded 1920x1080 with 90° rotation → display 1080x1920
+      final ratio = videoDisplayAspectRatio(const Size(1920, 1080), 90);
+      expect(ratio, closeTo(1080 / 1920, 0.001));
+      // Same for 270°
+      expect(
+        videoDisplayAspectRatio(const Size(1920, 1080), 270),
+        closeTo(1080 / 1920, 0.001),
+      );
+    });
+
+    test('keeps dimensions for 0/180 rotation', () {
+      expect(
+        videoDisplayAspectRatio(const Size(1920, 1080), 0),
+        closeTo(1920 / 1080, 0.001),
+      );
+      expect(
+        videoDisplayAspectRatio(const Size(1920, 1080), 180),
+        closeTo(1920 / 1080, 0.001),
+      );
+    });
+
+    test('normalizes negative and >360 rotation values', () {
+      expect(
+        videoDisplayAspectRatio(const Size(1920, 1080), -270),
+        closeTo(1080 / 1920, 0.001),
+      );
+      expect(
+        videoDisplayAspectRatio(const Size(1920, 1080), 450),
+        closeTo(1080 / 1920, 0.001),
+      );
+    });
+
+    test('returns null for invalid dimensions', () {
+      expect(videoDisplayAspectRatio(const Size(0, 1080), 0), isNull);
+      expect(videoDisplayAspectRatio(const Size(1920, 0), 90), isNull);
+      expect(videoDisplayAspectRatio(const Size(-1, 1080), 0), isNull);
+    });
+  });
+
+  group('portrait video aspect correction', () {
+    test('swaps w/h when thumbnail orientation disagrees with declared', () {
+      // Sender probes coded 1920x1080 (landscape) but the auto-rotated
+      // thumbnail is 1080x1920 (portrait). The ratio is close enough to
+      // confirm it is the same video rotated, not a different crop.
+      final info = MediaInfo.fromContent({
+        'info': {
+          'w': 1920,
+          'h': 1080,
+          'thumbnail_info': {'w': 1080, 'h': 1920},
+        },
+      });
+      expect(info.width, 1080);
+      expect(info.height, 1920);
+      expect(info.aspectRatio, closeTo(1080 / 1920, 0.001));
+    });
+
+    test('does not swap when orientations agree', () {
+      final info = MediaInfo.fromContent({
+        'info': {
+          'w': 1920,
+          'h': 1080,
+          'thumbnail_info': {'w': 960, 'h': 540},
+        },
+      });
+      expect(info.width, 1920);
+      expect(info.height, 1080);
+    });
+
+    test('does not swap when ratios differ too much (different crop)', () {
+      final info2 = MediaInfo.fromContent({
+        'info': {
+          'w': 1920,
+          'h': 1080,
+          'thumbnail_info': {'w': 200, 'h': 900},
+        },
+      });
+      // 1080/1920 = 0.5625 vs 200/900 = 0.222 → diff 0.34 > 0.15, no swap
+      expect(info2.width, 1920);
+      expect(info2.height, 1080);
+    });
+
+    test('falls back to thumbnail dimensions when w/h missing', () {
+      final info = MediaInfo.fromContent({
+        'info': {
+          'thumbnail_info': {'w': 720, 'h': 1280},
+        },
+      });
+      expect(info.width, 720);
+      expect(info.height, 1280);
+    });
+
+    test('mediaPreviewSizeForAspect produces portrait shape', () {
+      final size = mediaPreviewSizeForAspect(9 / 16, maxWidth: 240);
+      expect(size.height, greaterThan(size.width));
+      expect(size.height, 320);
+      expect(size.width, greaterThanOrEqualTo(120));
     });
   });
 }

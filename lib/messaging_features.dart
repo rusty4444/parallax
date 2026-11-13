@@ -75,10 +75,16 @@ class ThreadPage {
 }
 
 class MessageReader {
-  const MessageReader({required this.userId, required this.name, this.time});
+  const MessageReader({
+    required this.userId,
+    required this.name,
+    this.time,
+    this.avatar,
+  });
   final String userId;
   final String name;
   final DateTime? time;
+  final Uri? avatar;
 }
 
 class ProviderDiscovery {

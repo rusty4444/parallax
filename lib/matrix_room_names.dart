@@ -154,8 +154,18 @@ extension ParallaxRoomNames on Room {
       );
       final membership = content.tryGet<String>('membership', TryGet.silent);
       if (membership == null) return false;
-      final name = content.tryGet<String>('displayname', TryGet.silent);
-      final avatar = content.tryGet<String>('avatar_url', TryGet.silent);
+      var name = content.tryGet<String>('displayname', TryGet.silent);
+      var avatar = content.tryGet<String>('avatar_url', TryGet.silent);
+      if (name == null || avatar == null) {
+        try {
+          final profile = await client.request(
+            RequestType.GET,
+            '/client/v3/profile/${Uri.encodeComponent(userId)}',
+          );
+          name ??= profile.tryGet<String>('displayname', TryGet.silent);
+          avatar ??= profile.tryGet<String>('avatar_url', TryGet.silent);
+        } catch (_) {}
+      }
       final current = getState(EventTypes.RoomMember, userId)?.content;
       if (current != null &&
           current['displayname'] == name &&
@@ -211,13 +221,13 @@ extension ParallaxRoomNames on Room {
       membership =
           member.tryGet<String>('membership', TryGet.silent) ?? membership;
     } catch (_) {}
-    if (name == null) {
+    if (name == null || avatar == null) {
       try {
         final profile = await client.request(
           RequestType.GET,
           '/client/v3/profile/${Uri.encodeComponent(userId)}',
         );
-        name = profile.tryGet<String>('displayname', TryGet.silent);
+        name ??= profile.tryGet<String>('displayname', TryGet.silent);
         avatar ??= profile.tryGet<String>('avatar_url', TryGet.silent);
       } catch (_) {}
     }
