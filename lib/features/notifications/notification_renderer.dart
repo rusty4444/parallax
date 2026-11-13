@@ -196,15 +196,28 @@ RenderedNotification renderRoomThread(
   ];
   final latest = thread.lines.last;
   final highlight = thread.lines.any((line) => line.highlight && !line.fromMe);
-  final style = MessagingStyleInformation(
-    me,
-    conversationTitle: thread.isDirect ? null : thread.roomName,
-    groupConversation: !thread.isDirect,
-    messages: messages,
-  );
-  final roomAvatar =
-      thread.roomAvatarPath ??
-      (thread.isDirect ? latest.senderAvatarPath : null);
+  final roomAvatar = thread.roomAvatarPath ?? latest.senderAvatarPath;
+  final largeAvatarExists = roomAvatar != null && fileExists(roomAvatar);
+  // Android hides largeIcon on a collapsed MessagingStyle notification. For a
+  // single group message with avatar art, BigTextStyle keeps the collapsed
+  // row's avatar visible. Direct chats retain MessagingStyle and the sender's
+  // name-level Person icon; multi-message history retains it for everyone.
+  final singleGroupWithAvatar =
+      !thread.isDirect &&
+      thread.lines.length == 1 &&
+      statusLine == null &&
+      largeAvatarExists;
+  final StyleInformation style = singleGroupWithAvatar
+      ? BigTextStyleInformation(
+          latest.fromMe ? latest.text : '${latest.senderName}: ${latest.text}',
+          contentTitle: thread.roomName,
+        )
+      : MessagingStyleInformation(
+          me,
+          conversationTitle: thread.isDirect ? null : thread.roomName,
+          groupConversation: !thread.isDirect,
+          messages: messages,
+        );
   final details = AndroidNotificationDetails(
     messageChannelId,
     messageChannelName,
@@ -219,7 +232,13 @@ RenderedNotification renderRoomThread(
     onlyAlertOnce: !alert,
     silent: !alert,
     when: latest.timestamp.millisecondsSinceEpoch,
-    largeIcon: roomAvatar != null && fileExists(roomAvatar)
+    // MessagingStyle already places the sender Person icon beside their name.
+    // A second large bitmap on a direct notification can instead be rendered
+    // beside the message body (the misplaced avatar in the screenshot). Keep
+    // direct avatars on Person only. Group notifications still need a large
+    // icon for their collapsed row; use room art, or the latest sender when a
+    // bridged group has no room-level avatar of its own.
+    largeIcon: !thread.isDirect && largeAvatarExists
         ? _bitmap(roomAvatar)
         : null,
     actions: _roomActions(canMarkRead: thread.latestEventId != null),
@@ -294,13 +313,22 @@ RenderedNotification renderReplyStatus(
 );
 
 /// The group summary (shown on older Android versions and when collapsed).
-RenderedNotification renderSummary(List<RoomNotificationThread> threads) {
+RenderedNotification renderSummary(
+  List<RoomNotificationThread> threads, {
+  FileExists fileExists = _fileExists,
+}) {
   final count = threads.fold<int>(0, (sum, t) => sum + t.lines.length);
   final title = count == 1 ? '1 notification' : '$count notifications';
   final lines = [
     for (final thread in threads.take(6))
       '${thread.roomName}: ${thread.lines.last.text}',
   ];
+  final latestThread = threads.isEmpty
+      ? null
+      : threads.reduce((a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b);
+  final avatar = latestThread == null
+      ? null
+      : latestThread.roomAvatarPath ?? latestThread.lines.last.senderAvatarPath;
   return RenderedNotification(
     id: notificationSummaryId,
     title: title,
@@ -315,6 +343,9 @@ RenderedNotification renderSummary(List<RoomNotificationThread> threads) {
         visibility: NotificationVisibility.private,
         category: AndroidNotificationCategory.message,
         color: _accent,
+        largeIcon: avatar != null && fileExists(avatar)
+            ? _bitmap(avatar)
+            : null,
         groupKey: notificationGroupKey,
         setAsGroupSummary: true,
         groupAlertBehavior: GroupAlertBehavior.children,

@@ -148,67 +148,92 @@ void main() {
       expect(style(room).groupConversation, isFalse);
     });
 
-    test('room thumbnails appear in direct and group notifications', () async {
-      final roomAvatar = File('${directory.path}/room.png')
-        ..writeAsBytesSync([1, 2, 3]);
-      final senderAvatar = File('${directory.path}/sender.png')
-        ..writeAsBytesSync([4, 5, 6]);
+    test(
+      'direct avatars stay on the sender and group rows have fallbacks',
+      () async {
+        final roomAvatar = File('${directory.path}/room.png')
+          ..writeAsBytesSync([1, 2, 3]);
+        final senderAvatar = File('${directory.path}/sender.png')
+          ..writeAsBytesSync([4, 5, 6]);
 
-      Future<String?> largeIcon({
-        required String eventId,
-        required bool isDirect,
-        String? roomPath,
-        String? senderPath,
-      }) async {
-        await handler(
-          (_, _) async => resolved(
-            eventId: eventId,
-            isDirect: isDirect,
-            avatarPath: senderPath,
-            roomAvatarPath: roomPath,
+        Future<String?> largeIcon({
+          required String eventId,
+          required bool isDirect,
+          String? roomPath,
+          String? senderPath,
+        }) async {
+          await handler(
+            (_, _) async => resolved(
+              eventId: eventId,
+              isDirect: isDirect,
+              avatarPath: senderPath,
+              roomAvatarPath: roomPath,
+            ),
+            useStore: false,
+          ).handle(envelope(eventId));
+          final bitmap = android(
+            surface.byId(roomNotificationId(room))!,
+          ).largeIcon;
+          return bitmap is FilePathAndroidBitmap ? bitmap.data : null;
+        }
+
+        expect(
+          await largeIcon(
+            eventId: r'$group-room',
+            isDirect: false,
+            roomPath: roomAvatar.path,
           ),
-          useStore: false,
-        ).handle(envelope(eventId));
-        final bitmap = android(
+          roomAvatar.path,
+        );
+        expect(
+          await largeIcon(
+            eventId: r'$direct-room',
+            isDirect: true,
+            roomPath: roomAvatar.path,
+            senderPath: senderAvatar.path,
+          ),
+          isNull,
+        );
+        expect(
+          await largeIcon(
+            eventId: r'$direct-fallback',
+            isDirect: true,
+            senderPath: senderAvatar.path,
+          ),
+          isNull,
+        );
+        // The direct sender still has their name-level MessagingStyle avatar;
+        // only the duplicate large bitmap is omitted.
+        final person = style(
           surface.byId(roomNotificationId(room))!,
+        ).messages!.single.person!;
+        expect(
+          (person.icon as BitmapFilePathAndroidIcon).data,
+          senderAvatar.path,
+        );
+        expect(
+          await largeIcon(
+            eventId: r'$group-no-room-art',
+            isDirect: false,
+            senderPath: senderAvatar.path,
+          ),
+          senderAvatar.path,
+        );
+        final groupStyle = android(
+          surface.byId(roomNotificationId(room))!,
+        ).styleInformation;
+        expect(groupStyle, isA<BigTextStyleInformation>());
+        expect(
+          (groupStyle as BigTextStyleInformation).bigText,
+          'Alice: See you at 6',
+        );
+        // The collapsed group summary also has an avatar to show.
+        final summaryIcon = android(
+          surface.byId(notificationSummaryId)!,
         ).largeIcon;
-        return bitmap is FilePathAndroidBitmap ? bitmap.data : null;
-      }
-
-      expect(
-        await largeIcon(
-          eventId: r'$group-room',
-          isDirect: false,
-          roomPath: roomAvatar.path,
-        ),
-        roomAvatar.path,
-      );
-      expect(
-        await largeIcon(
-          eventId: r'$direct-room',
-          isDirect: true,
-          roomPath: roomAvatar.path,
-          senderPath: senderAvatar.path,
-        ),
-        roomAvatar.path,
-      );
-      expect(
-        await largeIcon(
-          eventId: r'$direct-fallback',
-          isDirect: true,
-          senderPath: senderAvatar.path,
-        ),
-        senderAvatar.path,
-      );
-      expect(
-        await largeIcon(
-          eventId: r'$group-no-room-art',
-          isDirect: false,
-          senderPath: senderAvatar.path,
-        ),
-        isNull,
-      );
-    });
+        expect((summaryIcon as FilePathAndroidBitmap).data, senderAvatar.path);
+      },
+    );
 
     test('messages accumulate in one notification per room', () async {
       final base = DateTime.now().subtract(const Duration(minutes: 5));
