@@ -710,13 +710,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Old text'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('More'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Edit message'),
-      120,
-      scrollable: find.byType(Scrollable).last,
-    );
     await tester.tap(find.text('Edit message'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'New text');

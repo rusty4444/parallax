@@ -742,6 +742,13 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       for (final item in hookActions)
         if (item.id != 'reactions.forward') item,
     ];
+    final canEdit =
+        entry.mine &&
+        const {
+          EntryKind.text,
+          EntryKind.emote,
+          EntryKind.notice,
+        }.contains(entry.kind);
     final verifySender =
         !entry.mine &&
         widget.backend.rooms.any(
@@ -797,6 +804,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                     onTap: () => Navigator.pop(sheetContext, 'reply'),
                   ),
                   if (forwardAction != null) hookTile(forwardAction),
+                  if (canEdit)
+                    ListTile(
+                      leading: const Icon(Icons.edit_outlined),
+                      title: const Text('Edit message'),
+                      onTap: () => Navigator.pop(sheetContext, 'edit'),
+                    ),
                   if (!expanded && hasMoreActions)
                     ListTile(
                       key: const ValueKey('message-actions-more'),
@@ -834,17 +847,6 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         leading: const Icon(Icons.download_rounded),
                         title: const Text('Save attachment'),
                         onTap: () => Navigator.pop(sheetContext, 'save'),
-                      ),
-                    if (entry.mine &&
-                        const {
-                          EntryKind.text,
-                          EntryKind.emote,
-                          EntryKind.notice,
-                        }.contains(entry.kind))
-                      ListTile(
-                        leading: const Icon(Icons.edit_outlined),
-                        title: const Text('Edit message'),
-                        onTap: () => Navigator.pop(sheetContext, 'edit'),
                       ),
                     if (entry.mine)
                       ListTile(

@@ -563,13 +563,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Old text'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('More'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Edit message'),
-      120,
-      scrollable: find.byType(Scrollable).last,
-    );
     await tester.tap(find.text('Edit message'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'Edited text');
@@ -920,6 +913,7 @@ void main() {
     expect(find.text('Forward'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
     for (final hidden in [
+      'Edit message',
       'Open thread',
       'Read receipts',
       'Copy text',
@@ -979,6 +973,71 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  testWidgets(
+    'own editable messages show Edit message below Forward and above More',
+    (tester) async {
+      final backend = FeaturesBackend()
+        ..entries = [
+          ChatEntry(
+            id: r'$own-editable',
+            sender: '@me:s',
+            body: 'Editable text',
+            time: DateTime(2026),
+            mine: true,
+            content: const {'msgtype': 'm.text', 'body': 'Editable text'},
+          ),
+          ChatEntry(
+            id: r'$own-image',
+            sender: '@me:s',
+            body: 'photo.jpg',
+            isImage: true,
+            kind: EntryKind.image,
+            time: DateTime(2026, 1, 1, 0, 1),
+            mine: true,
+            content: const {
+              'msgtype': 'm.image',
+              'body': 'photo.jpg',
+              'url': 'mxc://s/pic',
+            },
+          ),
+        ];
+      await tester.pumpWidget(room(backend, Drafts()));
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.text('Editable text'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reply'), findsOneWidget);
+      expect(find.text('Forward'), findsOneWidget);
+      expect(find.text('Edit message'), findsOneWidget);
+      expect(find.text('More'), findsOneWidget);
+      expect(find.text('Delete message'), findsNothing);
+
+      final forwardY = tester.getTopLeft(find.text('Forward')).dy;
+      final editY = tester.getTopLeft(find.text('Edit message')).dy;
+      final moreY = tester.getTopLeft(find.text('More')).dy;
+      expect(forwardY, lessThan(editY));
+      expect(editY, lessThan(moreY));
+
+      await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit message'), findsOneWidget);
+      expect(find.text('Delete message'), findsOneWidget);
+
+      Navigator.pop(tester.element(find.text('Edit message')));
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.byType(MessageImage));
+      await tester.pumpAndSettle();
+      expect(find.text('Forward'), findsOneWidget);
+      expect(find.text('Edit message'), findsNothing);
+      expect(find.text('More'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
 
   testWidgets(
     'recent mode: + picker reaction leads a persisted six-emoji recent row',
@@ -1354,13 +1413,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Edit original'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('More'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Edit message'),
-      120,
-      scrollable: find.byType(Scrollable).last,
-    );
     await tester.tap(find.text('Edit message'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'New edit body');

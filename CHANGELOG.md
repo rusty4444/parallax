@@ -7,6 +7,7 @@
 - Photo galleries line up with the other bubbles: they reserve the sender's picture column and use the same width cap, so a run of photos no longer sticks out past the text and single-image messages.
 - "Send a photo gallery" moved into the composer's **+** menu (**Photo gallery**), keeping the timeline clear.
 - Tapping your own reaction removes it on the first tap, even when the SDK has not indexed the reaction yet; it no longer takes a second reaction to make the first one removable.
+- **Edit message** now sits directly in the long-press menu below **Forward** and above **More** for your own messages.
 
 ### Faster, no more short freezes
 
