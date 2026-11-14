@@ -115,11 +115,7 @@ class GalleryBubble extends StatelessWidget {
     // messages and cap the width the same way, so a gallery lines up with
     // the text and single-image bubbles above and below it.
     final avatars = !mine;
-    final maxWidth = bubbleMaxWidth(
-      screenWidth,
-      mine: mine,
-      avatars: avatars,
-    );
+    final maxWidth = bubbleMaxWidth(screenWidth, mine: mine, avatars: avatars);
     final width = math.min(320.0, maxWidth);
     // The room's bubble colours apply inside the bubble.
     final outer = this.palette;
@@ -218,10 +214,7 @@ class GalleryBubble extends StatelessWidget {
         : gallery;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 14),
-        child: row,
-      ),
+      child: Padding(padding: const EdgeInsets.only(top: 14), child: row),
     );
   }
 }

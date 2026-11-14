@@ -19,8 +19,7 @@ const _roomId = '!room:matrix.example';
 
 /// The outer gallery bubble (the padded, rounded Container).
 final _galleryBox = find.byWidgetPredicate(
-  (widget) =>
-      widget is Container && widget.padding == const EdgeInsets.all(10),
+  (widget) => widget is Container && widget.padding == const EdgeInsets.all(10),
 );
 
 ChatEntry _entry(
@@ -40,7 +39,10 @@ ChatEntry _entry(
 
 void main() {
   group('gallery alignment', () {
-    Future<void> pumpTimeline(WidgetTester tester, List<Widget> children) async {
+    Future<void> pumpTimeline(
+      WidgetTester tester,
+      List<Widget> children,
+    ) async {
       tester.view
         ..physicalSize = _screen
         ..devicePixelRatio = 1;
