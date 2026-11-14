@@ -376,7 +376,13 @@ class PrivacySettingsPage extends StatelessWidget {
   }
 }
 
-/// Settings → Advanced: the Element Call service and opening Matrix links.
+/// Public setup guide for optional homeserver and bridge additions.
+final parallaxServerSetupUrl = Uri.parse(
+  'https://github.com/rusty4444/parallax-server-setup',
+);
+
+/// Settings → Advanced: the Element Call service, opening Matrix links, and
+/// server-side additions needed by some advanced media features.
 class AdvancedSettingsPage extends StatelessWidget {
   const AdvancedSettingsPage({
     super.key,
@@ -392,9 +398,30 @@ class AdvancedSettingsPage extends StatelessWidget {
     palette: palette,
     eyebrow: 'Under the hood',
     title: 'Advanced',
-    children: advancedSettingsSectionsFor(
-      context,
-      SettingsHookContext(backend: backend, palette: palette),
-    ),
+    children: [
+      SettingsGroup(
+        palette: palette,
+        title: 'Required for advanced features',
+        footer:
+            'Optional additions for your own homeserver. Normal chats do not '
+            'require a custom server.',
+        children: [
+          ListTile(
+            key: const ValueKey('settings.advanced.serverSetup'),
+            leading: const Icon(Icons.hub_outlined),
+            title: const Text('Server & bridge setup'),
+            subtitle: const Text(
+              'Video thumbnails, compatibility and setup instructions',
+            ),
+            trailing: const Icon(Icons.open_in_new_rounded),
+            onTap: () => openExternalLink(context, parallaxServerSetupUrl),
+          ),
+        ],
+      ),
+      ...advancedSettingsSectionsFor(
+        context,
+        SettingsHookContext(backend: backend, palette: palette),
+      ),
+    ],
   );
 }

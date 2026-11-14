@@ -436,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     key: const ValueKey('settings.advanced'),
                     icon: Icons.tune_rounded,
                     title: 'Advanced',
-                    subtitle: const Text('Element Call and Matrix links'),
+                    subtitle: const Text('Calls, links and server setup'),
                     onTap: () => _push(
                       (palette) => AdvancedSettingsPage(
                         backend: widget.backend,

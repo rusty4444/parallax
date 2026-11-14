@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
 import 'package:parallax/chat_backend.dart';
@@ -9,6 +10,7 @@ import 'package:parallax/features/home/sign_out.dart';
 import 'package:parallax/appearance_preferences.dart';
 import 'package:parallax/feature_settings_scope.dart';
 import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/settings_pages.dart';
 import 'package:parallax/settings_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -347,7 +349,12 @@ void main() {
       'Identity connected on this device',
       'Verify with another device',
     ]);
-    await visit('Advanced', ['Open a Matrix link']);
+    await visit('Advanced', [
+      'REQUIRED FOR ADVANCED FEATURES',
+      'Server & bridge setup',
+      'Video thumbnails, compatibility and setup instructions',
+      'Open a Matrix link',
+    ]);
     await visit('About & help', ['Report a problem']);
   });
 
@@ -362,6 +369,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(themes, [VisualTheme.daylight]);
     expect(find.text('Theme: Daybreak'), findsOneWidget);
+  });
+
+  testWidgets('advanced server setup row opens the public setup guide', (
+    tester,
+  ) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    final launched = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      final args = call.arguments;
+      if (args is Map && args['url'] is String) {
+        launched.add(args['url'] as String);
+      }
+      return true;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    });
+
+    await pumpSettings(tester);
+    await open(tester, 'Advanced');
+    expect(
+      find.textContaining('Normal chats do not require a custom server.'),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('settings.advanced.serverSetup')),
+    );
+    await tester.pumpAndSettle();
+    expect(launched, ['https://github.com/rusty4444/parallax-server-setup']);
+    expect(parallaxServerSetupUrl.scheme, 'https');
   });
 
   testWidgets('security row flags an identity that needs recovery', (

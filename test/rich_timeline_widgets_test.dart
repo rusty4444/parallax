@@ -28,13 +28,15 @@ class _Backend extends ChatBackend implements RichTimelineFeatures {
     ),
   };
   Map<String, List<ReceiptReader>> receipts = {};
+  bool olderAvailable = false;
+  bool historyLoading = false;
 
   @override
   String? get userId => me;
   @override
-  bool get canLoadOlder => false;
+  bool get canLoadOlder => olderAvailable;
   @override
-  bool get loadingHistory => false;
+  bool get loadingHistory => historyLoading;
   @override
   List<ChatRoom> get rooms => const [];
   @override
@@ -304,6 +306,7 @@ void main() {
       _Backend backend,
       List<ChatEntry> entries, {
       ChatRoom? room,
+      VoidCallback? onLoadOlder,
     }) => host(
       TimelineView(
         backend: backend,
@@ -315,7 +318,7 @@ void main() {
         onHeart: (_) {},
         onAction: (_) {},
         onReaction: (_, _) {},
-        onLoadOlder: () {},
+        onLoadOlder: onLoadOlder ?? () {},
       ),
     );
 
@@ -488,6 +491,94 @@ void main() {
       await tester.tap(find.byTooltip('Jump to latest messages'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Jump to latest messages'), findsNothing);
+    });
+
+    testWidgets('pulling down loads earlier messages only while visible', (
+      tester,
+    ) async {
+      final backend = _Backend()..olderAvailable = true;
+      var loads = 0;
+      final now = DateTime.now();
+      final entries = [
+        for (var i = 0; i < 40; i++)
+          message(
+            '\$m$i',
+            body: 'message $i',
+            time: now.add(Duration(minutes: i * 10)),
+          ),
+      ];
+      await tester.pumpWidget(
+        timeline(backend, entries, onLoadOlder: () => loads++),
+      );
+      expect(find.text('Load earlier messages'), findsNothing);
+
+      // Pulling down while the control is off-screen must not paginate.
+      await tester.drag(find.byType(ListView), const Offset(0, 80));
+      await tester.pump();
+      expect(loads, 0);
+
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pump();
+      expect(find.text('Load earlier messages'), findsOneWidget);
+      expect(loads, 0);
+
+      // Swiping up (scrolling down toward newer messages) must not paginate.
+      await tester.drag(find.byType(ListView), const Offset(0, -80));
+      await tester.pump();
+      expect(loads, 0);
+
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pump();
+      await tester.drag(
+        find.text('Load earlier messages'),
+        const Offset(0, 80),
+      );
+      await tester.pump();
+      expect(loads, 1);
+    });
+
+    testWidgets('short timeline pull-down is single-flight and preserves tap', (
+      tester,
+    ) async {
+      final backend = _Backend()..olderAvailable = true;
+      var loads = 0;
+      final entries = [
+        message(r'$a', body: 'first'),
+        message(r'$b', body: 'second'),
+      ];
+      await tester.pumpWidget(
+        timeline(backend, entries, onLoadOlder: () => loads++),
+      );
+      expect(find.text('Load earlier messages'), findsOneWidget);
+
+      // Even when the room does not fill the viewport (maxScrollExtent == 0),
+      // a pull-down gesture triggers once and does not double-fire mid-drag.
+      await tester.drag(find.byType(ListView), const Offset(0, 120));
+      await tester.pump();
+      expect(loads, 1);
+
+      backend.historyLoading = true;
+      await tester.pumpWidget(
+        timeline(backend, entries, onLoadOlder: () => loads++),
+      );
+      expect(find.text('Loading…'), findsOneWidget);
+      await tester.drag(find.byType(ListView), const Offset(0, 80));
+      await tester.pump();
+      expect(loads, 1);
+
+      backend.historyLoading = false;
+      await tester.pumpWidget(
+        timeline(backend, entries, onLoadOlder: () => loads++),
+      );
+      await tester.tap(find.text('Load earlier messages'));
+      await tester.pump();
+      expect(loads, 2);
     });
   });
 

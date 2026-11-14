@@ -15,6 +15,10 @@ import 'swipe_reply.dart';
 /// Distance from the newest message before the jump-to-bottom button shows.
 const jumpToBottomThreshold = 320.0;
 
+/// Downward drag distance while the history control is visible before loading
+/// earlier messages.
+const pullToLoadOlderThreshold = 24.0;
+
 /// The scrolling room timeline (newest at the bottom), with day separators,
 /// Element X-style sender grouping, collapsible room changes, read receipts
 /// and a jump-to-bottom button.
@@ -70,9 +74,14 @@ class _Item {
 
 class _TimelineViewState extends State<TimelineView> {
   final _scroll = ScrollController();
+  final _listKey = GlobalKey();
+  final _loadOlderKey = GlobalKey();
   final _groupIds = <String, String>{};
   final _expanded = <String>{};
   bool _away = false;
+  double _pullDistance = 0;
+  bool _pullTriggered = false;
+  bool _pullArmed = false;
 
   /// Newest entry when the user scrolled away from the bottom.
   String? _awayNewestId;
@@ -102,6 +111,9 @@ class _TimelineViewState extends State<TimelineView> {
       _derived = null;
       _away = false;
       _awayNewestId = null;
+      _pullDistance = 0;
+      _pullTriggered = false;
+      _pullArmed = false;
     }
   }
 
@@ -140,6 +152,71 @@ class _TimelineViewState extends State<TimelineView> {
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  bool get _loadOlderIsVisible {
+    final control = _loadOlderKey.currentContext?.findRenderObject();
+    final list = _listKey.currentContext?.findRenderObject();
+    if (control is! RenderBox ||
+        list is! RenderBox ||
+        !control.attached ||
+        !list.attached ||
+        !control.hasSize ||
+        !list.hasSize) {
+      return false;
+    }
+    final controlBounds = control.localToGlobal(Offset.zero) & control.size;
+    final listBounds = list.localToGlobal(Offset.zero) & list.size;
+    return controlBounds.overlaps(listBounds);
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0 || notification.metrics.axis != Axis.vertical) {
+      return false;
+    }
+    if (notification is ScrollStartNotification) {
+      _pullDistance = 0;
+      _pullTriggered = false;
+      _pullArmed =
+          notification.dragDetails != null &&
+          widget.backend.canLoadOlder &&
+          !widget.backend.loadingHistory &&
+          _loadOlderIsVisible;
+      return false;
+    }
+    if (notification is ScrollEndNotification) {
+      _pullDistance = 0;
+      _pullTriggered = false;
+      _pullArmed = false;
+      return false;
+    }
+    final dragDetails = switch (notification) {
+      ScrollUpdateNotification(:final dragDetails) => dragDetails,
+      OverscrollNotification(:final dragDetails) => dragDetails,
+      _ => null,
+    };
+    final dy = dragDetails?.delta.dy;
+    if (dy == null) return false;
+    if (!_loadOlderIsVisible) {
+      _pullArmed = false;
+      _pullDistance = 0;
+      return false;
+    }
+    if (dy < 0 ||
+        !_pullArmed ||
+        !widget.backend.canLoadOlder ||
+        widget.backend.loadingHistory) {
+      if (dy < 0) _pullDistance = 0;
+      return false;
+    }
+    if (_pullTriggered) return false;
+    _pullDistance += dy;
+    if (_pullDistance >= pullToLoadOlderThreshold) {
+      _pullTriggered = true;
+      _pullDistance = 0;
+      widget.onLoadOlder();
+    }
+    return false;
   }
 
   void _openReceipts(String eventId) => showMessageReceipts(
@@ -370,35 +447,43 @@ class _TimelineViewState extends State<TimelineView> {
       };
     }
 
-    final list = ListView.builder(
-      controller: _scroll,
-      reverse: true,
-      padding: EdgeInsets.fromLTRB(
-        16,
-        widget.compact ? 8 : 20,
-        16,
-        widget.compact ? 8 : 18,
-      ),
-      itemCount: items.length + (backend.canLoadOlder ? 1 : 0),
-      findChildIndexCallback: (key) =>
-          key is _ItemKey ? indexOfKey[key.value] : null,
-      itemBuilder: (context, index) {
-        if (index == items.length) {
-          return Center(
-            child: TextButton(
-              onPressed: backend.loadingHistory ? null : widget.onLoadOlder,
-              child: Text(
-                backend.loadingHistory ? 'Loading…' : 'Load earlier messages',
+    final list = NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: ListView.builder(
+        key: _listKey,
+        controller: _scroll,
+        reverse: true,
+        physics: backend.canLoadOlder
+            ? const AlwaysScrollableScrollPhysics()
+            : null,
+        padding: EdgeInsets.fromLTRB(
+          16,
+          widget.compact ? 8 : 20,
+          16,
+          widget.compact ? 8 : 18,
+        ),
+        itemCount: items.length + (backend.canLoadOlder ? 1 : 0),
+        findChildIndexCallback: (key) =>
+            key is _ItemKey ? indexOfKey[key.value] : null,
+        itemBuilder: (context, index) {
+          if (index == items.length) {
+            return Center(
+              child: TextButton(
+                key: _loadOlderKey,
+                onPressed: backend.loadingHistory ? null : widget.onLoadOlder,
+                child: Text(
+                  backend.loadingHistory ? 'Loading…' : 'Load earlier messages',
+                ),
               ),
-            ),
+            );
+          }
+          final i = items.length - index - 1;
+          return KeyedSubtree(
+            key: _ItemKey(itemKeys[i]),
+            child: buildItem(items[i]),
           );
-        }
-        final i = items.length - index - 1;
-        return KeyedSubtree(
-          key: _ItemKey(itemKeys[i]),
-          child: buildItem(items[i]),
-        );
-      },
+        },
+      ),
     );
     return Stack(
       children: [

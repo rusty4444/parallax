@@ -8,6 +8,8 @@ android {
     namespace = "net.samrussell.parallax"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    val playBuild = (providers.environmentVariable("PARALLAX_PLAY_BUILD").orNull
+        ?: providers.gradleProperty("parallax.playBuild").orNull) == "true"
     val ciKeystoreFile = System.getenv("PARALLAX_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
 
     compileOptions {
@@ -26,8 +28,22 @@ android {
         versionName = flutter.versionName
     }
 
-    if (ciKeystoreFile != null) {
-        signingConfigs {
+    signingConfigs {
+        if (playBuild) {
+            val uploadKeystore = providers.environmentVariable("PARALLAX_UPLOAD_KEYSTORE").orNull
+                ?: providers.gradleProperty("parallax.uploadKeystore").orNull
+            val uploadStorePassword = providers.environmentVariable("PARALLAX_UPLOAD_STORE_PASSWORD").orNull
+            val uploadKeyPassword = providers.environmentVariable("PARALLAX_UPLOAD_KEY_PASSWORD").orNull
+            require(!uploadKeystore.isNullOrBlank() && !uploadStorePassword.isNullOrBlank() && !uploadKeyPassword.isNullOrBlank()) {
+                "Play builds require upload keystore path and brokered upload-key environment variables"
+            }
+            create("parallaxUpload") {
+                storeFile = file(uploadKeystore)
+                storePassword = uploadStorePassword
+                keyAlias = "parallax-upload"
+                keyPassword = uploadKeyPassword
+            }
+        } else if (ciKeystoreFile != null) {
             create("personalTest") {
                 storeFile = file(ciKeystoreFile)
                 storePassword = "android"
@@ -39,9 +55,15 @@ android {
 
     buildTypes {
         release {
-            // CI pins the same personal preview key as earlier APKs. Local
-            // release builds continue to use the developer's debug key.
-            signingConfig = signingConfigs.getByName(if (ciKeystoreFile != null) "personalTest" else "debug")
+            // Play builds use the dedicated upload key; CI pins the personal
+            // preview key; local release builds use the developer's debug key.
+            signingConfig = signingConfigs.getByName(
+                when {
+                    playBuild -> "parallaxUpload"
+                    ciKeystoreFile != null -> "personalTest"
+                    else -> "debug"
+                }
+            )
         }
     }
 }

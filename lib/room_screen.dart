@@ -166,6 +166,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   int _backgroundVersion = 0;
   bool _backgroundBusy = false;
   bool _opening = true;
+  bool _loadingOlder = false;
+  double _emptyPullDistance = 0;
+  bool _emptyPullTriggered = false;
+  bool _emptyPullArmed = false;
   String? _error;
 
   @override
@@ -986,6 +990,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   }
 
   Future<void> _loadOlder() async {
+    if (_loadingOlder ||
+        widget.backend.loadingHistory ||
+        !widget.backend.canLoadOlder) {
+      return;
+    }
+    _loadingOlder = true;
     try {
       await widget.backend.loadOlder(widget.roomId);
     } catch (_) {
@@ -994,6 +1004,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
           const SnackBar(content: Text('Couldn’t load older messages.')),
         );
       }
+    } finally {
+      _loadingOlder = false;
     }
   }
 
@@ -1458,38 +1470,90 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                   ),
                                 )
                               : entries.isEmpty
-                              ? Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      BrandMark(palette: p, size: 53),
-                                      const SizedBox(height: 18),
-                                      Text(
-                                        'Start something good.',
-                                        style: TextStyle(
-                                          color: p.foreground,
-                                          fontSize: 21,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        'Messages in this room will appear here.',
-                                        style: TextStyle(color: p.muted),
-                                      ),
-                                      if (widget.backend.canLoadOlder) ...[
-                                        const SizedBox(height: 14),
-                                        TextButton(
-                                          onPressed:
-                                              widget.backend.loadingHistory
-                                              ? null
-                                              : _loadOlder,
-                                          child: const Text(
-                                            'Load earlier messages',
+                              ? GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onVerticalDragStart:
+                                      widget.backend.canLoadOlder
+                                      ? (_) {
+                                          _emptyPullDistance = 0;
+                                          _emptyPullTriggered = false;
+                                          _emptyPullArmed =
+                                              widget.backend.canLoadOlder &&
+                                              !widget.backend.loadingHistory &&
+                                              !_loadingOlder;
+                                        }
+                                      : null,
+                                  onVerticalDragUpdate:
+                                      widget.backend.canLoadOlder
+                                      ? (details) {
+                                          final dy = details.delta.dy;
+                                          if (dy < 0 ||
+                                              !_emptyPullArmed ||
+                                              !widget.backend.canLoadOlder ||
+                                              widget.backend.loadingHistory) {
+                                            if (dy < 0) _emptyPullDistance = 0;
+                                            return;
+                                          }
+                                          if (_emptyPullTriggered) return;
+                                          _emptyPullDistance += dy;
+                                          if (_emptyPullDistance >=
+                                              pullToLoadOlderThreshold) {
+                                            _emptyPullTriggered = true;
+                                            _emptyPullDistance = 0;
+                                            unawaited(_loadOlder());
+                                          }
+                                        }
+                                      : null,
+                                  onVerticalDragEnd: widget.backend.canLoadOlder
+                                      ? (_) {
+                                          _emptyPullDistance = 0;
+                                          _emptyPullTriggered = false;
+                                          _emptyPullArmed = false;
+                                        }
+                                      : null,
+                                  onVerticalDragCancel:
+                                      widget.backend.canLoadOlder
+                                      ? () {
+                                          _emptyPullDistance = 0;
+                                          _emptyPullTriggered = false;
+                                          _emptyPullArmed = false;
+                                        }
+                                      : null,
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        BrandMark(palette: p, size: 53),
+                                        const SizedBox(height: 18),
+                                        Text(
+                                          'Start something good.',
+                                          style: TextStyle(
+                                            color: p.foreground,
+                                            fontSize: 21,
+                                            fontWeight: FontWeight.w700,
                                           ),
                                         ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Messages in this room will appear here.',
+                                          style: TextStyle(color: p.muted),
+                                        ),
+                                        if (widget.backend.canLoadOlder) ...[
+                                          const SizedBox(height: 14),
+                                          TextButton(
+                                            onPressed:
+                                                widget.backend.loadingHistory
+                                                ? null
+                                                : _loadOlder,
+                                            child: Text(
+                                              widget.backend.loadingHistory
+                                                  ? 'Loading…'
+                                                  : 'Load earlier messages',
+                                            ),
+                                          ),
+                                        ],
                                       ],
-                                    ],
+                                    ),
                                   ),
                                 )
                               : TimelineView(

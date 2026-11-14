@@ -45,11 +45,13 @@
   - **Media:** when chats show media, and upload quality.
   - **Privacy:** screen lock, read receipts, typing notifications, invite avatars, blocked users and device search.
   - **Security:** your encryption identity, verifying with another device, key storage, recovery, room keys and reset. The menu row says when this device needs recovery or setup.
-  - **Advanced:** the Element Call service and opening a Matrix link.
+  - **Advanced:** the Element Call service, opening a Matrix link, and the public server/bridge setup guide for optional advanced media features.
   - **About & help:** version, licences and reporting a problem.
+- Settings → Advanced → **Required for advanced features** links to the public setup repository, including the Synapse video-thumbnail module, compatibility requirements and installation instructions.
 - Sign out stays at the bottom of the main Settings screen.
 - The other-devices list under Security is collapsed until you open it.
 - Settings → Appearance → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
+- Pulling down in a chat while **Load earlier messages** is visible loads older history automatically; tapping the button still works.
 
 ### Notifications without Google or a push service
 
