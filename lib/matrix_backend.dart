@@ -3965,7 +3965,10 @@ class MatrixBackend extends ChatBackend
       preview: event?.type == matrix.EventTypes.Message
           // SDK body substitutes an "Unknown message format" error when an
           // uncaptioned media event has no body; text is the raw body or ''.
-          ? event!.text
+          ? visibleMessageBody(
+              event!.text,
+              isReply: event.inReplyToEventId(includingFallback: false) != null,
+            )
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
           : '',

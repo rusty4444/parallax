@@ -240,6 +240,39 @@ void main() {
     );
   });
 
+  test('home previews hide the quoted fallback for replies', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@friend:example.org',
+      content: const {
+        'msgtype': 'm.text',
+        'body':
+            '> <@sam.russell:samprim.net> Hahaha I do that\n'
+            '> sometimes for like 3 minutes\n\n'
+            'Literally what Hayden says to me everytime',
+        'm.relates_to': {
+          'm.in_reply_to': {'event_id': r'$original'},
+        },
+      },
+      room: r,
+      eventId: r'$reply',
+      originServerTs: DateTime(2026, 11, 13),
+    );
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(
+          join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    final projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'Friend');
+    expect(projected.preview, 'Literally what Hayden says to me everytime');
+  });
+
   test('a sync touching one room projects only that room', () async {
     final before = {for (final r in backend.rooms) r.id: r};
     client.getRoomById('!b:example.org')!.lastEvent = matrix.Event(
