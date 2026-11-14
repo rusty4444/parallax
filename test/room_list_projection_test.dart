@@ -307,6 +307,87 @@ void main() {
     expect(projected.preview, 'Deleted a Message');
   });
 
+  test('home previews use the redactor of a redacted last message', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    r.setState(
+      matrix.Event(
+        type: matrix.EventTypes.RoomMember,
+        stateKey: '@author:example.org',
+        senderId: '@author:example.org',
+        content: const {'membership': 'join', 'displayname': 'Author'},
+        room: r,
+        eventId: r'$author-member',
+        originServerTs: DateTime(2026, 11, 12),
+      ),
+    );
+    final original = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@author:example.org',
+      content: {'msgtype': 'm.text', 'body': 'Original text'},
+      room: r,
+      eventId: r'$original-message',
+      originServerTs: DateTime(2026, 11, 12),
+    );
+    original.setRedactionEvent(
+      matrix.Event(
+        type: matrix.EventTypes.Redaction,
+        senderId: '@friend:example.org',
+        content: const {'redacts': r'$original-message'},
+        room: r,
+        eventId: r'$moderator-redaction',
+        originServerTs: DateTime(2026, 11, 13),
+      ),
+    );
+    r.lastEvent = original;
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(
+          join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    final projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'Friend');
+    expect(projected.preview, 'Deleted a Message');
+  });
+
+  test('bridge bot redactions name the original Meta sender', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    final original = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@friend:example.org',
+      content: {'msgtype': 'm.text', 'body': 'Meta message'},
+      room: r,
+      eventId: r'$meta-message',
+      originServerTs: DateTime(2026, 11, 12),
+    );
+    original.setRedactionEvent(
+      matrix.Event(
+        type: matrix.EventTypes.Redaction,
+        senderId: '@metabot:example.org',
+        content: const {'redacts': r'$meta-message'},
+        room: r,
+        eventId: r'$meta-redaction',
+        originServerTs: DateTime(2026, 11, 13),
+      ),
+    );
+    r.lastEvent = original;
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: '2',
+        rooms: matrix.RoomsUpdate(
+          join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    final projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'Friend');
+    expect(projected.preview, 'Deleted a Message');
+  });
+
   test('home previews describe photos, videos and files by sender', () async {
     final r = client.getRoomById('!b:example.org')!;
     var batch = 2;

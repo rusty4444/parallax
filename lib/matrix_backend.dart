@@ -3753,7 +3753,10 @@ class MatrixBackend extends ChatBackend
     if (_disposed || client == null || !_freshRooms.add(roomId)) return;
     final room = _roomIndex[roomId];
     if (room == null || room.membership != matrix.Membership.join) return;
-    final sender = room.lastEvent?.senderId;
+    final lastEvent = room.lastEvent;
+    final sender = lastEvent == null
+        ? null
+        : _homePreviewSenderId(lastEvent, room);
     for (final id in {
       ...room.peopleHeroes.take(4),
       if (sender != null && sender != client.userID) sender,
@@ -3905,8 +3908,25 @@ class MatrixBackend extends ChatBackend
     }
   }
 
+  String _homePreviewSenderId(matrix.Event event, matrix.Room room) {
+    if (event.type == matrix.EventTypes.Redaction) return event.senderId;
+    final redaction = event.redactedBecause;
+    if (redaction == null) return event.senderId;
+    // Mautrix can redact through the bridge bot. The useful attribution is
+    // the bridged sender, not "Meta bridge bot".
+    return room.isBridgeBot(redaction.senderId)
+        ? event.senderId
+        : redaction.senderId;
+  }
+
   ChatRoom _projectRoom(matrix.Room room, matrix.Client client) {
     final event = room.lastEvent;
+    final isDeletion =
+        event?.type == matrix.EventTypes.Redaction ||
+        event?.redactedBecause != null;
+    final previewSenderId = event == null
+        ? ''
+        : _homePreviewSenderId(event, room);
     // Computed names and avatar clusters leave out bridge bots.
     final name = room.parallaxName;
     final heroIds = room.peopleHeroes;
@@ -3921,31 +3941,31 @@ class MatrixBackend extends ChatBackend
         (event.type == matrix.EventTypes.Message ||
             event.type == matrix.EventTypes.Encrypted ||
             event.type == matrix.EventTypes.Redaction)) {
-      if (event.senderId == client.userID) {
+      if (previewSenderId == client.userID) {
         previewSender = 'You';
       } else {
         final member = room.getState(
           matrix.EventTypes.RoomMember,
-          event.senderId,
+          previewSenderId,
         );
         final name = member?.content['displayname'];
         if (name is String && name.trim().isNotEmpty) {
           previewSender = name.trim();
         } else if (member == null &&
-            (!_memberRequests.contains('${room.id}|${event.senderId}') ||
-                _memberPending.contains('${room.id}|${event.senderId}'))) {
+            (!_memberRequests.contains('${room.id}|$previewSenderId') ||
+                _memberPending.contains('${room.id}|$previewSenderId'))) {
           // Still loading: show the message without a raw Matrix ID.
-          unresolvedSender = event.senderId;
+          unresolvedSender = previewSenderId;
         } else {
           previewSender = matrix.User(
-            event.senderId,
+            previewSenderId,
             room: room,
           ).calcDisplayname();
         }
       }
     }
     _needMembers(room, [...heroIds.take(4), ?unresolvedSender]);
-    final mediaKind = event?.type == matrix.EventTypes.Message
+    final mediaKind = !isDeletion && event?.type == matrix.EventTypes.Message
         ? switch (event!.messageType) {
             matrix.MessageTypes.Image => 'photo',
             matrix.MessageTypes.Video => 'video',
@@ -3972,7 +3992,9 @@ class MatrixBackend extends ChatBackend
       network: room.parallaxNetwork,
       id: room.id,
       name: name,
-      preview: mediaKind != null
+      preview: isDeletion
+          ? 'Deleted a Message'
+          : mediaKind != null
           ? previewSender == null
                 ? switch (mediaKind) {
                     'photo' => 'Photo',
@@ -3989,8 +4011,6 @@ class MatrixBackend extends ChatBackend
             )
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
-          : event?.type == matrix.EventTypes.Redaction
-          ? 'Deleted a Message'
           : '',
       lastActivity: event?.originServerTs,
       unread: room.notificationCount,
