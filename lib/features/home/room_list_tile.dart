@@ -94,6 +94,8 @@ class RoomListTile extends StatelessWidget {
         ? (room.isDirect ? 'Invited you to chat' : 'Invited you to join')
         : room.preview.isEmpty
         ? 'No messages yet'
+        : room.previewIncludesSender
+        ? room.preview
         : room.previewSender == null
         ? room.preview
         : '${room.previewSender}: ${room.preview}';

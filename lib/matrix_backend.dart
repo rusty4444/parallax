@@ -3945,6 +3945,14 @@ class MatrixBackend extends ChatBackend
       }
     }
     _needMembers(room, [...heroIds.take(4), ?unresolvedSender]);
+    final mediaKind = event?.type == matrix.EventTypes.Message
+        ? switch (event!.messageType) {
+            matrix.MessageTypes.Image => 'photo',
+            matrix.MessageTypes.Video => 'video',
+            matrix.MessageTypes.File || matrix.MessageTypes.Audio => 'file',
+            _ => null,
+          }
+        : null;
     return ChatRoom(
       highlightCount: room.highlightCount,
       favourite: tags.contains(matrix.TagType.favourite),
@@ -3959,11 +3967,20 @@ class MatrixBackend extends ChatBackend
       isSpace: room.isSpace,
       isPublic: room.joinRules == matrix.JoinRules.public,
       previewSender: previewSender,
+      previewIncludesSender: mediaKind != null && previewSender != null,
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       network: room.parallaxNetwork,
       id: room.id,
       name: name,
-      preview: event?.type == matrix.EventTypes.Message
+      preview: mediaKind != null
+          ? previewSender == null
+                ? switch (mediaKind) {
+                    'photo' => 'Photo',
+                    'video' => 'Video',
+                    _ => 'File',
+                  }
+                : '$previewSender sent a $mediaKind'
+          : event?.type == matrix.EventTypes.Message
           // SDK body substitutes an "Unknown message format" error when an
           // uncaptioned media event has no body; text is the raw body or ''.
           ? visibleMessageBody(

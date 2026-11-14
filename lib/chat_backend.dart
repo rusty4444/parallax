@@ -115,6 +115,7 @@ class ChatRoom {
     this.isSpace = false,
     this.isPublic = false,
     this.previewSender,
+    this.previewIncludesSender = false,
     this.canonicalAlias,
     this.network,
   });
@@ -152,6 +153,10 @@ class ChatRoom {
 
   /// Display name of the last message's sender, for group previews.
   final String? previewSender;
+
+  /// Whether [preview] already includes [previewSender], as in
+  /// "Chris sent a photo", rather than being a message body.
+  final bool previewIncludesSender;
   final String? canonicalAlias;
 
   /// The app the chat comes from (bridged or native Matrix); null when
@@ -191,6 +196,7 @@ class ChatRoom {
     isSpace: isSpace,
     isPublic: isPublic,
     previewSender: previewSender,
+    previewIncludesSender: previewIncludesSender,
     canonicalAlias: canonicalAlias,
     network: network,
   );
@@ -216,6 +222,7 @@ bool sameChatRoom(ChatRoom a, ChatRoom b) {
       a.isSpace != b.isSpace ||
       a.isPublic != b.isPublic ||
       a.previewSender != b.previewSender ||
+      a.previewIncludesSender != b.previewIncludesSender ||
       a.canonicalAlias != b.canonicalAlias ||
       a.network != b.network ||
       a.tags.length != b.tags.length ||

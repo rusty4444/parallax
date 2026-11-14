@@ -307,6 +307,42 @@ void main() {
     expect(projected.preview, 'Deleted a Message');
   });
 
+  test('home previews describe photos, videos and files by sender', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    var batch = 2;
+    for (final sample in {
+      matrix.MessageTypes.Image: 'photo',
+      matrix.MessageTypes.Video: 'video',
+      matrix.MessageTypes.File: 'file',
+      matrix.MessageTypes.Audio: 'file',
+    }.entries) {
+      r.lastEvent = matrix.Event(
+        type: matrix.EventTypes.Message,
+        senderId: '@friend:example.org',
+        content: {'msgtype': sample.key, 'body': 'upload.bin'},
+        room: r,
+        eventId: '\$media-$batch',
+        originServerTs: DateTime(2026, 11, 13),
+      );
+      backend.debugRoomsSynced(
+        matrix.SyncUpdate(
+          nextBatch: '$batch',
+          rooms: matrix.RoomsUpdate(
+            join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+          ),
+        ),
+      );
+      await settle();
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.previewSender, 'Friend');
+      expect(projected.preview, 'Friend sent a ${sample.value}');
+      expect(projected.previewIncludesSender, isTrue);
+      batch++;
+    }
+  });
+
   test('a sync touching one room projects only that room', () async {
     final before = {for (final r in backend.rooms) r.id: r};
     client.getRoomById('!b:example.org')!.lastEvent = matrix.Event(

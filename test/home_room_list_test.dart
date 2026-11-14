@@ -31,6 +31,7 @@ ChatRoom _room(
   RoomNotificationMode mode = RoomNotificationMode.allMessages,
   String preview = '',
   String? sender,
+  bool previewIncludesSender = false,
 }) => ChatRoom(
   id: id,
   name: name ?? id,
@@ -46,6 +47,7 @@ ChatRoom _room(
   manuallyUnread: manual,
   notificationMode: mode,
   previewSender: sender,
+  previewIncludesSender: previewIncludesSender,
 );
 
 List<String> _ids(List<ChatRoom> rooms) => [for (final r in rooms) r.id];
@@ -297,6 +299,23 @@ void main() {
         tester.getTopLeft(find.text('Quiet')).dy,
         greaterThan(tester.getTopLeft(find.text('Alex')).dy),
       );
+    });
+
+    testWidgets('room rows do not repeat senders in activity previews', (
+      tester,
+    ) async {
+      backend.roomList = [
+        _room(
+          '!activity:x.org',
+          name: 'Group',
+          preview: 'Chris sent a photo',
+          sender: 'Chris',
+          previewIncludesSender: true,
+        ),
+      ];
+      await pump(tester);
+      expect(find.text('Chris sent a photo'), findsOneWidget);
+      expect(find.text('Chris: Chris sent a photo'), findsNothing);
     });
 
     testWidgets('row style and message preview follow the home settings', (
