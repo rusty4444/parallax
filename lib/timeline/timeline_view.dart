@@ -395,7 +395,7 @@ class _TimelineViewState extends State<TimelineView> {
           day: day,
           palette: palette,
         ),
-        GalleryRow(:final entries) => Column(
+        GalleryRow(:final entries, :final showSender) => Column(
           key: ValueKey(row.key),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -408,6 +408,7 @@ class _TimelineViewState extends State<TimelineView> {
               onAction: widget.onAction,
               onReaction: widget.onReaction,
               onReply: widget.onReply,
+              showSender: showSender,
             ),
             receiptRow(entries),
           ],

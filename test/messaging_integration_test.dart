@@ -418,12 +418,12 @@ void main() {
 
     expect(find.text('Replying to Me: Own swipe reply target'), findsOneWidget);
     expect(find.text('Own swipe reply target'), findsOneWidget);
-    final gallery = tester.getRect(find.text('Send a photo gallery'));
+    // The gallery action lives in the composer's + menu, not above the field.
+    expect(find.text('Send a photo gallery'), findsNothing);
     final replyBar = tester.getRect(
       find.byKey(const ValueKey('composer-context-bar')),
     );
     final field = tester.getRect(find.byType(TextField).last);
-    expect(replyBar.top, greaterThanOrEqualTo(gallery.bottom));
     expect(field.top, closeTo(replyBar.bottom, 0.01));
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

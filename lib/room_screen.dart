@@ -1606,28 +1606,20 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         ),
                       ),
                     if (_features != null) ...[
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed:
-                              _sending ||
-                                  widget.backend.isRoomSending(widget.roomId) ||
-                                  _editing != null
-                              ? null
-                              : () => pickAndSendImages(
-                                  context,
-                                  widget.backend,
-                                  widget.roomId,
-                                ),
-                          icon: const Icon(Icons.photo_library_outlined),
-                          label: const Text('Send a photo gallery'),
-                        ),
-                      ),
                       RichMessageComposer(
-                        extraAttachments: composerAttachmentsFor(
-                          context,
-                          roomCtx,
-                        ),
+                        extraAttachments: [
+                          ComposerAttachmentAction(
+                            id: 'media.photo-gallery',
+                            icon: Icons.photo_library_outlined,
+                            label: 'Photo gallery',
+                            onSelected: (context) => pickAndSendImages(
+                              context,
+                              widget.backend,
+                              widget.roomId,
+                            ),
+                          ),
+                          ...composerAttachmentsFor(context, roomCtx),
+                        ],
                         mentionSource: richTimelineMentionSource(roomCtx),
                         hookContext: roomCtx,
                         replyToId: _replyingTo?.id,

@@ -1,4 +1,40 @@
+import 'package:matrix/matrix.dart' as matrix;
+
 import 'chat_backend.dart';
+
+/// Reactions to [eventId] from the SDK aggregation and from the timeline
+/// itself. The aggregation can lag behind a just-sent reaction (or a
+/// fragmented timeline), so scanning the timeline events keeps the first
+/// tap on your own reaction a removal instead of sending a duplicate.
+Iterable<matrix.Event> reactionEventsFor(
+  matrix.Timeline timeline,
+  String eventId,
+) {
+  final seen = <String>{};
+  final result = <matrix.Event>[];
+  void add(matrix.Event event) {
+    final key = event.eventId.isNotEmpty
+        ? event.eventId
+        : event.transactionId ?? '';
+    if (key.isEmpty || !seen.add(key)) return;
+    result.add(event);
+  }
+
+  final aggregated =
+      timeline.aggregatedEvents[eventId]?[matrix.RelationshipTypes.reaction];
+  if (aggregated != null) {
+    for (final event in aggregated) {
+      add(event);
+    }
+  }
+  for (final event in timeline.events) {
+    if (event.relationshipType == matrix.RelationshipTypes.reaction &&
+        event.relationshipEventId == eventId) {
+      add(event);
+    }
+  }
+  return result;
+}
 
 /// Private marker inside the ciphertext of an encrypted reaction.
 const encryptedReactionMarker = 'net.samrussell.parallax.encrypted_reaction';

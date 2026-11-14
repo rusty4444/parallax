@@ -1978,8 +1978,8 @@ class MatrixBackend extends ChatBackend
           _activeRoomId != roomId) {
         throw StateError('Message unavailable');
       }
-      final ownReaction = event
-          .aggregatedEvents(timeline, matrix.RelationshipTypes.reaction)
+      final reactions = reactionEventsFor(timeline, eventId);
+      final ownReaction = reactions
           .where(
             (reaction) =>
                 !reaction.redacted && reaction.senderId == client.userID,
@@ -1995,11 +1995,7 @@ class MatrixBackend extends ChatBackend
                   normaliseReactionShortcode(
                     packShortcodeForKey(client, roomId, emoji),
                   ) ??
-                  event
-                      .aggregatedEvents(
-                        timeline,
-                        matrix.RelationshipTypes.reaction,
-                      )
+                  reactions
                       .where(
                         (reaction) =>
                             (reaction.content['m.relates_to']
