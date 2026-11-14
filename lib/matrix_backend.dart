@@ -3919,7 +3919,8 @@ class MatrixBackend extends ChatBackend
     if (!isDirect &&
         event != null &&
         (event.type == matrix.EventTypes.Message ||
-            event.type == matrix.EventTypes.Encrypted)) {
+            event.type == matrix.EventTypes.Encrypted ||
+            event.type == matrix.EventTypes.Redaction)) {
       if (event.senderId == client.userID) {
         previewSender = 'You';
       } else {
@@ -3971,6 +3972,8 @@ class MatrixBackend extends ChatBackend
             )
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
+          : event?.type == matrix.EventTypes.Redaction
+          ? 'Deleted a Message'
           : '',
       lastActivity: event?.originServerTs,
       unread: room.notificationCount,

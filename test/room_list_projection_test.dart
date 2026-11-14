@@ -273,6 +273,40 @@ void main() {
     expect(projected.preview, 'Literally what Hayden says to me everytime');
   });
 
+  test('home previews name the sender who deleted a message', () async {
+    final r = client.getRoomById('!b:example.org')!;
+
+    Future<void> redact(String sender, String eventId, String batch) async {
+      r.lastEvent = matrix.Event(
+        type: matrix.EventTypes.Redaction,
+        senderId: sender,
+        content: const {'redacts': r'$original'},
+        room: r,
+        eventId: eventId,
+        originServerTs: DateTime(2026, 11, 13),
+      );
+      backend.debugRoomsSynced(
+        matrix.SyncUpdate(
+          nextBatch: batch,
+          rooms: matrix.RoomsUpdate(
+            join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+          ),
+        ),
+      );
+      await settle();
+    }
+
+    await redact('@friend:example.org', r'$friend-redaction', '2');
+    var projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'Friend');
+    expect(projected.preview, 'Deleted a Message');
+
+    await redact('@me:example.org', r'$own-redaction', '3');
+    projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'You');
+    expect(projected.preview, 'Deleted a Message');
+  });
+
   test('a sync touching one room projects only that room', () async {
     final before = {for (final r in backend.rooms) r.id: r};
     client.getRoomById('!b:example.org')!.lastEvent = matrix.Event(
