@@ -738,9 +738,14 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     final forwardAction = hookActions
         .where((item) => item.id == 'reactions.forward')
         .firstOrNull;
+    final copyTextAction = hookActions
+        .where((item) => item.id == 'rich-timeline-copy-text')
+        .firstOrNull;
     final remainingHookActions = [
       for (final item in hookActions)
-        if (item.id != 'reactions.forward') item,
+        if (item.id != 'reactions.forward' &&
+            item.id != 'rich-timeline-copy-text')
+          item,
     ];
     final canEdit =
         entry.mine &&
@@ -810,6 +815,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       title: const Text('Edit message'),
                       onTap: () => Navigator.pop(sheetContext, 'edit'),
                     ),
+                  if (copyTextAction != null) hookTile(copyTextAction),
                   if (!expanded && hasMoreActions)
                     ListTile(
                       key: const ValueKey('message-actions-more'),

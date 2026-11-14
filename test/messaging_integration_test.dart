@@ -892,6 +892,22 @@ void main() {
   testWidgets('message actions stay compact until More expands them', (
     tester,
   ) async {
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
     final backend = FeaturesBackend()
       ..entries = [
         ChatEntry(
@@ -911,12 +927,12 @@ void main() {
     expect(find.text('Reply'), findsOneWidget);
     expect(find.byTooltip('React ❤️'), findsOneWidget);
     expect(find.text('Forward'), findsOneWidget);
+    expect(find.text('Copy text'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
     for (final hidden in [
       'Edit message',
       'Open thread',
       'Read receipts',
-      'Copy text',
       'Copy link to message',
       'View source',
     ]) {
@@ -925,10 +941,12 @@ void main() {
     final replyY = tester.getTopLeft(find.text('Reply')).dy;
     final reactionsY = tester.getTopLeft(find.byTooltip('React ❤️')).dy;
     final forwardY = tester.getTopLeft(find.text('Forward')).dy;
+    final copyY = tester.getTopLeft(find.text('Copy text')).dy;
     final moreY = tester.getTopLeft(find.text('More')).dy;
     expect(reactionsY, lessThan(replyY));
     expect(replyY, lessThan(forwardY));
-    expect(forwardY, lessThan(moreY));
+    expect(forwardY, lessThan(copyY));
+    expect(copyY, lessThan(moreY));
 
     await tester.tap(find.text('More'));
     await tester.pumpAndSettle();
@@ -946,6 +964,10 @@ void main() {
     expect(find.text('More'), findsOneWidget);
     expect(find.text('Open thread'), findsNothing);
     expect(find.text('Read receipts'), findsNothing);
+
+    await tester.tap(find.text('Copy text'));
+    await tester.pumpAndSettle();
+    expect(clipboard, ['Compact actions']);
   });
 
   testWidgets('own local messages show Forward in compact actions', (
@@ -975,8 +997,13 @@ void main() {
   });
 
   testWidgets(
-    'own editable messages show Edit message below Forward and above More',
+    'own editable messages keep Edit message and Copy text above More on a phone',
     (tester) async {
+      tester.view
+        ..physicalSize = const Size(360, 640)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final backend = FeaturesBackend()
         ..entries = [
           ChatEntry(
@@ -1011,18 +1038,26 @@ void main() {
       expect(find.text('Reply'), findsOneWidget);
       expect(find.text('Forward'), findsOneWidget);
       expect(find.text('Edit message'), findsOneWidget);
+      expect(find.text('Copy text'), findsOneWidget);
       expect(find.text('More'), findsOneWidget);
       expect(find.text('Delete message'), findsNothing);
 
       final forwardY = tester.getTopLeft(find.text('Forward')).dy;
       final editY = tester.getTopLeft(find.text('Edit message')).dy;
+      final copyY = tester.getTopLeft(find.text('Copy text')).dy;
       final moreY = tester.getTopLeft(find.text('More')).dy;
       expect(forwardY, lessThan(editY));
-      expect(editY, lessThan(moreY));
+      expect(editY, lessThan(copyY));
+      expect(copyY, lessThan(moreY));
 
       await tester.tap(find.text('More'));
       await tester.pumpAndSettle();
-      expect(find.text('Edit message'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('View source'),
+        120,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Edit message').hitTestable(), findsOneWidget);
       expect(find.text('Delete message'), findsOneWidget);
 
       Navigator.pop(tester.element(find.text('Edit message')));
