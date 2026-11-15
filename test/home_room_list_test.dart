@@ -507,6 +507,32 @@ void main() {
       },
     );
 
+    testWidgets('system back closes conversation search before app exit', (
+      tester,
+    ) async {
+      await pump(tester);
+      final search = find.byKey(const ValueKey('home.conversation_search'));
+      await tester.tap(find.byTooltip('Search conversations'));
+      await tester.pumpAndSettle();
+      await tester.enterText(search, 'ale');
+      await tester.pump();
+      expect(find.text('Team'), findsNothing);
+      expect(find.text('Alex'), findsOneWidget);
+
+      final searchHandled = await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(searchHandled, isTrue);
+      expect(search, findsNothing);
+      expect(find.byType(InboxScreen), findsOneWidget);
+      expect(find.text('Team'), findsOneWidget);
+      expect(find.text('Alex'), findsOneWidget);
+
+      // With search dismissed, Back retains its normal app-exit behaviour.
+      final exitHandled = await tester.binding.handlePopRoute();
+      expect(exitHandled, isFalse);
+    });
+
     testWidgets('home search lists message matches from the visible rooms', (
       tester,
     ) async {

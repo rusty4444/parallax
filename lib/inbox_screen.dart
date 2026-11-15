@@ -1612,15 +1612,21 @@ class _InboxScreenState extends State<InboxScreen> {
                     curve: Curves.easeOutCubic,
                     alignment: Alignment.topCenter,
                     child: _searchOpen
-                        ? Padding(
-                            key: const ValueKey('home.search_panel'),
-                            padding: EdgeInsets.fromLTRB(
-                              24,
-                              compact ? 10 : 16,
-                              24,
-                              0,
+                        ? PopScope<void>(
+                            canPop: false,
+                            onPopInvokedWithResult: (didPop, _) {
+                              if (!didPop) _toggleConversationSearch();
+                            },
+                            child: Padding(
+                              key: const ValueKey('home.search_panel'),
+                              padding: EdgeInsets.fromLTRB(
+                                24,
+                                compact ? 10 : 16,
+                                24,
+                                0,
+                              ),
+                              child: conversationSearch,
                             ),
-                            child: conversationSearch,
                           )
                         : const SizedBox(width: double.infinity),
                   ),
