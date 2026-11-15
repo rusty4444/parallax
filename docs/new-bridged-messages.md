@@ -1,6 +1,6 @@
 # New bridged messages
 
-Status: **application code implemented for Google Messages, Facebook Messenger and Instagram behind off-by-default flags; live creation and messaging acceptance are not yet tested.** Each service is independently enabled by its own trusted HTTPS Mautrix provisioning endpoint. No production configuration, bridge process or Synapse configuration was changed while implementing this feature, and no real conversation or message was created.
+Status: **application code implemented for Google Messages, Facebook Messenger and Instagram behind off-by-default flags; the approved HTTPS provisioning routes are deployed and CI test builds enable the feature. Live creation and messaging acceptance are not yet tested.** Each service is independently enabled by its own trusted HTTPS Mautrix provisioning endpoint. The feature commit itself changed no production configuration, bridge process or Synapse configuration and created no real conversation or message; the HTTPS routes below were deployed afterwards under separate infrastructure approval.
 
 ## Architecture
 
@@ -242,7 +242,15 @@ Configuration rules:
 - Provisioning identifiers are path parameters, and account selection uses query parameters. The app does not log them, but the bridge/reverse proxy access-log configuration must redact the full request target: recipient paths plus `user_id` and `login_id` query values. Redacting only the phone-number path is insufficient.
 - No shared secret, bridge credential or other secret belongs in these Dart defines or in a URL.
 
-The currently verified listeners are plain HTTP LAN ports (`29336` Google Messages, `29335` Messenger and `29337` Instagram). **A reviewed HTTPS route is a deployment blocker.** Creating or changing that route requires separate infrastructure approval.
+The approved HTTPS routes are deployed on the Synology `matrix-server` nginx (`/usr/local/etc/nginx/conf.d/http.matrix.conf`, pre-change backup `http.matrix.conf.bak.bridged-provision-20261115-210633`, applied 2026-11-16 AEDT):
+
+- `https://matrix.samprim.net/gmessages/_matrix/provision` → `127.0.0.1:29336`
+- `https://matrix.samprim.net/meta/_matrix/provision` → `127.0.0.1:29335`
+- `https://matrix.samprim.net/instagram/_matrix/provision` → `127.0.0.1:29337`
+
+Each route applies a per-IP `limit_req` zone (30 requests/minute, burst 15, `nodelay`; excess requests get 503), a redacted access-log format that records only `METHOD /_matrix/provision/[redacted] PROTOCOL` plus status/bytes/user-agent (recipient paths and `user_id`/`login_id` query values never reach `matrix_access.log`), and 90-second proxy read/send timeouts that outlast Mautrix's 60-second waits while staying above Parallax's 65s/75s application deadlines. Unauthenticated requests return the bridge's `401 M_MISSING_TOKEN`; a 20-request burst verified 16 admissions then 503s. The Instagram route and its `/.well-known/matrix/mautrix` entry were added in the same change (well-known backup `mautrix.json.bak.bridged-provision-20261115-210633`).
+
+The underlying bridge listeners remain plain HTTP on LAN ports `29336`/`29335`/`29337`; binding them to loopback only is a separate hardening follow-up. CI (`.gitea/workflows/android-apk.yml`) now builds per-commit test APKs with `PARALLAX_NEW_BRIDGED_MESSAGES=true`, the three deployed provisioning URLs and `PARALLAX_PHONE_DEFAULT_REGION=AU`.
 
 ## Rollback
 
@@ -261,6 +269,8 @@ Rollback does not delete Matrix rooms, leave remote chats, alter bridge mappings
 - `lib/features/rooms_admin/start_chat_screen.dart`: optional entry point.
 - `lib/features/rooms_admin/admin_ui.dart`: semantic label for the shared busy indicator.
 - `test/bridged_message_models_test.dart`, `test/mautrix_bridged_messages_test.dart`, `test/new_bridged_message_screen_test.dart`: mocked unit and widget coverage.
+- `.gitea/workflows/android-apk.yml`: enable the feature flag and the deployed HTTPS provisioning URLs in CI test builds.
+- `docs/new-bridged-messages.md`: record the deployed HTTPS routes, redaction/rate-limit verification and CI enablement.
 
 ## Verification record and remaining work
 
@@ -270,7 +280,7 @@ Current local verification: `dart format --output=none --set-exit-if-changed lib
 
 Before release acceptance:
 
-1. Obtain approval for and configure secure HTTPS routes with rate limiting and full request-target log redaction (recipient path and account query values).
+1. Secure HTTPS routes with rate limiting and full request-target log redaction (recipient path and account query values): **deployed and verified** — see Configuration and rollout.
 2. Build the flagged app for a designated test account.
 3. With designated recipients, test opening an existing conversation, portal creation for an existing thread, genuinely new Google Messages remote creation, manual first send, reply in the same room and repeat without duplicate portals.
 4. Test disconnected/re-auth-required accounts, delayed membership/sync and ambiguous timeout recovery on controlled infrastructure.
