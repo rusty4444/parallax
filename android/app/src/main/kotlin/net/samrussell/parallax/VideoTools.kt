@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -73,6 +75,19 @@ object VideoTools {
                     val shortSide = call.argument<Int>("shortSide") ?: 720
                     val bitrate = call.argument<Int>("videoBitrate") ?: 2_500_000
                     compress(app, path, shortSide, bitrate, result)
+                }
+                "sampleFrames" -> {
+                    val maxEdge = (call.argument<Int>("maxEdge") ?: 360).coerceIn(64, 720)
+                    val maxFrames = (call.argument<Int>("maxFrames") ?: 12).coerceIn(2, 24)
+                    val maxDurationMs = (call.argument<Int>("maxDurationMs") ?: 3000).coerceIn(500, 10_000)
+                    io.execute {
+                        val sample = try {
+                            sampleFrames(path, maxEdge, maxFrames, maxDurationMs)
+                        } catch (error: Exception) {
+                            null
+                        }
+                        main.post { result.success(sample) }
+                    }
                 }
                 "delete" -> io.execute {
                     deleteOwned(app, path)
@@ -148,6 +163,148 @@ object VideoTools {
             } catch (error: IOException) {
                 // Nothing left to release.
             }
+        }
+    }
+
+    private fun sampleFrames(
+        path: String,
+        maxEdge: Int,
+        maxFrames: Int,
+        maxDurationMs: Int,
+    ): Map<String, Any?>? {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(path)
+            fun number(key: Int) = retriever.extractMetadata(key)?.toLongOrNull()
+            val rawWidth = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt()
+            val rawHeight = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt()
+            val rawRotation = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val rotation = ((rawRotation % 360) + 360) % 360
+            val durationMs = number(MediaMetadataRetriever.METADATA_KEY_DURATION) ?: 0L
+
+            // Android 11+ (API 30) applies video rotation accurately inside
+            // getScaledFrameAtTime; older releases only scale unrotated frames
+            // reliably and otherwise scale the rotated Bitmap afterwards.
+            val canScaleInRetriever = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 &&
+                    (rotation == 0 || rotation == 180))
+            val displayWidth = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
+            val displayHeight = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+            val scaledTarget = if (canScaleInRetriever &&
+                displayWidth != null && displayHeight != null &&
+                displayWidth > 0 && displayHeight > 0
+            ) {
+                val scale = (maxEdge.toFloat() / max(displayWidth, displayHeight)).coerceAtMost(1f)
+                Pair(
+                    (displayWidth * scale).roundToInt().coerceAtLeast(1),
+                    (displayHeight * scale).roundToInt().coerceAtLeast(1),
+                )
+            } else {
+                null
+            }
+
+            val clipMs = durationMs.coerceAtMost(maxDurationMs.toLong())
+            val count = when {
+                clipMs <= 0L -> 1
+                clipMs < 400L -> 2
+                else -> (clipMs / 250L).toInt().coerceIn(4, maxFrames)
+            }
+            val stepMs = if (clipMs > 0L) clipMs.toDouble() / count else 200.0
+            val delayMs = stepMs.roundToInt().coerceIn(80, 500)
+
+            val frames = ArrayList<ByteArray>(count)
+            val startedMs = SystemClock.elapsedRealtime()
+            for (i in 0 until count) {
+                if (frames.size >= 2 && SystemClock.elapsedRealtime() - startedMs > 3_500L) {
+                    break
+                }
+                val atMs = if (durationMs > 0L) {
+                    ((i + 0.25) * stepMs).toLong().coerceIn(0L, (durationMs - 1L).coerceAtLeast(0L))
+                } else {
+                    0L
+                }
+                val timeUs = atMs * 1000L
+                val encoded = extractScaledJpeg(
+                    retriever,
+                    timeUs = timeUs,
+                    option = MediaMetadataRetriever.OPTION_CLOSEST,
+                    scaledTarget = scaledTarget,
+                    maxEdge = maxEdge,
+                ) ?: if (frames.isEmpty()) {
+                    extractScaledJpeg(
+                        retriever,
+                        timeUs = timeUs,
+                        option = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        scaledTarget = scaledTarget,
+                        maxEdge = maxEdge,
+                    )
+                } else {
+                    null
+                }
+                if (encoded != null) {
+                    frames.add(encoded)
+                }
+            }
+            if (frames.isEmpty()) return null
+            val distinct = if (frames.size > 1 && frames.all { it.contentEquals(frames.first()) }) {
+                listOf(frames.first())
+            } else {
+                frames
+            }
+            return mapOf(
+                "frames" to distinct,
+                "delayMs" to delayMs,
+            )
+        } finally {
+            try {
+                retriever.release()
+            } catch (error: IOException) {
+                // Nothing left to release.
+            }
+        }
+    }
+
+    private fun extractScaledJpeg(
+        retriever: MediaMetadataRetriever,
+        timeUs: Long,
+        option: Int,
+        scaledTarget: Pair<Int, Int>?,
+        maxEdge: Int,
+    ): ByteArray? {
+        val raw = try {
+            if (scaledTarget != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                retriever.getScaledFrameAtTime(
+                    timeUs,
+                    option,
+                    scaledTarget.first,
+                    scaledTarget.second,
+                )
+            } else {
+                retriever.getFrameAtTime(timeUs, option)
+            }
+        } catch (error: Exception) {
+            null
+        } ?: return null
+        var scaled: Bitmap? = null
+        try {
+            val longSide = max(raw.width, raw.height)
+            val target = if (longSide > maxEdge) {
+                val ratio = maxEdge.toFloat() / longSide
+                Bitmap.createScaledBitmap(
+                    raw,
+                    (raw.width * ratio).roundToInt().coerceAtLeast(1),
+                    (raw.height * ratio).roundToInt().coerceAtLeast(1),
+                    true,
+                ).also { scaled = it }
+            } else {
+                raw
+            }
+            val out = ByteArrayOutputStream()
+            target.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            return out.toByteArray()
+        } finally {
+            if (scaled != null && scaled !== raw) scaled.recycle()
+            raw.recycle()
         }
     }
 

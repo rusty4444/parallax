@@ -319,6 +319,37 @@ void main() {
       expect(messages.every((m) => m.dataUri == null), isTrue);
     });
 
+    test(
+      'animated GIF and video previews keep MessagingStyle even in single-message group rooms',
+      () async {
+        final gif = File('${directory.path}/notification_media/m_anim.gif')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+        final roomAvatar = File('${directory.path}/room_anim.png')
+          ..writeAsBytesSync([1, 2, 3]);
+        await handler(
+          (_, _) async => resolved(
+            eventId: r'$anim',
+            text: 'Video',
+            isDirect: false,
+            imagePath: gif.path,
+            roomAvatarPath: roomAvatar.path,
+          ),
+          useStore: false,
+        ).handle(envelope(r'$anim'));
+        final notification = surface.byId(
+          roomNotificationId('!room:example.org'),
+        )!;
+        final messaging = style(notification);
+        expect(messaging.messages!.single.dataMimeType, 'image/gif');
+        expect(messaging.messages!.single.dataUri, 'content://test${gif.path}');
+        expect(
+          (android(notification).largeIcon as FilePathAndroidBitmap).data,
+          roomAvatar.path,
+        );
+      },
+    );
+
     test('ringing calls and invites get their own notifications', () async {
       await handler(
         (_, _) async => resolved(

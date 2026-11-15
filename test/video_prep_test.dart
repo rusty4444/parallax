@@ -6,11 +6,12 @@ import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:parallax/features/media/video_prep.dart';
 
 class _Tools implements VideoTools {
-  _Tools({this.info, this.output, this.throwProbe});
+  _Tools({this.info, this.output, this.throwProbe, this.sample});
 
   final VideoInfo? info;
   final String? output;
   final Object? throwProbe;
+  final VideoFrameSample? Function(String path)? sample;
   final compressed = <(int shortSide, int bitrate)>[];
   final deleted = <String>[];
 
@@ -29,6 +30,14 @@ class _Tools implements VideoTools {
     compressed.add((shortSide, videoBitrate));
     return output!;
   }
+
+  @override
+  Future<VideoFrameSample?> sampleFrames(
+    String path, {
+    int maxEdge = 360,
+    int maxFrames = 12,
+    int maxDurationMs = 3000,
+  }) async => sample?.call(path);
 
   @override
   Future<void> delete(String path) async => deleted.add(path);
@@ -170,4 +179,35 @@ void main() {
   test('the longest video that fits is about four minutes', () {
     expect(maxVideoLengthLabel, '4 minutes');
   });
+
+  test(
+    'sampleVideoBytes passes a temporary file to native tools and cleans up',
+    () async {
+      String? observedPath;
+      Uint8List? observedBytes;
+      final tools = _Tools(
+        sample: (path) {
+          observedPath = path;
+          observedBytes = File(path).readAsBytesSync();
+          return VideoFrameSample(
+            frames: [
+              Uint8List.fromList([1, 2, 3]),
+            ],
+            delayMs: 220,
+          );
+        },
+      );
+      final result = await sampleVideoBytes(
+        Uint8List.fromList([9, 8, 7, 6]),
+        tools: tools,
+        cacheDir: dir,
+      );
+      expect(result, isNotNull);
+      expect(result!.delayMs, 220);
+      expect(result.frames.single, [1, 2, 3]);
+      expect(observedBytes, [9, 8, 7, 6]);
+      expect(File(observedPath!).existsSync(), isFalse);
+      expect(File(observedPath!).parent.existsSync(), isFalse);
+    },
+  );
 }

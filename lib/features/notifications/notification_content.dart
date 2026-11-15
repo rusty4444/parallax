@@ -11,9 +11,15 @@ const maxNotificationTextLength = 600;
 /// Longest sender or room name kept for a notification.
 const maxNotificationNameLength = 80;
 
-/// Largest declared media size we will download for a preview. Encrypted
-/// media cannot be thumbnailed by the server, so this bounds the download.
+/// Largest declared media size we will download for a static image preview.
+/// Encrypted media cannot be thumbnailed by the server, so this bounds it.
 const maxNotificationMediaBytes = 3 * 1024 * 1024;
+
+/// Largest declared size downloaded for an animated GIF or WebP preview.
+const maxNotificationAnimatedMediaBytes = 10 * 1024 * 1024;
+
+/// Largest declared size downloaded to sample a video notification preview.
+const maxNotificationVideoBytes = 20 * 1024 * 1024;
 
 /// How the notification for an event is presented.
 enum NotifiableEventKind {
@@ -27,7 +33,7 @@ enum NotifiableEventKind {
   call,
 }
 
-/// Media that may be previewed (image, sticker or video thumbnail).
+/// Media that may be previewed (image, sticker, animated GIF/WebP or video).
 @immutable
 class NotificationMediaRef {
   const NotificationMediaRef({
@@ -36,9 +42,10 @@ class NotificationMediaRef {
     this.mimeType,
     this.declaredSize,
     required this.thumbnail,
+    this.fallback,
   }) : assert((mxc == null) != (encryptedFile == null));
 
-  /// Plaintext media: the server can produce a small thumbnail.
+  /// Plaintext media: the server can produce a small thumbnail for static art.
   final Uri? mxc;
 
   /// Encrypted media (`EncryptedFile` JSON: url, key, iv, hashes).
@@ -49,7 +56,16 @@ class NotificationMediaRef {
   /// True when this is the event's thumbnail rather than the original.
   final bool thumbnail;
 
+  /// Static fallback (typically `thumbnail_url` / `thumbnail_file`) used when
+  /// downloading or sampling an animated or video source fails.
+  final NotificationMediaRef? fallback;
+
   bool get encrypted => encryptedFile != null;
+
+  bool get isVideo => mimeType != null && mimeType!.startsWith('video/');
+
+  bool get mayAnimate =>
+      isVideo || mimeType == 'image/gif' || mimeType == 'image/webp';
 
   /// The mxc URI that is downloaded (encrypted files carry it inside).
   Uri? get source {
@@ -235,15 +251,22 @@ NotificationEventText _describeCall(
         );
 }
 
-/// Picks the media to preview for image, sticker and video events: the
-/// thumbnail when there is one, otherwise the (bounded) original image.
-/// Videos are only previewed through their thumbnail.
+/// Picks the media to preview for image, sticker and video events:
+///  - Videos (`m.video`): the bounded video itself (sampled into an animated
+///    preview), falling back to its static thumbnail when oversized or
+///    unreadable.
+///  - Animated images/stickers (`image/gif`, `image/webp`): the bounded
+///    animated original so animation is not flattened by a static thumbnail,
+///    falling back to the thumbnail when oversized or unreadable.
+///  - Static images/stickers: the thumbnail when there is one, otherwise the
+///    (bounded) original image.
 NotificationMediaRef? notificationMediaFor({
   required String type,
   required Map<String, Object?> content,
 }) {
   final msgtype = content['msgtype'];
-  final image = type == 'm.sticker' || msgtype == 'm.image';
+  final image =
+      type == 'm.sticker' || (type == 'm.room.message' && msgtype == 'm.image');
   final video = type == 'm.room.message' && msgtype == 'm.video';
   if (!image && !video) return null;
   final info = content['info'] is Map
@@ -258,32 +281,55 @@ NotificationMediaRef? notificationMediaFor({
     required Object? plain,
     required Map<String, Object?> info,
     required bool thumbnail,
+    String? inferredMime,
+    required bool allowVideo,
+    NotificationMediaRef? fallback,
   }) {
-    final mime = _string(info['mimetype'])?.toLowerCase();
-    if (mime != null && !_previewableMime(mime)) return null;
+    final rawMime = _cleanMime(_string(info['mimetype'])) ?? inferredMime;
+    if (rawMime != null) {
+      final allowed = allowVideo
+          ? _previewableVideoMime(rawMime)
+          : _previewableImageMime(rawMime);
+      if (!allowed) return null;
+    }
     final size = info['size'];
     final declared = size is int ? size : null;
+    final isVideo = rawMime != null && _previewableVideoMime(rawMime);
+    final isAnimatedImage = !isVideo && _animatedImageMime(rawMime);
+    final maxBytes = isVideo
+        ? maxNotificationVideoBytes
+        : (isAnimatedImage && !thumbnail)
+        ? maxNotificationAnimatedMediaBytes
+        : maxNotificationMediaBytes;
     if (encrypted is Map) {
       final file = Map<String, Object?>.from(encrypted);
       final url = file['url'];
       if (url is! String || validMxc(url) == null) return null;
-      if (declared != null && declared > maxNotificationMediaBytes) return null;
+      if (declared != null && declared > maxBytes) return null;
       return NotificationMediaRef(
         encryptedFile: file,
-        mimeType: mime,
+        mimeType: rawMime,
         declaredSize: declared,
         thumbnail: thumbnail,
+        fallback: fallback,
       );
     }
     if (plain is String) {
       final mxc = validMxc(plain);
       if (mxc == null) return null;
-      // The server scales plaintext images, so the original size is no bound.
+      // Full downloads (videos and un-thumbnailed animations) are not scaled by
+      // the homeserver, so their declared size bounds the download too.
+      if ((isVideo || (isAnimatedImage && !thumbnail)) &&
+          declared != null &&
+          declared > maxBytes) {
+        return null;
+      }
       return NotificationMediaRef(
         mxc: mxc,
-        mimeType: mime,
+        mimeType: rawMime,
         declaredSize: declared,
         thumbnail: thumbnail,
+        fallback: fallback,
       );
     }
     return null;
@@ -294,23 +340,98 @@ NotificationMediaRef? notificationMediaFor({
     plain: info['thumbnail_url'],
     info: thumbnailInfo,
     thumbnail: true,
+    allowVideo: false,
   );
-  if (fromThumbnail != null || video) return fromThumbnail;
+  final inferredMainMime = _inferMediaMime(content, video: video);
+  final mainMime = _cleanMime(_string(info['mimetype'])) ?? inferredMainMime;
+
+  if (video) {
+    final mainVideo = build(
+      encrypted: content['file'],
+      plain: content['url'],
+      info: info,
+      thumbnail: false,
+      inferredMime: inferredMainMime,
+      allowVideo: true,
+      fallback: fromThumbnail,
+    );
+    return mainVideo ?? fromThumbnail;
+  }
+
+  final explicitAnimated =
+      info['is_animated'] ?? info['org.matrix.msc4230.is_animated'];
+  if (_animatedImageMime(mainMime) && explicitAnimated != false) {
+    final animated = build(
+      encrypted: content['file'],
+      plain: content['url'],
+      info: info,
+      thumbnail: false,
+      inferredMime: inferredMainMime,
+      allowVideo: false,
+      fallback: fromThumbnail,
+    );
+    if (animated != null) return animated;
+    if (fromThumbnail != null) return fromThumbnail;
+    // Plaintext animated image over the full-download cap: ask the homeserver
+    // for a scaled static thumbnail instead of dropping the preview.
+    final plain = content['url'];
+    final mxc = plain is String ? validMxc(plain) : null;
+    if (mxc != null) {
+      return NotificationMediaRef(
+        mxc: mxc,
+        mimeType: 'image/png',
+        thumbnail: true,
+      );
+    }
+    return null;
+  }
+
+  if (fromThumbnail != null) return fromThumbnail;
   return build(
     encrypted: content['file'],
     plain: content['url'],
     info: info,
     thumbnail: false,
+    inferredMime: inferredMainMime,
+    allowVideo: false,
   );
 }
 
-bool _previewableMime(String mime) => const {
+String? _cleanMime(String? mime) {
+  if (mime == null) return null;
+  final clean = mime.split(';').first.trim().toLowerCase();
+  return clean.isEmpty ? null : clean;
+}
+
+bool _previewableImageMime(String mime) => const {
   'image/jpeg',
   'image/jpg',
   'image/png',
   'image/webp',
   'image/gif',
-}.contains(mime.split(';').first.trim());
+}.contains(mime);
+
+bool _animatedImageMime(String? mime) =>
+    mime == 'image/gif' || mime == 'image/webp';
+
+bool _previewableVideoMime(String mime) =>
+    mime.startsWith('video/') && mime.length > 'video/'.length;
+
+String? _inferMediaMime(Map<String, Object?> content, {required bool video}) {
+  final name = (_string(content['filename']) ?? _string(content['body']) ?? '')
+      .trim()
+      .toLowerCase();
+  if (video) {
+    if (name.endsWith('.webm')) return 'video/webm';
+    if (name.endsWith('.mov')) return 'video/quicktime';
+    if (name.endsWith('.3gp')) return 'video/3gpp';
+    if (name.endsWith('.mkv')) return 'video/x-matroska';
+    return 'video/mp4';
+  }
+  if (name.endsWith('.gif')) return 'image/gif';
+  if (name.endsWith('.webp')) return 'image/webp';
+  return null;
+}
 
 /// A strictly validated `mxc://server/media` URI, or null.
 Uri? validMxc(String value) {

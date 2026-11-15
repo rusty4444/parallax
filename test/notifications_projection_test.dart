@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:matrix/matrix.dart' as matrix;
+import 'package:parallax/features/media/video_prep.dart' show VideoFrameSample;
 import 'package:parallax/features/notifications/matrix_push_projection.dart';
 import 'package:parallax/features/notifications/notification_content.dart';
 import 'package:parallax/features/notifications/notification_media.dart';
@@ -652,6 +653,199 @@ void main() {
       )!;
       expect(img.decodeJpg(small)!.width, 100);
     });
+
+    test(
+      'animated GIFs and WebPs become bounded looping GIFs while static WebPs stay JPEG',
+      () {
+        final gifFrame0 = img.Image(width: 600, height: 400, numChannels: 4);
+        img.fill(gifFrame0, color: img.ColorRgba8(220, 40, 40, 255));
+        final gifFrame1 = img.Image(width: 600, height: 400, numChannels: 4);
+        img.fill(gifFrame1, color: img.ColorRgba8(40, 180, 90, 255));
+        final gifFrame2 = img.Image(width: 600, height: 400, numChannels: 4);
+        img.fill(gifFrame2, color: img.ColorRgba8(40, 90, 220, 255));
+        final srcGif =
+            (img.GifEncoder(repeat: 0)
+                  ..addFrame(gifFrame0, duration: 12)
+                  ..addFrame(gifFrame1, duration: 15)
+                  ..addFrame(gifFrame2, duration: 18))
+                .finish()!;
+
+        final outGif = processNotificationImage(
+          NotificationImageJob(
+            srcGif,
+            edge: notificationPreviewEdge,
+            animate: true,
+          ),
+        )!;
+        final gifInfo = img.GifDecoder().startDecode(outGif)!;
+        expect(gifInfo.numFrames, 3);
+        expect(gifInfo.width, notificationAnimatedPreviewEdge);
+        expect(gifInfo.height, 240);
+        expect(gifInfo.frames.map((f) => f.duration), [12, 15, 18]);
+
+        // Transparent animated WebP sticker preserves frame count and transparency.
+        final webp0 = img.Image(
+          width: 120,
+          height: 120,
+          numChannels: 4,
+          frameDuration: 140,
+        );
+        img.fillRect(
+          webp0,
+          x1: 30,
+          y1: 30,
+          x2: 90,
+          y2: 90,
+          color: img.ColorRgba8(255, 120, 0, 255),
+        );
+        final webp1 = img.Image(
+          width: 120,
+          height: 120,
+          numChannels: 4,
+          frameDuration: 160,
+        );
+        img.fillRect(
+          webp1,
+          x1: 10,
+          y1: 10,
+          x2: 60,
+          y2: 60,
+          color: img.ColorRgba8(0, 160, 255, 255),
+        );
+        webp0.addFrame(webp1);
+        final srcWebp = img.WebPEncoder().encode(webp0);
+        final outStickerGif = processNotificationImage(
+          NotificationImageJob(
+            srcWebp,
+            edge: notificationPreviewEdge,
+            animate: true,
+          ),
+        )!;
+        final stickerInfo = img.GifDecoder().startDecode(outStickerGif)!;
+        expect(stickerInfo.numFrames, 2);
+        expect(stickerInfo.frames.first.transparent, greaterThanOrEqualTo(0));
+
+        // Single-frame WebP photo keeps static 640 px JPEG resolution.
+        final staticWebpImg = img.Image(
+          width: 500,
+          height: 400,
+          numChannels: 4,
+        );
+        img.fill(staticWebpImg, color: img.ColorRgba8(80, 100, 140, 255));
+        final staticWebpOut = processNotificationImage(
+          NotificationImageJob(
+            img.WebPEncoder().encode(staticWebpImg),
+            edge: notificationPreviewEdge,
+            animate: true,
+          ),
+        )!;
+        final staticJpg = img.decodeJpg(staticWebpOut)!;
+        expect(staticJpg.width, 500);
+      },
+    );
+
+    test(
+      'video notifications encode sampled frames as looping GIFs and fall back to thumbnails',
+      () async {
+        Uint8List frameBytes(int r, int g, int b) {
+          final im = img.Image(width: 480, height: 270, numChannels: 3);
+          img.fill(im, color: img.ColorRgb8(r, g, b));
+          return img.encodeJpg(im, quality: 85);
+        }
+
+        final requests = <String>[];
+        var failSampling = false;
+        final loader = NotificationMediaLoader(
+          httpClient: MockClient((request) async {
+            requests.add(request.url.path);
+            if (request.url.path.endsWith('/clip')) {
+              return http.Response.bytes(
+                Uint8List.fromList([0, 0, 0, 24]),
+                200,
+              );
+            }
+            if (request.url.path.endsWith('/clip-thumb')) {
+              return http.Response.bytes(_png(640, 360), 200);
+            }
+            return http.Response.bytes(_png(96, 96), 200);
+          }),
+          homeserver: Uri.parse('https://matrix.example.org'),
+          accessToken: 'token',
+          cacheRoot: cache,
+          process: (job) async => processNotificationImage(job),
+          sampleVideo: (_) async => failSampling
+              ? null
+              : VideoFrameSample(
+                  frames: [
+                    frameBytes(220, 30, 30),
+                    frameBytes(30, 200, 60),
+                    frameBytes(40, 80, 220),
+                  ],
+                  delayMs: 250,
+                ),
+        );
+        final room = _groupRoom(client);
+        final videoContent = {
+          'msgtype': 'm.video',
+          'body': 'front-door.mp4',
+          'url': 'mxc://example.org/clip',
+          'info': {
+            'mimetype': 'video/mp4',
+            'size': 1500000,
+            'thumbnail_url': 'mxc://example.org/clip-thumb',
+            'thumbnail_info': {'mimetype': 'image/png', 'size': 9000},
+          },
+        };
+        final animated = await projectPushEvent(
+          event: matrix.Event(
+            type: 'm.room.message',
+            content: videoContent,
+            senderId: '@alice:example.org',
+            eventId: r'$vid1',
+            originServerTs: DateTime(2026, 11, 12, 9, 30),
+            room: room,
+          ),
+          room: room,
+          myUserId: _me,
+          isDirect: false,
+          highlight: false,
+          media: loader,
+        );
+        expect(animated.line.text, 'Video');
+        expect(animated.line.imagePath, endsWith('.gif'));
+        expect(
+          requests,
+          contains('/_matrix/client/v1/media/download/example.org/clip'),
+        );
+        final encodedGif = File(animated.line.imagePath!).readAsBytesSync();
+        final gifHeader = img.GifDecoder().startDecode(encodedGif)!;
+        expect(gifHeader.numFrames, 3);
+        expect(gifHeader.width, notificationAnimatedPreviewEdge);
+
+        // When native video sampling fails, the static thumbnail is shown instead.
+        failSampling = true;
+        final fallback = await projectPushEvent(
+          event: matrix.Event(
+            type: 'm.room.message',
+            content: videoContent,
+            senderId: '@alice:example.org',
+            eventId: r'$vid2',
+            originServerTs: DateTime(2026, 11, 12, 9, 31),
+            room: room,
+          ),
+          room: room,
+          myUserId: _me,
+          isDirect: false,
+          highlight: false,
+          media: loader,
+        );
+        expect(fallback.line.imagePath, endsWith('.jpg'));
+        expect(
+          requests,
+          contains('/_matrix/client/v1/media/thumbnail/example.org/clip-thumb'),
+        );
+      },
+    );
   });
 }
 

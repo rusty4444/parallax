@@ -316,44 +316,143 @@ void main() {
       );
     });
 
-    test('videos only preview their thumbnail; other types never', () {
-      expect(
-        notificationMediaFor(
+    test(
+      'videos preview the bounded clip with thumbnail fallback; other types never',
+      () {
+        final plainVideo = notificationMediaFor(
           type: 'm.room.message',
           content: {'msgtype': 'm.video', 'url': 'mxc://example.org/v'},
-        ),
-        isNull,
-      );
-      expect(
-        notificationMediaFor(
+        );
+        expect(plainVideo?.source.toString(), 'mxc://example.org/v');
+        expect(plainVideo?.isVideo, isTrue);
+        expect(plainVideo?.mayAnimate, isTrue);
+        expect(plainVideo?.thumbnail, isFalse);
+        expect(plainVideo?.fallback, isNull);
+
+        final withThumb = notificationMediaFor(
           type: 'm.room.message',
           content: {
             'msgtype': 'm.video',
             'url': 'mxc://example.org/v',
-            'info': {'thumbnail_url': 'mxc://example.org/vt'},
+            'info': {
+              'mimetype': 'video/mp4',
+              'size': 4 * 1024 * 1024,
+              'thumbnail_url': 'mxc://example.org/vt',
+              'thumbnail_info': {'mimetype': 'image/jpeg', 'size': 12000},
+            },
           },
-        )?.source.toString(),
-        'mxc://example.org/vt',
-      );
-      expect(
-        notificationMediaFor(
+        );
+        expect(withThumb?.source.toString(), 'mxc://example.org/v');
+        expect(withThumb?.isVideo, isTrue);
+        expect(withThumb?.fallback?.source.toString(), 'mxc://example.org/vt');
+        expect(withThumb?.fallback?.thumbnail, isTrue);
+
+        // Oversized videos skip the clip download and fall back to the thumbnail.
+        final oversizedVideo = notificationMediaFor(
           type: 'm.room.message',
-          content: {'msgtype': 'm.file', 'url': 'mxc://example.org/f'},
-        ),
-        isNull,
-      );
-      expect(
-        notificationMediaFor(
+          content: {
+            'msgtype': 'm.video',
+            'url': 'mxc://example.org/huge-v',
+            'info': {
+              'mimetype': 'video/mp4',
+              'size': maxNotificationVideoBytes + 1,
+              'thumbnail_url': 'mxc://example.org/vt',
+            },
+          },
+        );
+        expect(oversizedVideo?.source.toString(), 'mxc://example.org/vt');
+        expect(oversizedVideo?.thumbnail, isTrue);
+        expect(oversizedVideo?.isVideo, isFalse);
+
+        expect(
+          notificationMediaFor(
+            type: 'm.room.message',
+            content: {'msgtype': 'm.file', 'url': 'mxc://example.org/f'},
+          ),
+          isNull,
+        );
+        expect(
+          notificationMediaFor(
+            type: 'm.room.message',
+            content: {
+              'msgtype': 'm.image',
+              'url': 'mxc://example.org/svg',
+              'info': {'mimetype': 'image/svg+xml'},
+            },
+          ),
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'animated GIF and WebP images and stickers keep animation with static fallback',
+      () {
+        final gif = notificationMediaFor(
           type: 'm.room.message',
           content: {
             'msgtype': 'm.image',
-            'url': 'mxc://example.org/svg',
-            'info': {'mimetype': 'image/svg+xml'},
+            'body': 'party.gif',
+            'url': 'mxc://example.org/party',
+            'info': {
+              'mimetype': 'image/gif',
+              'size': 2 * 1024 * 1024,
+              'thumbnail_url': 'mxc://example.org/party-thumb',
+              'thumbnail_info': {'mimetype': 'image/png'},
+            },
           },
-        ),
-        isNull,
-      );
-    });
+        );
+        expect(gif?.source.toString(), 'mxc://example.org/party');
+        expect(gif?.thumbnail, isFalse);
+        expect(gif?.mayAnimate, isTrue);
+        expect(
+          gif?.fallback?.source.toString(),
+          'mxc://example.org/party-thumb',
+        );
+        expect(gif?.fallback?.thumbnail, isTrue);
+
+        // Stickers and filename-inferred GIFs without explicit mimetype animate too.
+        final sticker = notificationMediaFor(
+          type: 'm.sticker',
+          content: {'body': 'wave.webp', 'url': 'mxc://example.org/wave'},
+        );
+        expect(sticker?.source.toString(), 'mxc://example.org/wave');
+        expect(sticker?.thumbnail, isFalse);
+        expect(sticker?.mayAnimate, isTrue);
+
+        // Explicitly non-animated WebP photos (MSC4230) keep the fast thumbnail.
+        final staticWebp = notificationMediaFor(
+          type: 'm.room.message',
+          content: {
+            'msgtype': 'm.image',
+            'url': 'mxc://example.org/photo-webp',
+            'info': {
+              'mimetype': 'image/webp',
+              'org.matrix.msc4230.is_animated': false,
+              'thumbnail_url': 'mxc://example.org/photo-thumb',
+            },
+          },
+        );
+        expect(staticWebp?.source.toString(), 'mxc://example.org/photo-thumb');
+        expect(staticWebp?.thumbnail, isTrue);
+
+        // Plaintext GIF above the animated download cap still gets a server thumbnail.
+        final hugePlainGif = notificationMediaFor(
+          type: 'm.room.message',
+          content: {
+            'msgtype': 'm.image',
+            'url': 'mxc://example.org/huge-gif',
+            'info': {
+              'mimetype': 'image/gif',
+              'size': maxNotificationAnimatedMediaBytes + 1,
+            },
+          },
+        );
+        expect(hugePlainGif?.source.toString(), 'mxc://example.org/huge-gif');
+        expect(hugePlainGif?.thumbnail, isTrue);
+        expect(hugePlainGif?.mayAnimate, isFalse);
+      },
+    );
 
     test('content URIs only cover the notification media directory', () {
       const cache = '/data/user/0/net.samrussell.parallax/cache';

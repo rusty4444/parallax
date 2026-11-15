@@ -35,6 +35,15 @@ class VideoInfo {
       width == null || height == null ? null : math.min(width!, height!);
 }
 
+/// Evenly spaced JPEG frames sampled from the start of a video clip.
+@immutable
+class VideoFrameSample {
+  const VideoFrameSample({required this.frames, required this.delayMs});
+
+  final List<Uint8List> frames;
+  final int delayMs;
+}
+
 /// Native video tools (Android: MediaMetadataRetriever and Media3
 /// Transformer, see VideoTools.kt). Replace [instance] in tests.
 abstract class VideoTools {
@@ -43,6 +52,15 @@ abstract class VideoTools {
   /// Dimensions (display orientation), duration and a poster frame, or null
   /// when the file can't be read.
   Future<VideoInfo?> probe(String path);
+
+  /// Evenly spaced JPEG frames from the opening [maxDurationMs] of [path] for
+  /// an animated notification preview, or null when unreadable.
+  Future<VideoFrameSample?> sampleFrames(
+    String path, {
+    int maxEdge = 360,
+    int maxFrames = 12,
+    int maxDurationMs = 3000,
+  });
 
   /// Re-encodes to H.264/AAC MP4 with the short side at most [shortSide]
   /// and the video at [videoBitrate] bits/s. Returns the output path, which
@@ -93,6 +111,32 @@ class PlatformVideoTools implements VideoTools {
     });
     if (output == null) throw const FormatException('Video compression failed');
     return output;
+  }
+
+  @override
+  Future<VideoFrameSample?> sampleFrames(
+    String path, {
+    int maxEdge = 360,
+    int maxFrames = 12,
+    int maxDurationMs = 3000,
+  }) async {
+    final raw = await _channel
+        .invokeMapMethod<String, Object?>('sampleFrames', {
+          'path': path,
+          'maxEdge': maxEdge,
+          'maxFrames': maxFrames,
+          'maxDurationMs': maxDurationMs,
+        });
+    if (raw == null) return null;
+    final rawFrames = raw['frames'];
+    if (rawFrames is! List) return null;
+    final frames = <Uint8List>[
+      for (final item in rawFrames)
+        if (item is Uint8List && item.isNotEmpty) item,
+    ];
+    if (frames.isEmpty) return null;
+    final delayMs = (raw['delayMs'] as num?)?.toInt() ?? 250;
+    return VideoFrameSample(frames: frames, delayMs: delayMs.clamp(40, 1000));
   }
 
   @override
@@ -210,6 +254,40 @@ Future<VideoInfo?> probeVideoBytes(Uint8List bytes, {VideoTools? tools}) async {
     final file = File('${dir.path}/video');
     await file.writeAsBytes(bytes, flush: true);
     return await video.probe(file.path);
+  } catch (_) {
+    return null;
+  } finally {
+    try {
+      await dir?.delete(recursive: true);
+    } catch (_) {}
+  }
+}
+
+/// Samples evenly spaced JPEG frames from [bytes] by writing a temporary file
+/// for the native reader, then deleting it. Null when the platform has no
+/// reader or the video cannot be decoded.
+Future<VideoFrameSample?> sampleVideoBytes(
+  Uint8List bytes, {
+  VideoTools? tools,
+  Directory? cacheDir,
+  int maxEdge = 360,
+  int maxFrames = 12,
+  int maxDurationMs = 3000,
+}) async {
+  final video = tools ?? VideoTools.instance;
+  Directory? dir;
+  try {
+    final base = cacheDir ?? await getTemporaryDirectory();
+    await base.create(recursive: true);
+    dir = await base.createTemp('parallax-video-preview-');
+    final file = File('${dir.path}/video');
+    await file.writeAsBytes(bytes, flush: true);
+    return await video.sampleFrames(
+      file.path,
+      maxEdge: maxEdge,
+      maxFrames: maxFrames,
+      maxDurationMs: maxDurationMs,
+    );
   } catch (_) {
     return null;
   } finally {

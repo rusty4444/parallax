@@ -217,14 +217,17 @@ RenderedNotification renderRoomThread(
   final roomAvatar = thread.roomAvatarPath ?? latest.senderAvatarPath;
   final largeAvatarExists = roomAvatar != null && fileExists(roomAvatar);
   // Android hides largeIcon on a collapsed MessagingStyle notification. For a
-  // single group message with avatar art, BigTextStyle keeps the collapsed
-  // row's avatar visible. Direct chats retain MessagingStyle and the sender's
-  // name-level Person icon; multi-message history retains it for everyone.
+  // single text-only group message with avatar art, BigTextStyle keeps the
+  // collapsed row's avatar visible. Media previews, direct chats and
+  // multi-message threads retain MessagingStyle so inline/animated media
+  // and sender Person icons render.
+  final hasMediaPreview = messages.any((message) => message.dataUri != null);
   final singleGroupWithAvatar =
       !thread.isDirect &&
       thread.lines.length == 1 &&
       statusLine == null &&
-      largeAvatarExists;
+      largeAvatarExists &&
+      !hasMediaPreview;
   final StyleInformation style = singleGroupWithAvatar
       ? BigTextStyleInformation(
           latest.fromMe ? latest.text : '${latest.senderName}: ${latest.text}',
@@ -301,9 +304,19 @@ Message _message(
           text,
           line.timestamp,
           person,
-          dataMimeType: 'image/jpeg',
+          dataMimeType: notificationPreviewMimeType(image!),
           dataUri: uri,
         );
+}
+
+/// MIME type reported to Android `MessagingStyle.Message.setData` for a cached
+/// preview file.
+String notificationPreviewMimeType(String path) {
+  final lower = path.toLowerCase();
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.png')) return 'image/png';
+  return 'image/jpeg';
 }
 
 /// A quick-reply status for a room without notification history.

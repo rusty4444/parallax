@@ -282,13 +282,18 @@ or UnifiedPush distributor only ever see event and room IDs.
   “📎 name”; “Voice message”; “📍 Location”; polls as “Poll: question”; reactions;
   live location. Mentions and keyword highlights (push rule `highlight`) are raised
   in priority without adding labels that obscure the message text.
-- **Media previews:** a decrypted image/sticker/video thumbnail, downloaded with
-  strict size caps (3 MB for encrypted originals; server-scaled thumbnails for
-  plaintext media), decoded with pixel bounds and re-encoded to a small JPEG in the
-  app's private cache (`cache/notification_media/`). Android's system UI reads it
-  through a non-exported FileProvider
-  (`${applicationId}.notifications.fileprovider`) using only the URI attached to the
-  posted notification. Android 9+ shows the image inline; older versions show text.
+- **Media previews:** decrypted static images/stickers, animated GIF/WebP images
+  and video clips, downloaded with strict size caps (3 MB for static originals,
+  10 MB for animated GIF/WebP originals, 20 MB for videos, and server-scaled
+  thumbnails for static plaintext media with automatic thumbnail fallback when an
+  animated or video download fails or exceeds its cap), decoded with pixel/frame
+  bounds and re-encoded in the app's private cache (`cache/notification_media/`)
+  as a small JPEG or looping GIF (for animated GIFs/WebPs and frames sampled from
+  the opening seconds of a video). Android's system UI reads each preview through
+  a non-exported FileProvider (`${applicationId}.notifications.fileprovider`)
+  using only the URI attached to the posted notification. Android 12+ animates
+  looping GIF previews inline like camera alerts; Android 9–11 shows a static
+  frame; older versions show text.
 - **Invites:** “Alice invited you to Book club” (or “… invited you to chat”).
 - **Calls:** an MSC4075 `m.rtc.notification` ring (or legacy `m.call.invite`) in a
   DM becomes a high-priority, call-category notification on the “Calls” channel

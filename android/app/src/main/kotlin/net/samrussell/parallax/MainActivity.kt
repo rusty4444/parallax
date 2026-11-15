@@ -33,7 +33,6 @@ class MainActivity : FlutterFragmentActivity() {
     private var intentChannel: MethodChannel? = null
     private var secureWindowChannel: MethodChannel? = null
     private var permissionsChannel: MethodChannel? = null
-    private var videoChannel: MethodChannel? = null
 
     /**
      * Always the process-wide cached engine (see BackgroundConnection.kt), so
@@ -128,8 +127,6 @@ class MainActivity : FlutterFragmentActivity() {
         }
         intentChannel = channel
         SharedIntentStore.listener = { channel.invokeMethod("pending", null) }
-        // Video compression and poster frames for sending videos.
-        videoChannel = VideoTools.register(appContext, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -141,8 +138,6 @@ class MainActivity : FlutterFragmentActivity() {
         secureWindowChannel = null
         permissionsChannel?.setMethodCallHandler(null)
         permissionsChannel = null
-        videoChannel?.setMethodCallHandler(null)
-        videoChannel = null
         for ((result, permissions) in permissionRequests.values) {
             result.success(grantedMap(permissions))
         }
@@ -205,8 +200,10 @@ class MainActivity : FlutterFragmentActivity() {
  * main()), so a push never starts the Matrix client in the background.
  */
 class ParallaxUnifiedPushService : UnifiedPushService() {
+    @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
     override fun getEngine(context: Context): FlutterEngine {
         val engine = FlutterEngine(context)
+        VideoTools.register(context.applicationContext, engine.dartExecutor.binaryMessenger)
         val bundlePath = FlutterInjector.instance().flutterLoader().findAppBundlePath()
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint(

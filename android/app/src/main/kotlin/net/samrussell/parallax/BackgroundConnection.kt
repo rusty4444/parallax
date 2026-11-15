@@ -30,11 +30,13 @@ import io.flutter.plugin.common.MethodChannel
 object ParallaxEngine {
     const val ID = "parallax_main"
 
+    @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
     fun obtain(context: Context): FlutterEngine {
         FlutterEngineCache.getInstance().get(ID)?.let { return it }
         val app = context.applicationContext
         val engine = FlutterEngine(app)
         BackgroundConnection.attachChannel(app, engine)
+        VideoTools.register(app, engine.dartExecutor.binaryMessenger)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ID, engine)
         return engine

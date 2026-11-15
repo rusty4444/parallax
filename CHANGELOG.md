@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Animated notification previews
+
+- Sent videos, GIFs and animated WebP images or stickers play as looping previews inside rich Android notifications, including encrypted rooms and background sync, and fall back to the static thumbnail if sampling fails.
+
 ### Timeline and composer fixes
 
 - The swipe-to-reply strip fades out at the top and bottom so the accent tint blends into the room instead of cutting a hard line.
