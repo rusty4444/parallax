@@ -59,6 +59,7 @@
 - The other-devices list under Security is collapsed until you open it.
 - Settings → Appearance → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
 - Pulling down in a chat while **Load earlier messages** is visible loads older history automatically; tapping the button still works.
+- Back now dismisses conversation search and clears its query instead of closing the app. Pressing Back again retains the normal app-exit behaviour.
 
 ### Notifications without Google or a push service
 
