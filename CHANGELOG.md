@@ -4,6 +4,7 @@
 
 ### Timeline and composer fixes
 
+- The swipe-to-reply strip fades out at the top and bottom so the accent tint blends into the room instead of cutting a hard line.
 - Swiping a message to reply, or choosing Reply from the long-press menu, puts the cursor in the compose box so you can type straight away. Quote in reply does the same in a thread.
 - Photo galleries line up with the other bubbles: they reserve the sender's picture column and use the same width cap, so a run of photos no longer sticks out past the text and single-image messages.
 - "Send a photo gallery" moved into the composer's **+** menu (**Photo gallery**), keeping the timeline clear.
