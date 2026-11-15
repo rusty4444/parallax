@@ -56,8 +56,8 @@ class MautrixProvisioningApi {
     this.endpoints, {
     http.Client? httpClient,
     this.readTimeout = const Duration(seconds: 15),
-    this.metaReadTimeout = const Duration(seconds: 65),
-    this.createTimeout = const Duration(seconds: 75),
+    this.metaReadTimeout = const Duration(seconds: 80),
+    this.createTimeout = const Duration(seconds: 85),
   }) : _http = httpClient ?? http.Client();
 
   final Map<BridgedService, Uri> endpoints;
@@ -65,8 +65,15 @@ class MautrixProvisioningApi {
   final Duration readTimeout;
 
   /// Messenger can wait up to 60s for its socket connection during reconnects
-  /// before answering search or identifier calls.
+  /// before answering search or identifier calls, and `search_users` then
+  /// synchronously refreshes every result's ghost profile (avatar download,
+  /// Synapse upload, display name). Live searches measured 44-65s even while
+  /// CONNECTED, so the deadline must cover the connection wait plus ghost
+  /// sync while staying below the proxy's 90s read timeout.
   final Duration metaReadTimeout;
+
+  /// Creation can also incur Messenger's connection wait plus portal work;
+  /// keep it below the proxy's 90s read timeout.
   final Duration createTimeout;
 
   Future<List<BridgeAccount>> loadAccounts(

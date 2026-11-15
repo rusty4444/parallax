@@ -688,6 +688,25 @@ void main() {
     );
 
     test(
+      'Default deadlines cover Meta connection wait plus ghost sync below the proxy timeout',
+      () {
+        final api = MautrixProvisioningApi({
+          BridgedService.messenger: Uri.parse(_messengerBase),
+        });
+        // Messenger waits up to 60s for its socket and search_users then
+        // synchronously refreshes ghost profiles; live searches measured
+        // 44-65s while CONNECTED. The nginx proxy read timeout is 90s.
+        expect(api.readTimeout, const Duration(seconds: 15));
+        expect(api.metaReadTimeout, const Duration(seconds: 80));
+        expect(api.createTimeout, const Duration(seconds: 85));
+        expect(api.metaReadTimeout.inSeconds, greaterThan(65));
+        expect(api.createTimeout.inSeconds, greaterThan(75));
+        expect(api.metaReadTimeout.inSeconds, lessThan(90));
+        expect(api.createTimeout.inSeconds, lessThan(90));
+      },
+    );
+
+    test(
       'Meta read operations use metaReadTimeout rather than Google readTimeout',
       () async {
         final client = _HeldClient();
