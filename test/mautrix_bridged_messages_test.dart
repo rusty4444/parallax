@@ -786,7 +786,7 @@ void main() {
       },
     );
 
-    test('invalidates results when Matrix session changes mid-call', () async {
+    test('invalidates results when the Matrix user changes mid-call', () async {
       final config = BridgedMessageConfig.fromValues(
         enabled: true,
         instagramUrl: _instagramBase,
@@ -794,12 +794,54 @@ void main() {
       final stub = _StubClient();
       final backend = _SdkFakeBackend(stub);
       final api = _api((_) async {
-        stub.accessToken = 'rotated-token';
+        stub.userID = '@someone-else:example.org';
         return http.Response('{"results":[]}', 200);
       });
       final live = MatrixBridgedMessages(backend, config, api: api);
       await expectLater(
         live.searchRecipients(_instagramAccount, 'alice'),
+        throwsStateError,
+      );
+    });
+
+    test('a refreshed access token mid-create keeps the confirmed room', () async {
+      // Regression: a ~40s gmessages create_dm refreshed the SDK token; the old
+      // token-string pin threw StateError after the 201, discarding the room ID
+      // and locking the inbox into "Room creation not confirmed".
+      final config = BridgedMessageConfig.fromValues(
+        enabled: true,
+        googleMessagesUrl: _base,
+      );
+      final stub = _StubClient();
+      final backend = _SdkFakeBackend(stub);
+      final api = _api((_) async {
+        stub.accessToken = 'rotated-token';
+        return http.Response('{"dm_room_mxid":"!room:example.org"}', 201);
+      });
+      final live = MatrixBridgedMessages(backend, config, api: api);
+      final conversation = await live.ensureDirectConversation(
+        _account,
+        _recipient,
+      );
+      expect(conversation.roomId, '!room:example.org');
+      expect(stub.userID, '@me:example.org');
+      expect(stub.deviceID, 'DEVICE');
+    });
+
+    test('a logged-out session mid-create still invalidates', () async {
+      final config = BridgedMessageConfig.fromValues(
+        enabled: true,
+        googleMessagesUrl: _base,
+      );
+      final stub = _StubClient();
+      final backend = _SdkFakeBackend(stub);
+      final api = _api((_) async {
+        backend.sessionCurrent = false;
+        return http.Response('{"dm_room_mxid":"!room:example.org"}', 201);
+      });
+      final live = MatrixBridgedMessages(backend, config, api: api);
+      await expectLater(
+        live.ensureDirectConversation(_account, _recipient),
         throwsStateError,
       );
     });

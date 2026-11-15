@@ -218,6 +218,8 @@ Google Messages read operations have a 15-second application deadline; Meta read
 
 There is no exactly-once claim. Google Messages uses get-or-create semantics and Mautrix reuses the portal key, but an ambiguous client failure cannot prove that nothing was created.
 
+Session identity is pinned by client object, user ID and device ID — not the access-token string. The SDK refreshes the token during long bridge calls. On 2026-11-16 a Google Messages `create_dm` took ~40s (phone-response wait), the token refreshed mid-flight, and the old token-string pin threw `StateError` after the bridge had returned 201. That discarded the confirmed room ID and locked `RoomCreationRequest` into a permanent "Room creation not confirmed" state even though the portal was created and the user joined. The pin now tolerates a token refresh; a genuine user/device/sign-out change still invalidates. Regression tests cover refresh-keeps-room, user-change-invalidates and sign-out-invalidates.
+
 ## Configuration and rollout
 
 The feature is unavailable unless the flag and at least one valid HTTPS Mautrix provisioning URL are supplied at build time:
@@ -276,7 +278,7 @@ Rollback does not delete Matrix rooms, leave remote chats, alter bridge mappings
 
 Focused automated coverage includes configuration rejection across all three services, phone parsing/default regions, search query normalisation and control-character rejection, positive signed-64-bit Meta ID validation, strict `mxc://` avatar parsing and Matrix room-ID validation, capability mapping and malformed-capability rejection, Matrix-auth request construction, explicit account selection, account/recipient isolation, Meta `search_users` deduplication and `id: "0"` filtering, existing-portal response mapping, disconnected/unsupported accounts (`FI.MAU.NOT_LOGGED_IN` and `FI.MAU.NOT_CONNECTED`), partial multi-service discovery warnings, safe errors/rate limits, read-only resolution/search versus creation, abort-aware 15s/65s/75s deadlines and uncertain outcomes, duplicate submission, route disposal/reopening, late acknowledgement, stale-review and stale-search invalidation, service-specific disclosures (Google Messages reachability, Messenger remote setup caveat, Instagram text-before-media caveat), delayed Matrix readiness with recipient locking, and accessibility live regions. All bridge operations use mocks; no real create, search or message endpoint was called.
 
-Current local verification: `dart format --output=none --set-exit-if-changed lib test` and full `flutter analyze` report no issues, and the complete `flutter test` run passes **2,097 tests** with 74 existing skips (including **62 focused feature tests** across the three bridged-messages test suites). These are local mock/unit/widget results; CI builds and verifies the signed arm64 release APK.
+Current local verification: `dart format --output=none --set-exit-if-changed lib test` and full `flutter analyze` report no issues, and the complete `flutter test` run passes **2,099 tests** with 74 existing skips (including **64 focused feature tests** across the three bridged-messages test suites). These are local mock/unit/widget results; CI builds and verifies the signed arm64 release APK.
 
 Before release acceptance:
 

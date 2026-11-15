@@ -618,8 +618,9 @@ class MautrixProvisioningApi {
 }
 
 /// Live module implementation. It pins each operation to the current Matrix
-/// client, user, device and token, and never gives the SDK token to a URL that
-/// was not supplied in trusted build configuration.
+/// client, user and device (a refreshed access token is the same session), and
+/// never gives the SDK token to a URL that was not supplied in trusted build
+/// configuration.
 class MatrixBridgedMessages implements BridgedMessageFeatures {
   MatrixBridgedMessages(
     this.backend,
@@ -753,10 +754,15 @@ class MatrixBridgedMessages implements BridgedMessageFeatures {
 
   void _check(_MatrixContext context) {
     final auth = context.auth;
+    // Pin the session identity (client, user, device), not the access-token
+    // string. The SDK routinely refreshes the token during long bridge calls
+    // (create_dm can wait ~40-60s for the phone); a refresh keeps the same
+    // client/user/device and signed-in state. Treating it as a session change
+    // threw StateError AFTER the bridge created the room, discarding the
+    // confirmed room ID and locking creation into a permanent uncertain state.
     if (!_sdk.isSessionCurrent(context.client) ||
         context.client.userID != auth.userId ||
-        context.client.deviceID != auth.deviceId ||
-        context.client.accessToken != auth.accessToken) {
+        context.client.deviceID != auth.deviceId) {
       throw StateError('Session changed during bridge operation');
     }
   }
