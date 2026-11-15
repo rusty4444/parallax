@@ -62,7 +62,9 @@ class AdminPage extends StatelessWidget {
             ),
             SizedBox(
               height: 3,
-              child: busy ? const LinearProgressIndicator() : null,
+              child: busy
+                  ? const LinearProgressIndicator(semanticsLabel: 'Working')
+                  : null,
             ),
             Expanded(child: body),
           ],

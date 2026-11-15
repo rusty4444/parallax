@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### New bridged messages
+
+- Start chat → **New bridged message** opens or starts direct conversations through configured Mautrix bridges for Google Messages, Messenger and Instagram when enabled at build time (`PARALLAX_NEW_BRIDGED_MESSAGES=true` with per-service HTTPS `/_matrix/provision` URLs).
+- Google Messages normalises and reviews phone numbers before opening a room; Messenger and Instagram use explicit name/username search (`POST /v3/search_users`), profile review with Matrix avatars and handles, and explicit confirmation (`POST /v3/create_dm`) without sending a message automatically.
+- Service-specific disclosures explain Google Messages reachability/RCS transport, Messenger remote thread-setup error caveats, and Instagram's text-first requirement for new DMs.
+
 ### Animated notification previews
 
 - Sent videos, GIFs and animated WebP images or stickers play as looping previews inside rich Android notifications, including encrypted rooms and background sync, and fall back to the static thumbnail if sampling fails.
