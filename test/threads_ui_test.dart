@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
 import 'package:parallax/chat_backend.dart';
@@ -385,6 +386,47 @@ void main() {
       backend.activity.add(r'$other');
       await tester.pump();
       expect(backend.threadRequests, hasLength(requests));
+    });
+
+    testWidgets('thread replies offer exact phone-number copying', (
+      tester,
+    ) async {
+      final clipboard = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final backend = _Backend();
+      await tester.pumpWidget(
+        _app(
+          ThreadScreen(
+            backend: backend,
+            roomId: _roomId,
+            root: _entry(r'$root', body: 'Root message', replies: 1),
+          ),
+        ),
+      );
+      backend.threadRequests.single.result.complete(
+        ThreadPage([_entry(r'$r1', body: 'Call +61 400 123 456', minute: 1)]),
+      );
+      await tester.pump();
+
+      await tester.longPress(find.text('Call +61 400 123 456'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy phone number'));
+      await tester.pumpAndSettle();
+      expect(clipboard, ['+61 400 123 456']);
     });
   });
 

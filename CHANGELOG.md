@@ -36,6 +36,11 @@
 - Bubbles are as wide as their message: a short message gets a short bubble, on the right for your own messages and after the sender's picture for others. Before, every bubble stretched to its widest because the time's right alignment took the full width.
 - Your long messages stop about a quarter of the way in from the left, mirroring other people's bubbles on the right, and wrapped lines hug the longest line. On tablets bubbles are at most 520 points wide.
 
+### Copy codes and phone numbers
+
+- Long-press a text message to copy just its one-time code or phone number; **Copy text** remains available for the whole message. This also works for thread replies.
+- Rich Android notifications show **Copy code** or **Copy phone number** when the latest message contains one. The action copies the exact value without opening Parallax or dismissing the notification. Generic alerts with message content hidden are unchanged.
+
 ### Thumbnails saved on the device
 
 - Chat and profile pictures and photo, sticker and video previews are now saved on the phone, so they show straight away after a restart and without a connection. Before, they were only kept in memory, and a picture that failed to load stayed as initials until the screen was rebuilt.

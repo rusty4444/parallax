@@ -5,12 +5,14 @@ import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'features/rich_timeline/message_actions.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/threads/event_projection.dart';
 import 'features/threads/thread_features.dart';
 import 'features/threads/thread_widgets.dart';
 import 'hooks/hook_types.dart';
 import 'media_viewer.dart';
+import 'message_copy_targets.dart';
 import 'messaging_features.dart';
 import 'haptics.dart';
 
@@ -273,6 +275,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Future<void> _actions(ChatEntry entry) async {
     if (!mounted || !_ownerCurrent || entry.redacted) return;
     Haptics.longPress();
+    final copyTarget = canCopyText(entry)
+        ? messageCopyTarget(entry.body)
+        : null;
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -285,6 +290,16 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 leading: const Icon(Icons.reply_rounded),
                 title: const Text('Quote in reply'),
                 onTap: () => Navigator.pop(sheetContext, 'reply'),
+              ),
+            if (copyTarget != null)
+              ListTile(
+                leading: Icon(
+                  copyTarget.kind == MessageCopyKind.oneTimeCode
+                      ? Icons.password_rounded
+                      : Icons.phone_rounded,
+                ),
+                title: Text(copyTarget.label),
+                onTap: () => Navigator.pop(sheetContext, 'copy-target'),
               ),
             if (entry.body.isNotEmpty)
               ListTile(
@@ -299,6 +314,12 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (!mounted || !_ownerCurrent || choice == null) return;
     if (choice == 'reply') {
       setState(() => _replyingTo = entry);
+    } else if (choice == 'copy-target' && copyTarget != null) {
+      await copyToClipboard(
+        context,
+        copyTarget.value,
+        confirmation: copyTarget.confirmation,
+      );
     } else if (choice == 'copy') {
       await Clipboard.setData(ClipboardData(text: entry.body));
     }

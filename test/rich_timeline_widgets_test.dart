@@ -652,6 +652,58 @@ void main() {
         isEmpty,
       );
     });
+
+    testWidgets('code and phone actions copy only the detected value', (
+      tester,
+    ) async {
+      final clipboard = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final backend = _Backend();
+      late BuildContext captured;
+      await tester.pumpWidget(
+        host(
+          Builder(
+            builder: (context) {
+              captured = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+
+      Future<void> copy(String body, String label) async {
+        final actions = richTimelineMessageActions(
+          captured,
+          EntryHookContext(
+            backend: backend,
+            roomId: '!room:example.org',
+            palette: palette,
+            entry: message(r'$event', body: body, content: {'body': body}),
+          ),
+        );
+        expect(actions.first.label, label);
+        expect(actions[1].label, 'Copy text');
+        await actions.first.onSelected(captured);
+      }
+
+      await copy('Your login code is 123456', 'Copy code');
+      await copy('Call +61 400 123 456', 'Copy phone number');
+      expect(clipboard, ['123456', '+61 400 123 456']);
+    });
   });
 
   testWidgets('composer finds the room through the timeline on its route', (

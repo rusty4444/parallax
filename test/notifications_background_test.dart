@@ -313,6 +313,59 @@ void main() {
     });
   });
 
+  group('copy from the action isolate', () {
+    NotificationResponse copy(String actionId, [Object? value = '123456']) =>
+        NotificationResponse(
+          notificationResponseType:
+              NotificationResponseType.selectedNotificationAction,
+          actionId: actionId,
+          payload: jsonEncode({
+            'registration_id': _registration,
+            'room_id': _room,
+            'copy_value': value,
+          }),
+        );
+
+    test(
+      'writes only the exact code or phone number to the clipboard',
+      () async {
+        final written = <String>[];
+        Future<void> writer(String value) async => written.add(value);
+        await handleBackgroundNotificationAction(
+          copy(pushCopyCodeActionId),
+          clipboardWriter: writer,
+        );
+        await handleBackgroundNotificationAction(
+          copy(pushCopyPhoneActionId, '+61 400 123 456'),
+          clipboardWriter: writer,
+        );
+        expect(written, ['123456', '+61 400 123 456']);
+        expect(handoffs, isEmpty);
+        expect(surface.shown, isEmpty);
+        expect(await store.takePendingReplies(), isEmpty);
+      },
+    );
+
+    test('missing, malformed and wrong-kind values are ignored', () async {
+      final written = <String>[];
+      for (final response in [
+        copy(pushCopyCodeActionId, null),
+        copy(pushCopyCodeActionId, 'not a code'),
+        copy(pushCopyCodeActionId, '+61 400 123 456'),
+        copy(pushCopyPhoneActionId, '8123 4567\nspam'),
+        copy(pushCopyPhoneActionId, '1234'),
+      ]) {
+        await handleBackgroundNotificationAction(
+          response,
+          clipboardWriter: (value) async => written.add(value),
+        );
+      }
+      expect(written, isEmpty);
+      expect(handoffs, isEmpty);
+      expect(surface.shown, isEmpty);
+    });
+  });
+
   group('background client lock', () {
     test(
       'one background client at a time; stale locks are reclaimed',

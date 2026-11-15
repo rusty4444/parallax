@@ -50,6 +50,11 @@ const pushMarkReadActionId = 'parallax.mark_read';
 /// which hands it to the main isolate (lib/features/notifications).
 const pushReplyActionId = 'parallax.reply';
 
+/// Copy the exact code or phone number shown by a rich notification. These
+/// actions run in the notification-action isolate and never open the app.
+const pushCopyCodeActionId = 'parallax.copy_code';
+const pushCopyPhoneActionId = 'parallax.copy_phone';
+
 /// Renders a verified envelope with sender, text and media. Implemented by
 /// the notifications module while the signed-in app is mounted. [isCurrent]
 /// turns false when push is disabled or re-registered meanwhile.

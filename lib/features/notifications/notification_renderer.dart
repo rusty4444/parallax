@@ -11,6 +11,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../message_copy_targets.dart';
 import '../../push_notifications.dart';
 import 'notification_model.dart';
 
@@ -103,7 +104,9 @@ class PluginNotificationSurface implements NotificationSurface {
 
 /// Routing data in a rich notification's private payload. The registration
 /// nonce lets taps and "Mark as read" be verified exactly like the generic
-/// notification; nothing here is displayed.
+/// notification. A copy action also carries its exact target, already visible
+/// in the notification; the full message body is not added to the payload.
+/// Nothing here is logged.
 ///
 /// The account and device let a quick reply typed on an older notification
 /// be matched to the signed-in session after push was re-registered.
@@ -113,12 +116,14 @@ Map<String, Object?> notificationPayload({
   String? eventId,
   String? userId,
   String? deviceId,
+  String? copyValue,
 }) => {
   'registration_id': registrationId,
   'room_id': roomId,
   'event_id': ?eventId,
   'user_id': ?userId,
   'device_id': ?deviceId,
+  'copy_value': ?copyValue,
 };
 
 AndroidBitmap<Object>? _bitmap(String? path) =>
@@ -138,7 +143,10 @@ bool _fileExists(String path) {
   }
 }
 
-List<AndroidNotificationAction> _roomActions({required bool canMarkRead}) => [
+List<AndroidNotificationAction> _roomActions({
+  required bool canMarkRead,
+  MessageCopyTarget? copyTarget,
+}) => [
   const AndroidNotificationAction(
     pushReplyActionId,
     'Reply',
@@ -148,6 +156,15 @@ List<AndroidNotificationAction> _roomActions({required bool canMarkRead}) => [
     allowGeneratedReplies: true,
     semanticAction: SemanticAction.reply,
   ),
+  if (copyTarget != null)
+    AndroidNotificationAction(
+      copyTarget.kind == MessageCopyKind.oneTimeCode
+          ? pushCopyCodeActionId
+          : pushCopyPhoneActionId,
+      copyTarget.label,
+      showsUserInterface: false,
+      cancelNotification: false,
+    ),
   if (canMarkRead)
     const AndroidNotificationAction(
       pushMarkReadActionId,
@@ -195,6 +212,7 @@ RenderedNotification renderRoomThread(
     if (statusLine != null) Message(statusLine, DateTime.now(), me),
   ];
   final latest = thread.lines.last;
+  final copyTarget = statusLine == null ? messageCopyTarget(latest.text) : null;
   final highlight = thread.lines.any((line) => line.highlight && !line.fromMe);
   final roomAvatar = thread.roomAvatarPath ?? latest.senderAvatarPath;
   final largeAvatarExists = roomAvatar != null && fileExists(roomAvatar);
@@ -241,7 +259,10 @@ RenderedNotification renderRoomThread(
     largeIcon: !thread.isDirect && largeAvatarExists
         ? _bitmap(roomAvatar)
         : null,
-    actions: _roomActions(canMarkRead: thread.latestEventId != null),
+    actions: _roomActions(
+      canMarkRead: thread.latestEventId != null,
+      copyTarget: copyTarget,
+    ),
   );
   return RenderedNotification(
     id: roomNotificationId(thread.roomId),
@@ -255,6 +276,7 @@ RenderedNotification renderRoomThread(
         eventId: thread.latestEventId,
         userId: myUserId,
         deviceId: myDeviceId,
+        copyValue: copyTarget?.value,
       ),
     ),
   );

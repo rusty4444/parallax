@@ -970,6 +970,52 @@ void main() {
     expect(clipboard, ['Compact actions']);
   });
 
+  testWidgets('a code copy action stays above More and copies the code', (
+    tester,
+  ) async {
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: r'$code-event',
+          sender: '@a:s',
+          body: 'Your login code is 123456',
+          time: DateTime(2026),
+          mine: false,
+          content: const {
+            'msgtype': 'm.text',
+            'body': 'Your login code is 123456',
+          },
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts()));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Your login code is 123456'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Copy code'), findsOneWidget);
+    expect(find.text('Copy text'), findsOneWidget);
+    expect(find.text('Copy link to message'), findsNothing);
+    await tester.tap(find.text('Copy code'));
+    await tester.pumpAndSettle();
+    expect(clipboard, ['123456']);
+  });
+
   testWidgets('own local messages show Forward in compact actions', (
     tester,
   ) async {

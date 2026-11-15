@@ -20,7 +20,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' show DartPluginRegistrant;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 import 'package:http/http.dart' as http;
@@ -32,6 +33,7 @@ import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:vodozemac/vodozemac.dart' as vod;
 
 import '../../homeserver_security.dart';
+import '../../message_copy_targets.dart';
 import '../../push_notifications.dart';
 import 'matrix_push_projection.dart';
 import 'notification_media.dart';
@@ -493,18 +495,22 @@ Future<RichPushOutcome?> handleBackgroundPushEnvelope({
   return handler.handle(envelope);
 }
 
-// --- Quick reply from a notification action ------------------------------------
+// --- Notification actions ----------------------------------------------------
 
-/// flutter_local_notifications runs actions that do not open the app (the
-/// inline Reply) here, in a background isolate. The reply is handed to the
-/// main isolate, which sends it through the guarded send path. With no main
-/// isolate it is kept privately and sent when Parallax is next opened; it is
-/// never sent from a background isolate.
+Future<void> _copyNotificationValue(String value) =>
+    Clipboard.setData(ClipboardData(text: value));
+
+/// flutter_local_notifications runs actions that do not open the app here, in
+/// a background isolate. Copy actions use the platform clipboard directly.
+/// Inline replies are handed to the main isolate, which sends them through the
+/// guarded send path. With no main isolate a reply is kept privately and sent
+/// when Parallax is next opened; it is never sent from a background isolate.
 @pragma('vm:entry-point')
 Future<void> parallaxNotificationActionBackground(
   NotificationResponse response,
 ) async {
   try {
+    WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
     await handleBackgroundNotificationAction(response);
   } catch (_) {
@@ -518,7 +524,20 @@ Future<void> handleBackgroundNotificationAction(
   BackgroundPushEnvironment? environment,
   PushStateStore bindingStore = const SecurePushStateStore(),
   DateTime Function() clock = DateTime.now,
+  Future<void> Function(String)? clipboardWriter,
 }) async {
+  final copyKind = switch (response.actionId) {
+    pushCopyCodeActionId => MessageCopyKind.oneTimeCode,
+    pushCopyPhoneActionId => MessageCopyKind.phoneNumber,
+    _ => null,
+  };
+  if (copyKind != null) {
+    final data = decodeNotificationPayload(response.payload);
+    final value = data?['copy_value'];
+    if (value is! String || !validMessageCopyValue(copyKind, value)) return;
+    await (clipboardWriter ?? _copyNotificationValue)(value);
+    return;
+  }
   if (response.actionId != pushReplyActionId) return;
   final data = decodeNotificationPayload(response.payload);
   final text = response.input?.trim();

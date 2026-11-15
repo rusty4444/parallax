@@ -132,11 +132,48 @@ void main() {
         expect(payload['room_id'], '!room:example.org');
         expect(payload['event_id'], r'$event');
         expect(payload.containsKey('text'), isFalse);
+        expect(payload.containsKey('copy_value'), isFalse);
         // Grouped under a summary.
         final summary = surface.byId(notificationSummaryId)!;
         expect(android(summary).setAsGroupSummary, isTrue);
       },
     );
+
+    test('code and phone notifications copy without opening the app', () async {
+      final cases = [
+        (
+          text: 'Your login code is 123456',
+          action: pushCopyCodeActionId,
+          label: 'Copy code',
+          value: '123456',
+        ),
+        (
+          text: 'Call +61 400 123 456',
+          action: pushCopyPhoneActionId,
+          label: 'Copy phone number',
+          value: '+61 400 123 456',
+        ),
+      ];
+      for (final (index, item) in cases.indexed) {
+        final eventId = '\$copy-$index';
+        await handler(
+          (_, _) async => resolved(eventId: eventId, text: item.text),
+          useStore: false,
+        ).handle(envelope(eventId));
+        final notification = surface.byId(roomNotificationId(room))!;
+        final copy = android(
+          notification,
+        ).actions!.firstWhere((action) => action.id == item.action);
+        expect(copy.title, item.label);
+        expect(copy.showsUserInterface, isFalse);
+        expect(copy.cancelNotification, isFalse);
+        expect(android(notification).actions, hasLength(3));
+        final payload =
+            jsonDecode(notification.payload!) as Map<String, dynamic>;
+        expect(payload['copy_value'], item.value);
+        expect(payload.containsKey('text'), isFalse);
+      }
+    });
 
     test('direct chats use the sender as title and no group title', () async {
       await handler(
