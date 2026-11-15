@@ -569,17 +569,12 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
     for (final row in rows.take(limit)) {
       final room = client.getRoomById(row.roomId);
       if (room == null || room.membership != matrix.Membership.join) continue;
-      final name = room
-          .getState(matrix.EventTypes.RoomMember, row.sender)
-          ?.content['displayname'];
       hits.add(
         LocalMessageHit(
           id: row.eventId,
           roomId: row.roomId,
           roomName: room.parallaxName,
-          sender: name is String && name.trim().isNotEmpty
-              ? name.trim()
-              : row.sender,
+          sender: room.memberLabel(row.sender),
           body: row.body,
           time: row.time,
           threadRootId: row.threadRootId,

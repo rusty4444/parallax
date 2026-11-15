@@ -24,6 +24,17 @@ extension ParallaxRoomNames on Room {
       getState(EventTypes.RoomMember, userId)?.asUser(this) ??
       User(userId, room: this);
 
+  /// The sender label shown in message results, without starting a lookup.
+  /// Search responses contain only the Matrix ID; use the room's loaded
+  /// member state for its display name and retain the ID as a safe fallback.
+  String memberLabel(String userId) {
+    final name = getState(
+      EventTypes.RoomMember,
+      userId,
+    )?.content['displayname'];
+    return name is String && name.trim().isNotEmpty ? name.trim() : userId;
+  }
+
   /// Bots named by this room's bridge state, where that state is loaded.
   Set<String> get bridgeBotIds => {
     for (final type in bridgeStateTypes)

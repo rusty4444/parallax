@@ -60,6 +60,8 @@
 - Settings → Appearance → Home screen: choose the chat row style (Cards, List or Compact) and how much message preview to show (None, Small or Long).
 - Pulling down in a chat while **Load earlier messages** is visible loads older history automatically; tapping the button still works.
 - Back now dismisses conversation search and clears its query instead of closing the app. Pressing Back again retains the normal app-exit behaviour.
+- Message search results show sender display names instead of Matrix IDs, with the ID retained only when no usable display name is available.
+- Group avatar collages from joined members and full room state remain included, including bridged groups marked as direct chats and rooms with sparse membership summaries.
 
 ### Notifications without Google or a push service
 

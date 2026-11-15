@@ -2428,7 +2428,7 @@ class MatrixBackend extends ChatBackend
                       id: event.eventId,
                       roomId: roomId,
                       roomName: room.parallaxName,
-                      sender: event.senderId,
+                      sender: room.memberLabel(event.senderId),
                       body: body,
                       time: event.originServerTs,
                     ),
