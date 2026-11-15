@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
@@ -122,6 +123,32 @@ bool tapSpan(WidgetTester tester, String text) {
     if (tapped) return true;
   }
   return false;
+}
+
+Offset copySpanCenter(WidgetTester tester, String span) {
+  for (final element in find.byType(RichText).evaluate()) {
+    final rich = element.widget as RichText;
+    final plain = rich.text.toPlainText();
+    final start = plain.indexOf(span);
+    if (start < 0) continue;
+    var tappable = false;
+    rich.text.visitChildren((child) {
+      if (child is TextSpan &&
+          child.text == span &&
+          child.recognizer is TapGestureRecognizer) {
+        tappable = true;
+      }
+      return !tappable;
+    });
+    if (!tappable) continue;
+    final paragraph = element.renderObject! as RenderParagraph;
+    final boxes = paragraph.getBoxesForSelection(
+      TextSelection(baseOffset: start, extentOffset: start + span.length),
+    );
+    expect(boxes, isNotEmpty);
+    return paragraph.localToGlobal(boxes.first.toRect().center);
+  }
+  fail('No tappable span for $span');
 }
 
 bool hasLinkSpan(String text) {
@@ -653,7 +680,7 @@ void main() {
       );
     });
 
-    testWidgets('code and phone actions copy only the detected value', (
+    testWidgets('long-press copies the whole message, not only the code', (
       tester,
     ) async {
       final clipboard = <String>[];
@@ -685,24 +712,122 @@ void main() {
         ),
       );
 
-      Future<void> copy(String body, String label) async {
-        final actions = richTimelineMessageActions(
-          captured,
-          EntryHookContext(
-            backend: backend,
-            roomId: '!room:example.org',
-            palette: palette,
-            entry: message(r'$event', body: body, content: {'body': body}),
+      final actions = richTimelineMessageActions(
+        captured,
+        EntryHookContext(
+          backend: backend,
+          roomId: '!room:example.org',
+          palette: palette,
+          entry: message(
+            r'$event',
+            body: 'Your login code is 123456',
+            content: const {'body': 'Your login code is 123456'},
+          ),
+        ),
+      );
+      expect(actions.map((item) => item.label), isNot(contains('Copy code')));
+      expect(actions.first.label, 'Copy text');
+      await actions.first.onSelected(captured);
+      expect(clipboard, ['Your login code is 123456']);
+    });
+
+    testWidgets('tapping a code, phone number or IP address asks what to do', (
+      tester,
+    ) async {
+      final clipboard = <String>[];
+      final calls = <Uri>[];
+      final previousLaunch = richTimelineLaunchUrl;
+      richTimelineLaunchUrl = (uri) async {
+        calls.add(uri);
+        return true;
+      };
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        richTimelineLaunchUrl = previousLaunch;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+      });
+
+      Future<void> open(ChatEntry entry, String value) async {
+        await tester.pumpWidget(
+          host(
+            Builder(
+              builder: (context) => MessageContentView(
+                entry: entry,
+                style: const TextStyle(fontSize: 15),
+                palette: palette,
+                onCopyTarget: (target) =>
+                    showCopyTargetActions(context, target),
+              ),
+            ),
           ),
         );
-        expect(actions.first.label, label);
-        expect(actions[1].label, 'Copy text');
-        await actions.first.onSelected(captured);
+        await tester.tapAt(copySpanCenter(tester, value));
+        await tester.pumpAndSettle();
       }
 
-      await copy('Your login code is 123456', 'Copy code');
-      await copy('Call +61 400 123 456', 'Copy phone number');
-      expect(clipboard, ['123456', '+61 400 123 456']);
+      await open(
+        message(
+          r'$apple',
+          body:
+              'Your Apple Account code is:\n409675. Do not share it with anyone.',
+          formatted:
+              '<p>Your Apple Account code is:</p>'
+              '<p>409675. Do not share it with anyone.</p>',
+        ),
+        '409675',
+      );
+      final codeDialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(of: codeDialog, matching: find.text('Copy')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: codeDialog, matching: find.text('Call')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(of: codeDialog, matching: find.text('Copy')),
+      );
+      await tester.pumpAndSettle();
+
+      await open(
+        message(r'$phone', body: 'Call +61 400 123 456'),
+        '+61 400 123 456',
+      );
+      final phoneDialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(of: phoneDialog, matching: find.text('Call')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.descendant(of: phoneDialog, matching: find.text('Call')),
+      );
+      await tester.pumpAndSettle();
+
+      await open(message(r'$ip', body: 'Server 192.168.1.1'), '192.168.1.1');
+      final addressDialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(of: addressDialog, matching: find.text('Call')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(of: addressDialog, matching: find.text('Copy')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(clipboard, ['409675', '192.168.1.1']);
+      expect(calls, [Uri.parse('tel:+61400123456')]);
     });
   });
 

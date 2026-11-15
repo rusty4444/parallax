@@ -130,6 +130,21 @@ void main() {
     expect(resolved.line.imagePath, isNull);
   });
 
+  test('a mention in a notification uses the display name', () async {
+    final room = _groupRoom(client);
+    final resolved = await projectPushEvent(
+      event: _message(room, {
+        'msgtype': 'm.text',
+        'body': '@alice:example.org are you coming?',
+      }),
+      room: room,
+      myUserId: _me,
+      isDirect: false,
+      highlight: false,
+    );
+    expect(resolved.line.text, 'Alice are you coming?');
+  });
+
   test(
     'a sender not loaded yet is named from the server, not their ID',
     () async {

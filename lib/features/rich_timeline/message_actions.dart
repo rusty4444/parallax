@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../chat_backend.dart';
+import '../../message_copy_targets.dart';
 import 'permalinks.dart';
 
 /// Opens external links. Replaceable in tests.
@@ -85,6 +86,66 @@ Future<void> copyToClipboard(
   ScaffoldMessenger.maybeOf(
     context,
   )?.showSnackBar(SnackBar(content: Text(confirmation)));
+}
+
+String? _phoneCallTarget(String value) {
+  final cleaned = value.replaceAll(RegExp(r'[^\d+]'), '');
+  final number = cleaned.startsWith('+')
+      ? '+${cleaned.substring(1).replaceAll('+', '')}'
+      : cleaned.replaceAll('+', '');
+  if (number.replaceAll('+', '').length < 3) return null;
+  return 'tel:$number';
+}
+
+/// Popup for a tappable code, phone number or IP address.
+Future<void> showCopyTargetActions(
+  BuildContext context,
+  MessageCopyTarget target,
+) async {
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(switch (target.kind) {
+        MessageCopyKind.oneTimeCode => 'Code',
+        MessageCopyKind.phoneNumber => 'Phone number',
+        MessageCopyKind.ipAddress => 'IP address',
+      }),
+      content: Text(target.value),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, 'copy'),
+          child: const Text('Copy'),
+        ),
+        if (target.kind == MessageCopyKind.phoneNumber)
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'call'),
+            child: const Text('Call'),
+          ),
+      ],
+    ),
+  );
+  if (!context.mounted || action == null) return;
+  if (action == 'copy') {
+    await copyToClipboard(
+      context,
+      target.value,
+      confirmation: target.confirmation,
+    );
+    return;
+  }
+  final tel = _phoneCallTarget(target.value);
+  if (tel == null) return;
+  var opened = false;
+  try {
+    opened = await richTimelineLaunchUrl(Uri.parse(tel));
+  } catch (_) {
+    opened = false;
+  }
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('Couldn\u2019t start the call.')),
+    );
+  }
 }
 
 /// The JSON shown by "View source": identifiers plus the decrypted display

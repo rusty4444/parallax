@@ -35,6 +35,54 @@ extension ParallaxRoomNames on Room {
     return name is String && name.trim().isNotEmpty ? name.trim() : userId;
   }
 
+  static final _mentionCandidate = RegExp(
+    '(?<![A-Za-z0-9./])@[A-Za-z0-9._=+/-]+:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?',
+  );
+  static const _mentionTrailingChars = '.,;:!?';
+
+  /// Matrix user IDs in [text] that have no loaded member event.
+  /// Permalinks are ignored: their `@` is preceded by `/`.
+  List<String> mentionsMissingLocally(String text) {
+    final missing = <String>[];
+    for (final id in _mentionIds(text)) {
+      if (getState(EventTypes.RoomMember, id) == null &&
+          !missing.contains(id)) {
+        missing.add(id);
+      }
+    }
+    return missing;
+  }
+
+  /// Replaces bare Matrix user IDs in [text] with loaded display names.
+  /// An ID with no usable name is left as written.
+  String withMentionNames(String text) {
+    if (!text.contains('@')) return text;
+    return text.replaceAllMapped(_mentionCandidate, (match) {
+      final raw = match.group(0)!;
+      final id = _trimMention(raw);
+      if (!id.isValidMatrixIdStrict()) return raw;
+      final label = memberLabel(id);
+      if (label == id) return raw;
+      return '$label${raw.substring(id.length)}';
+    });
+  }
+
+  static String _trimMention(String raw) {
+    var end = raw.length;
+    while (end > 1 && _mentionTrailingChars.contains(raw[end - 1])) {
+      end--;
+    }
+    return raw.substring(0, end);
+  }
+
+  static Iterable<String> _mentionIds(String text) sync* {
+    if (!text.contains('@')) return;
+    for (final match in _mentionCandidate.allMatches(text)) {
+      final id = _trimMention(match.group(0)!);
+      if (id.isValidMatrixIdStrict()) yield id;
+    }
+  }
+
   /// Bots named by this room's bridge state, where that state is loaded.
   Set<String> get bridgeBotIds => {
     for (final type in bridgeStateTypes)

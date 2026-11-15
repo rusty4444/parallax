@@ -47,6 +47,39 @@ void main() {
     );
   });
 
+  test('a code on the next line is still a code', () {
+    const text =
+        'Your Apple Account code is:\n409675. Do not share it with anyone.';
+    expect(
+      messageCopyTarget(text),
+      const MessageCopyTarget(MessageCopyKind.oneTimeCode, '409675'),
+    );
+  });
+
+  test('a later fragment uses the whole message for code context', () {
+    const full =
+        'Your Apple Account code is:\n409675. Do not share it with anyone.';
+    const fragment = '409675. Do not share it with anyone.';
+    expect(messageCopyMatches(fragment), isEmpty);
+    expect(
+      messageCopyMatches(
+        fragment,
+        context: full,
+        contextOffset: full.indexOf(fragment),
+      ).map((match) => match.value),
+      ['409675'],
+    );
+  });
+
+  test('IP addresses are tappable values but not notification actions', () {
+    const text = 'Server 192.168.1.1';
+    expect(messageCopyTarget(text), isNull);
+    final matches = messageCopyMatches(text);
+    expect(matches, hasLength(1));
+    expect(matches.single.kind, MessageCopyKind.ipAddress);
+    expect(matches.single.value, '192.168.1.1');
+  });
+
   test('ordinary numbers, dates and addresses do not become copy actions', () {
     for (final text in [
       'Room 2026',

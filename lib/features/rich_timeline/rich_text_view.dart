@@ -7,6 +7,7 @@ import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../packs/pack_image.dart';
 import '../packs/pack_model.dart';
+import '../../message_copy_targets.dart';
 import 'linkify.dart';
 import 'permalinks.dart';
 
@@ -65,6 +66,7 @@ class MessageContentView extends StatefulWidget {
     this.resolveName,
     this.onLink,
     this.onPermalink,
+    this.onCopyTarget,
     this.backend,
   });
 
@@ -75,6 +77,7 @@ class MessageContentView extends StatefulWidget {
   final NameResolver? resolveName;
   final LinkHandler? onLink;
   final PermalinkHandler? onPermalink;
+  final void Function(MessageCopyTarget target)? onCopyTarget;
 
   /// Loads custom emoji (`<img data-mx-emoticon>`) images. Defaults to the
   /// signed-in backend known to the packs module; without one, emoticons
@@ -187,6 +190,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       resolveName: widget.resolveName,
       onLink: (uri, text) => widget.onLink?.call(uri, text),
       onPermalink: (link) => widget.onPermalink?.call(link),
+      onCopyTarget: widget.onCopyTarget,
       revealed: _revealed,
       reveal: _reveal,
       backend: widget.backend,
@@ -306,6 +310,7 @@ class _Renderer {
     required this.resolveName,
     required this.onLink,
     required this.onPermalink,
+    required this.onCopyTarget,
     required this.revealed,
     required this.reveal,
     this.backend,
@@ -319,6 +324,8 @@ class _Renderer {
   final NameResolver? resolveName;
   final LinkHandler onLink;
   final PermalinkHandler onPermalink;
+  final void Function(MessageCopyTarget target)? onCopyTarget;
+  String messageContext = '';
   final Set<int> revealed;
   final void Function(int index) reveal;
   final ChatBackend? backend;
@@ -342,6 +349,7 @@ class _Renderer {
   );
 
   Widget renderPlain(String body, {List<InlineSpan> leading = const []}) {
+    messageContext = body;
     final block = _BlockBuilder(this);
     for (final span in leading) {
       block.addSpan(span);
@@ -357,6 +365,7 @@ class _Renderer {
     } catch (_) {
       return null;
     }
+    messageContext = fragment.text ?? '';
     final fontSize = base.fontSize ?? 15;
     _emoticonSize = leading.isEmpty && _onlyEmoticons(fragment)
         ? (fontSize * 2.4).clamp(28.0, 48.0)
@@ -617,13 +626,7 @@ class _Renderer {
     for (final token in tokenizeText(text)) {
       switch (token.kind) {
         case TextTokenKind.text:
-          spans.add(
-            TextSpan(
-              text: token.text,
-              style: ctx.style,
-              recognizer: ctx.recognizer,
-            ),
-          );
+          spans.addAll(_plainSpans(token.text, ctx));
         case TextTokenKind.link:
           final uri = token.href!;
           spans.add(
@@ -663,6 +666,65 @@ class _Renderer {
       }
     }
     return spans;
+  }
+
+  List<InlineSpan> _plainSpans(String text, _Ctx ctx) {
+    final matches = _copyMatches(text);
+    if (matches.isEmpty) {
+      return [
+        TextSpan(text: text, style: ctx.style, recognizer: ctx.recognizer),
+      ];
+    }
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    for (final match in matches) {
+      if (match.start < cursor || match.end > text.length) continue;
+      if (match.start > cursor) {
+        spans.add(
+          TextSpan(
+            text: text.substring(cursor, match.start),
+            style: ctx.style,
+            recognizer: ctx.recognizer,
+          ),
+        );
+      }
+      final target = match.target;
+      spans.add(
+        TextSpan(
+          text: text.substring(match.start, match.end),
+          style: ctx.style.merge(
+            TextStyle(
+              color: _linkColour,
+              decoration: TextDecoration.underline,
+              decorationColor: _linkColour,
+            ),
+          ),
+          recognizer: tap(() => onCopyTarget?.call(target)),
+        ),
+      );
+      cursor = match.end;
+    }
+    if (cursor < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(cursor),
+          style: ctx.style,
+          recognizer: ctx.recognizer,
+        ),
+      );
+    }
+    return spans;
+  }
+
+  List<MessageCopyMatch> _copyMatches(String text) {
+    if (onCopyTarget == null || text.isEmpty) return const [];
+    final context = messageContext;
+    if (context.isEmpty || context == text) return messageCopyMatches(text);
+    return messageCopyMatches(
+      text,
+      context: context,
+      contextOffset: context.indexOf(text),
+    );
   }
 
   InlineSpan _pill(MatrixPermalink link, String text) {

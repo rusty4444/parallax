@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 
 import '../../chat_backend.dart';
 import '../../hooks/hook_types.dart';
-import '../../message_copy_targets.dart';
 import '../platform/matrix_link_opener.dart';
 import 'mention_suggestions.dart';
 import 'message_actions.dart';
@@ -36,6 +35,9 @@ Widget buildMessageText(
     },
     onPermalink: (link) {
       if (context.mounted) openMatrixPermalink(context, ctx, link);
+    },
+    onCopyTarget: (target) {
+      if (context.mounted) showCopyTargetActions(context, target);
     },
   );
 }
@@ -81,21 +83,7 @@ List<MessageActionItem> richTimelineMessageActions(
 ) {
   final entry = ctx.entry;
   if (entry.redacted || entry.kind == EntryKind.redacted) return const [];
-  final copyTarget = canCopyText(entry) ? messageCopyTarget(entry.body) : null;
   return [
-    if (copyTarget != null)
-      MessageActionItem(
-        id: 'rich-timeline-copy-target',
-        icon: copyTarget.kind == MessageCopyKind.oneTimeCode
-            ? Icons.password_rounded
-            : Icons.phone_rounded,
-        label: copyTarget.label,
-        onSelected: (context) => copyToClipboard(
-          context,
-          copyTarget.value,
-          confirmation: copyTarget.confirmation,
-        ),
-      ),
     if (canCopyText(entry))
       MessageActionItem(
         id: 'rich-timeline-copy-text',

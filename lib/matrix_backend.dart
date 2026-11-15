@@ -2429,7 +2429,7 @@ class MatrixBackend extends ChatBackend
                       roomId: roomId,
                       roomName: room.parallaxName,
                       sender: room.memberLabel(event.senderId),
-                      body: body,
+                      body: room.withMentionNames(body),
                       time: event.originServerTs,
                     ),
       ]),
@@ -3964,7 +3964,24 @@ class MatrixBackend extends ChatBackend
         }
       }
     }
-    _needMembers(room, [...heroIds.take(4), ?unresolvedSender]);
+    final messagePreview =
+        !isDeletion &&
+            event?.type == matrix.EventTypes.Message &&
+            event?.messageType != matrix.MessageTypes.Image &&
+            event?.messageType != matrix.MessageTypes.Video &&
+            event?.messageType != matrix.MessageTypes.File &&
+            event?.messageType != matrix.MessageTypes.Audio
+        ? visibleMessageBody(
+            event!.text,
+            isReply: event.inReplyToEventId(includingFallback: false) != null,
+          )
+        : null;
+    _needMembers(room, [
+      ...heroIds.take(4),
+      ?unresolvedSender,
+      if (messagePreview != null)
+        ...room.mentionsMissingLocally(messagePreview),
+    ]);
     final mediaKind = !isDeletion && event?.type == matrix.EventTypes.Message
         ? switch (event!.messageType) {
             matrix.MessageTypes.Image => 'photo',
@@ -4002,13 +4019,10 @@ class MatrixBackend extends ChatBackend
                     _ => 'File',
                   }
                 : '$previewSender sent a $mediaKind'
-          : event?.type == matrix.EventTypes.Message
+          : messagePreview != null
           // SDK body substitutes an "Unknown message format" error when an
           // uncaptioned media event has no body; text is the raw body or ''.
-          ? visibleMessageBody(
-              event!.text,
-              isReply: event.inReplyToEventId(includingFallback: false) != null,
-            )
+          ? room.withMentionNames(messagePreview)
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
           : '',

@@ -1,5 +1,5 @@
 /// The useful part of a message that can be copied without its surrounding text.
-enum MessageCopyKind { oneTimeCode, phoneNumber }
+enum MessageCopyKind { oneTimeCode, phoneNumber, ipAddress }
 
 class MessageCopyTarget {
   const MessageCopyTarget(this.kind, this.value);
@@ -10,11 +10,13 @@ class MessageCopyTarget {
   String get label => switch (kind) {
     MessageCopyKind.oneTimeCode => 'Copy code',
     MessageCopyKind.phoneNumber => 'Copy phone number',
+    MessageCopyKind.ipAddress => 'Copy IP address',
   };
 
   String get confirmation => switch (kind) {
     MessageCopyKind.oneTimeCode => 'Code copied',
     MessageCopyKind.phoneNumber => 'Phone number copied',
+    MessageCopyKind.ipAddress => 'IP address copied',
   };
 
   @override
@@ -25,8 +27,31 @@ class MessageCopyTarget {
   int get hashCode => Object.hash(kind, value);
 }
 
+/// One tappable value inside a message, with its range in that text.
+class MessageCopyMatch {
+  const MessageCopyMatch(this.kind, this.value, this.start, this.end);
+
+  final MessageCopyKind kind;
+  final String value;
+  final int start;
+  final int end;
+
+  MessageCopyTarget get target => MessageCopyTarget(kind, value);
+
+  @override
+  bool operator ==(Object other) =>
+      other is MessageCopyMatch &&
+      other.kind == kind &&
+      other.value == value &&
+      other.start == start &&
+      other.end == end;
+
+  @override
+  int get hashCode => Object.hash(kind, value, start, end);
+}
+
 final _codeContext = RegExp(
-  r'\b(?:otp|one[- ]time(?:\s+(?:code|pin|password))?|passcode|verification(?:\s+code)?|security\s+code|log[ -]?in\s+code|auth(?:entication)?\s+code|pin)\b',
+  r'\b(?:otp|one[- ]time(?:\s+(?:code|pin|password))?|passcode|verification(?:\s+code)?|security\s+code|log[ -]?in\s+code|auth(?:entication)?\s+code|pin|code)\b',
   caseSensitive: false,
 );
 final _phoneContext = RegExp(
@@ -38,6 +63,9 @@ final _numericCandidate = RegExp(
 );
 final _alphaNumericCandidate = RegExp(
   r'(?<![A-Za-z0-9])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?![A-Za-z0-9])',
+);
+final _ipAddressToken = RegExp(
+  r'(?<![0-9.])(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?![0-9.])',
 );
 final _letters = RegExp(r'[A-Za-z]');
 final _digits = RegExp(r'[0-9]');
@@ -76,20 +104,52 @@ bool validMessageCopyValue(MessageCopyKind kind, String value) {
           _notNetworkOrDate(value) &&
           value.replaceAll(_nonDigits, '').length >= 7 &&
           value.replaceAll(_nonDigits, '').length <= 15,
+    MessageCopyKind.ipAddress => _ipAddressToken.hasMatch(value),
   };
 }
 
-/// Finds the most useful exact value to copy from [text].
+/// Every code, phone number and IP address in [text].
 ///
-/// Numeric codes need code-related wording unless the whole message is the
-/// code. Alphanumeric codes follow the same rule. Phone numbers need a phone
-/// cue, international/grouped formatting, or enough digits to be unambiguous.
-/// Dates, IP addresses and long card-like numbers are deliberately excluded.
-MessageCopyTarget? messageCopyTarget(String text) {
-  if (text.trim().isEmpty) return null;
-  final standAlone = _standAlone(text);
+/// [context] is the whole message when [text] is only one piece of it, such as
+/// an HTML text node. [contextOffset] is where [text] begins in [context].
+/// Pass `-1` when the piece is not a contiguous slice and each value should be
+/// found in [context] on its own.
+List<MessageCopyMatch> messageCopyMatches(
+  String text, {
+  String? context,
+  int contextOffset = 0,
+}) {
+  if (text.isEmpty) return const [];
+  final source = context == null || context == text ? text : context;
+  final anchored = source != text && contextOffset >= 0;
+  String around(int start, int end) {
+    if (source == text) return _nearby(text, start, end);
+    if (anchored) {
+      return _nearby(source, contextOffset + start, contextOffset + end);
+    }
+    final value = text.substring(start, end);
+    final found = source.indexOf(value);
+    if (found < 0) return _nearby(text, start, end);
+    return _nearby(source, found, found + value.length);
+  }
 
+  final taken = <(int, int)>[];
+  bool free(int start, int end) =>
+      taken.every((range) => end <= range.$1 || start >= range.$2);
+
+  final matches = <MessageCopyMatch>[];
+  void add(MessageCopyKind kind, String value, int start, int end) {
+    matches.add(MessageCopyMatch(kind, value, start, end));
+    taken.add((start, end));
+  }
+
+  for (final match in _ipAddressToken.allMatches(text)) {
+    add(MessageCopyKind.ipAddress, match.group(0)!, match.start, match.end);
+  }
+
+  final standAlone = _standAlone(source);
   for (final match in _alphaNumericCandidate.allMatches(text)) {
+    if (!free(match.start, match.end)) continue;
     final value = match.group(0)!;
     if (value.length < 4 ||
         value.length > 12 ||
@@ -97,34 +157,39 @@ MessageCopyTarget? messageCopyTarget(String text) {
         !_digits.hasMatch(value)) {
       continue;
     }
-    final nearby = _nearby(text, match.start, match.end);
-    if (_codeContext.hasMatch(nearby) || value == standAlone) {
-      return MessageCopyTarget(MessageCopyKind.oneTimeCode, value);
+    if (_codeContext.hasMatch(around(match.start, match.end)) ||
+        (source == text && value == standAlone)) {
+      add(MessageCopyKind.oneTimeCode, value, match.start, match.end);
     }
   }
 
-  MessageCopyTarget? phone;
   for (final match in _numericCandidate.allMatches(text)) {
+    if (!free(match.start, match.end)) continue;
     final value = match.group(0)!;
     if (!_notNetworkOrDate(value)) continue;
     final digits = value.replaceAll(_nonDigits, '');
     if (digits.length < 4 || digits.length > 15) continue;
-    final nearby = _nearby(text, match.start, match.end);
+    final nearby = around(match.start, match.end);
     final codeContext = _codeContext.hasMatch(nearby);
     final phoneContext = _phoneContext.hasMatch(nearby);
 
     if (codeContext && digits.length <= 10) {
-      return MessageCopyTarget(MessageCopyKind.oneTimeCode, value);
-    }
-    if (phoneContext && digits.length >= 7) {
-      phone ??= MessageCopyTarget(MessageCopyKind.phoneNumber, value);
+      add(MessageCopyKind.oneTimeCode, value, match.start, match.end);
       continue;
     }
-    if (value == standAlone) {
-      if (digits.length <= 8) {
-        return MessageCopyTarget(MessageCopyKind.oneTimeCode, value);
-      }
-      phone ??= MessageCopyTarget(MessageCopyKind.phoneNumber, value);
+    if (phoneContext && digits.length >= 7) {
+      add(MessageCopyKind.phoneNumber, value, match.start, match.end);
+      continue;
+    }
+    if (source == text && value == standAlone) {
+      add(
+        digits.length <= 8
+            ? MessageCopyKind.oneTimeCode
+            : MessageCopyKind.phoneNumber,
+        value,
+        match.start,
+        match.end,
+      );
       continue;
     }
     final phoneShaped =
@@ -132,7 +197,27 @@ MessageCopyTarget? messageCopyTarget(String text) {
         value.contains(RegExp(r'[\s().-]')) ||
         digits.length >= 9;
     if (phoneShaped && digits.length >= 7) {
-      phone ??= MessageCopyTarget(MessageCopyKind.phoneNumber, value);
+      add(MessageCopyKind.phoneNumber, value, match.start, match.end);
+    }
+  }
+
+  matches.sort((a, b) => a.start.compareTo(b.start));
+  return matches;
+}
+
+/// The single value a notification should offer. A code wins over a phone
+/// number. IP addresses stay tappable in the message and are not notification
+/// actions.
+MessageCopyTarget? messageCopyTarget(String text) {
+  MessageCopyTarget? phone;
+  for (final match in messageCopyMatches(text)) {
+    switch (match.kind) {
+      case MessageCopyKind.oneTimeCode:
+        return match.target;
+      case MessageCopyKind.phoneNumber:
+        phone ??= match.target;
+      case MessageCopyKind.ipAddress:
+        break;
     }
   }
   return phone;

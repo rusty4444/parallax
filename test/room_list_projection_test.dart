@@ -273,6 +273,48 @@ void main() {
     expect(projected.preview, 'Literally what Hayden says to me everytime');
   });
 
+  test('home previews use display names for mentions', () async {
+    final r = client.getRoomById('!c:example.org')!;
+    r.setState(
+      matrix.Event(
+        type: matrix.EventTypes.RoomMember,
+        stateKey: '@hayander:hayander.house',
+        senderId: '@hayander:hayander.house',
+        content: const {'membership': 'join', 'displayname': 'Hayander'},
+        room: r,
+        eventId: r'$hayander',
+        originServerTs: DateTime(2026, 11, 12),
+      ),
+    );
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@me:example.org',
+      content: const {
+        'msgtype': 'm.text',
+        'body':
+            '@hayander:hayander.house how you going? '
+            'See https://matrix.to/#/@hayander:hayander.house later.',
+      },
+      room: r,
+      eventId: r'$mention',
+      originServerTs: DateTime(2026, 11, 14),
+    );
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: 'mention',
+        rooms: matrix.RoomsUpdate(
+          join: {'!c:example.org': matrix.JoinedRoomUpdate()},
+        ),
+      ),
+    );
+    await settle();
+    expect(
+      backend.rooms.firstWhere((room) => room.id == '!c:example.org').preview,
+      'Hayander how you going? '
+      'See https://matrix.to/#/@hayander:hayander.house later.',
+    );
+  });
+
   test('home previews name the sender who deleted a message', () async {
     final r = client.getRoomById('!b:example.org')!;
 

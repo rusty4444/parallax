@@ -38,7 +38,7 @@
 
 ### Copy codes and phone numbers
 
-- Long-press a text message to copy just its one-time code or phone number; **Copy text** remains available for the whole message. This also works for thread replies.
+- A one-time code, phone number or IP address in a message is tappable. The popup offers **Copy**, and a phone number also offers **Call**. **Copy text** in the long-press menu still copies the whole message. This works in the timeline and in threads.
 - Rich Android notifications show **Copy code** or **Copy phone number** when the latest message contains one. The action copies the exact value without opening Parallax or dismissing the notification. Generic alerts with message content hidden are unchanged.
 
 ### Thumbnails saved on the device
@@ -66,6 +66,7 @@
 - Pulling down in a chat while **Load earlier messages** is visible loads older history automatically; tapping the button still works.
 - Back now dismisses conversation search and clears its query instead of closing the app. Pressing Back again retains the normal app-exit behaviour.
 - Message search results show sender display names instead of Matrix IDs, with the ID retained only when no usable display name is available.
+- Mentions in the chat list, notifications and search snippets use the person's display name. The Matrix ID stays only when no usable display name is loaded.
 - Group avatar collages from joined members and full room state remain included, including bridged groups marked as direct chats and rooms with sparse membership summaries.
 
 ### Notifications without Google or a push service

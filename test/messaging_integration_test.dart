@@ -26,8 +26,37 @@ import 'package:parallax/thread_screen.dart';
 import 'package:parallax/timeline/message_bubble.dart';
 import 'package:parallax/user_directory_screen.dart';
 
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
+
 import 'widget_test.dart' show FakeBackend, FakeBackgroundStore;
 import 'home_options.dart';
+
+Offset copySpanCenter(WidgetTester tester, String span) {
+  for (final element in find.byType(RichText).evaluate()) {
+    final rich = element.widget as RichText;
+    final plain = rich.text.toPlainText();
+    final start = plain.indexOf(span);
+    if (start < 0) continue;
+    var tappable = false;
+    rich.text.visitChildren((child) {
+      if (child is TextSpan &&
+          child.text == span &&
+          child.recognizer is TapGestureRecognizer) {
+        tappable = true;
+      }
+      return !tappable;
+    });
+    if (!tappable) continue;
+    final paragraph = element.renderObject! as RenderParagraph;
+    final boxes = paragraph.getBoxesForSelection(
+      TextSelection(baseOffset: start, extentOffset: start + span.length),
+    );
+    expect(boxes, isNotEmpty);
+    return paragraph.localToGlobal(boxes.first.toRect().center);
+  }
+  fail('No tappable span for $span');
+}
 
 const roomId = '!r:example.org';
 
@@ -1007,11 +1036,26 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Your login code is 123456'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Copy code'), findsOneWidget);
+    expect(find.text('Copy code'), findsNothing);
     expect(find.text('Copy text'), findsOneWidget);
     expect(find.text('Copy link to message'), findsNothing);
-    await tester.tap(find.text('Copy code'));
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(copySpanCenter(tester, '123456'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    final dialog = find.byType(AlertDialog);
+    expect(
+      find.descendant(of: dialog, matching: find.text('Copy')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.text('Call')),
+      findsNothing,
+    );
+    await tester.tap(find.descendant(of: dialog, matching: find.text('Copy')));
     await tester.pumpAndSettle();
     expect(clipboard, ['123456']);
   });

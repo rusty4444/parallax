@@ -129,6 +129,22 @@ Future<ResolvedPushEvent> projectPushEvent({
     now: now,
   );
   if (description == null) throw const UndescribablePushEvent();
+  final missingMentions = room.mentionsMissingLocally(description.text);
+  if (missingMentions.isNotEmpty) {
+    try {
+      await room
+          .loadMissingMembers(missingMentions)
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    try {
+      await Future.wait([
+        for (final id in missingMentions)
+          memberRefreshes?.refresh(room, id) ??
+              room.refreshMemberFromServer(id),
+      ]).timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+  final text = room.withMentionNames(description.text);
   String? avatarPath;
   String? roomAvatarPath;
   String? imagePath;
@@ -155,7 +171,7 @@ Future<ResolvedPushEvent> projectPushEvent({
       eventId: event.eventId,
       senderId: event.senderId,
       senderName: senderName,
-      text: description.text,
+      text: text,
       timestamp: event.originServerTs,
       highlight: highlight,
       senderAvatarPath: avatarPath,

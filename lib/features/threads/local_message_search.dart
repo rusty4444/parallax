@@ -575,7 +575,7 @@ class MatrixMessageSearchIndex implements LocalMessageSearch {
           roomId: row.roomId,
           roomName: room.parallaxName,
           sender: room.memberLabel(row.sender),
-          body: row.body,
+          body: room.withMentionNames(row.body),
           time: row.time,
           threadRootId: row.threadRootId,
         ),

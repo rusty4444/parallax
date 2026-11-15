@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
@@ -15,6 +17,33 @@ import 'package:parallax/messaging_features.dart';
 import 'package:parallax/thread_screen.dart';
 
 const _roomId = '!room:example.org';
+
+Offset _copySpanCenter(WidgetTester tester, String span) {
+  for (final element in find.byType(RichText).evaluate()) {
+    final rich = element.widget as RichText;
+    final plain = rich.text.toPlainText();
+    final start = plain.indexOf(span);
+    if (start < 0) continue;
+    var tappable = false;
+    rich.text.visitChildren((child) {
+      if (child is TextSpan &&
+          child.text == span &&
+          child.recognizer is TapGestureRecognizer) {
+        tappable = true;
+      }
+      return !tappable;
+    });
+    if (!tappable) continue;
+    final paragraph = element.renderObject! as RenderParagraph;
+    final boxes = paragraph.getBoxesForSelection(
+      TextSelection(baseOffset: start, extentOffset: start + span.length),
+    );
+    expect(boxes, isNotEmpty);
+    return paragraph.localToGlobal(boxes.first.toRect().center);
+  }
+  fail('No tappable span for $span');
+}
+
 final _palette = paletteFor(VisualTheme.parallax);
 
 class _Backend extends ChatBackend
@@ -422,9 +451,16 @@ void main() {
       );
       await tester.pump();
 
-      await tester.longPress(find.text('Call +61 400 123 456'));
+      await tester.tapAt(_copySpanCenter(tester, '+61 400 123 456'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Copy phone number'));
+      final dialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(of: dialog, matching: find.text('Call')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.descendant(of: dialog, matching: find.text('Copy')),
+      );
       await tester.pumpAndSettle();
       expect(clipboard, ['+61 400 123 456']);
     });
