@@ -505,6 +505,10 @@ void main() {
     await tester.tap(find.text('Reply'));
     await tester.pumpAndSettle();
     expect(find.text('Replying to Meta: First message'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+      isTrue,
+    );
     expect(find.textContaining('Replying to @meta_'), findsNothing);
     await tester.enterText(find.byType(TextField), 'My reply');
     expect(backend.typingStates.last, isTrue);

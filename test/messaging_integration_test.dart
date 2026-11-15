@@ -417,6 +417,13 @@ void main() {
       );
       expect(find.text('Swipe reply target'), findsOneWidget);
       expect(find.text('Forward'), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(find.byType(TextField).last)
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+      );
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     },
@@ -558,6 +565,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Reply'));
       await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byType(TextField).last)
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+      );
       await tester.enterText(find.byType(TextField).last, 'Reply body');
       final send = tester
           .widget<RichMessageComposer>(find.byType(RichMessageComposer))

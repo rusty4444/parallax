@@ -54,6 +54,7 @@ class RichMessageComposer extends StatefulWidget {
     this.contextLabel,
     this.sendOptions,
     this.suggestionSources,
+    this.focusRequest = 0,
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
@@ -110,6 +111,10 @@ class RichMessageComposer extends StatefulWidget {
   /// built-in `/` command source is always offered at the start of a new
   /// message.
   final List<ComposerSuggestionSource>? suggestionSources;
+
+  /// Bumped when a reply starts. The caret moves into this field after the
+  /// current frame, so a closing message menu cannot steal it back.
+  final int focusRequest;
 
   @override
   State<RichMessageComposer> createState() => _RichMessageComposerState();
@@ -205,6 +210,17 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       _suggestionQuery = null;
       _suggestions = const [];
     }
+    if (widget.focusRequest != oldWidget.focusRequest) {
+      _scheduleComposeFocus();
+    }
+  }
+
+  /// One frame later, so a route that is still restoring focus (the message
+  /// menu) cannot put the caret back on the timeline.
+  void _scheduleComposeFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_alive) _focus.requestFocus();
+    });
   }
 
   /// Caller edits (clear after send, draft restore, emoji) → the field.

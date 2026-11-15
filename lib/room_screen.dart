@@ -157,6 +157,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   bool _typing = false;
   ChatEntry? _replyingTo;
   ChatEntry? _editing;
+  int _composerFocusRequest = 0;
+  final _legacyComposerFocus = FocusNode(debugLabel: 'RoomComposer');
   late final _backgroundStore = widget.backgroundStore ?? RoomBackgroundStore();
   late final _bubbleStore =
       widget.bubbleColourStore ?? RoomBubbleColourStore.shared;
@@ -497,6 +499,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     _owner.release();
     _draft.removeListener(_draftChanged);
     _draft.dispose();
+    _legacyComposerFocus.dispose();
     super.dispose();
   }
 
@@ -727,6 +730,14 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       if (_editing != null) _setDraft(_normalDraft);
       _replyingTo = entry;
       _editing = null;
+      if (_features != null) _composerFocusRequest++;
+    });
+    if (_features == null) _scheduleLegacyComposerFocus();
+  }
+
+  void _scheduleLegacyComposerFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _owner.isCurrent) _legacyComposerFocus.requestFocus();
     });
   }
 
@@ -1650,6 +1661,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         onCancel: _replyingTo != null || _editing != null
                             ? _cancelComposerContext
                             : null,
+                        focusRequest: _composerFocusRequest,
                       ),
                     ] else
                       Container(
@@ -1765,6 +1777,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                     ),
                                   TextField(
                                     controller: _draft,
+                                    focusNode: _legacyComposerFocus,
                                     onChanged: _onDraftChanged,
                                     minLines: 1,
                                     maxLines: 5,

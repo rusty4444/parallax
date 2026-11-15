@@ -389,6 +389,10 @@ void main() {
       await tester.tap(find.text('Quote in reply'));
       await tester.pumpAndSettle();
       expect(find.text('Replying to Alice: first reply'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+        isTrue,
+      );
       await tester.enterText(find.byType(TextField), 'agreed');
       await tester.tap(find.byTooltip('Send reply'));
       await tester.pump();

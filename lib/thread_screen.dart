@@ -38,6 +38,7 @@ class ThreadScreen extends StatefulWidget {
 
 class _ThreadScreenState extends State<ThreadScreen> {
   final _draft = TextEditingController();
+  final _composeFocus = FocusNode(debugLabel: 'ThreadComposer');
   StreamSubscription<String>? _activity;
   int _generation = 0;
   int _sendGeneration = 0;
@@ -299,6 +300,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (!mounted || !_ownerCurrent || choice == null) return;
     if (choice == 'reply') {
       setState(() => _replyingTo = entry);
+      _scheduleComposeFocus();
     } else if (choice == 'copy') {
       await Clipboard.setData(ClipboardData(text: entry.body));
     }
@@ -311,7 +313,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
     _unbind(widget.backend);
     _draft.removeListener(_draftChanged);
     _draft.dispose();
+    _composeFocus.dispose();
     super.dispose();
+  }
+
+  void _scheduleComposeFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _ownerCurrent) _composeFocus.requestFocus();
+    });
   }
 
   ChatRoom? get _room {
@@ -702,6 +711,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
               Expanded(
                 child: TextField(
                   controller: _draft,
+                  focusNode: _composeFocus,
                   minLines: 1,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
