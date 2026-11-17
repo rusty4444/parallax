@@ -133,6 +133,14 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <!-- PDF previews: the system PDF library runs on files from other
+             people, so it gets a process of its own with no permissions and
+             no access to the app's data (see PdfRenderService.kt). -->
+        <service
+            android:name=".PdfRenderService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":pdf" />
         <!-- Background connection: keeps the shared Flutter engine (and so the
              Matrix client) syncing while Parallax is closed. -->
         <service

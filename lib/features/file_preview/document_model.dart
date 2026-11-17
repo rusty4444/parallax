@@ -22,6 +22,10 @@ enum DocumentFormat {
 
   /// PowerPoint (.pptx).
   slides,
+
+  /// PDF. Drawn page by page by the platform (see pdf_tools.dart), not
+  /// parsed into a [DocumentPreview].
+  pdf,
 }
 
 const _textExtensions = {
@@ -65,6 +69,7 @@ DocumentFormat? documentFormatFor(String name, String? mimeType) {
     'docx' || 'docm' || 'dotx' => DocumentFormat.word,
     'xlsx' || 'xlsm' || 'xltx' => DocumentFormat.spreadsheet,
     'pptx' || 'ppsx' || 'potx' => DocumentFormat.slides,
+    'pdf' => DocumentFormat.pdf,
     _ => _textExtensions.contains(extension) ? DocumentFormat.text : null,
   };
   if (byExtension != null) return byExtension;
@@ -81,6 +86,7 @@ DocumentFormat? documentFormatFor(String name, String? mimeType) {
   if (mime.endsWith('presentationml.presentation')) {
     return DocumentFormat.slides;
   }
+  if (mime == 'application/pdf') return DocumentFormat.pdf;
   if (mime.startsWith('text/') || _textMimeTypes.contains(mime)) {
     return DocumentFormat.text;
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -9,9 +10,10 @@ import '../media/media_content.dart';
 import 'document_loader.dart';
 import 'document_model.dart';
 import 'document_view.dart';
+import 'pdf_thumbnails.dart';
 
-/// The first lines (or first cells) of a document, shown under its file
-/// card in the timeline.
+/// The first lines (or first cells) of a document, or the top of a PDF's
+/// first page, shown under its file card in the timeline.
 ///
 /// Loads on its own only where media previews do (Settings → Media → In
 /// chats), for files up to [DocumentPreviews.inlineMaxBytes] in a format
@@ -36,7 +38,24 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
   bool _loading = false;
   int _generation = 0;
 
+  /// This widget's handle on a PDF's thumbnail.
+  ui.Image? _page;
+
   DocumentPreviews get _previews => DocumentPreviews.of(widget.ctx.backend);
+  PdfThumbnails get _thumbnails => PdfThumbnails.of(widget.ctx.backend);
+
+  bool get _pdf {
+    final info = MediaInfo.fromEntry(widget.ctx.entry);
+    return documentFormatFor(info.name, info.mimeType) == DocumentFormat.pdf;
+  }
+
+  /// Takes the thumbnail drawn for this file, if there is one.
+  void _adopt() {
+    final ctx = widget.ctx;
+    final page = _thumbnails.imageFor(ctx.roomId, ctx.entry.id);
+    _page?.dispose();
+    _page = page;
+  }
 
   /// Whether this file gets an inline preview at all. Looked up when the
   /// widget or the settings change, not on every build: the auto-load rule
@@ -74,6 +93,8 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
       _generation++;
       _started = false;
       _loading = false;
+      _page?.dispose();
+      _page = null;
     }
     _eligible = _checkEligible();
     _start();
@@ -82,6 +103,8 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
   @override
   void dispose() {
     _generation++;
+    _page?.dispose();
+    _page = null;
     _owner.release();
     super.dispose();
   }
@@ -89,27 +112,44 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
   void _start() {
     if (_started || !_eligible) return;
     final ctx = widget.ctx;
-    if (_previews.hasInline(ctx.roomId, ctx.entry.id)) return;
+    final Future<void> Function() load;
+    if (_pdf) {
+      if (_thumbnails.has(ctx.roomId, ctx.entry.id)) {
+        if (_page == null) _adopt();
+        return;
+      }
+      final ratio = MediaQuery.devicePixelRatioOf(context);
+      load = () => _thumbnails.load(
+        ctx.roomId,
+        ctx.entry.id,
+        width: (InlineDocumentPreview.width * ratio).round(),
+        height: (InlineDocumentPreview.height * ratio).round(),
+      );
+    } else {
+      if (_previews.hasInline(ctx.roomId, ctx.entry.id)) return;
+      final info = MediaInfo.fromEntry(ctx.entry);
+      load = () => _previews.inline(
+        ctx.roomId,
+        ctx.entry.id,
+        name: info.name,
+        mimeType: info.mimeType,
+      );
+    }
     _started = true;
     _loading = true;
     final generation = ++_generation;
     final owner = _owner;
-    final info = MediaInfo.fromEntry(ctx.entry);
+    final pdf = _pdf;
     unawaited(
-      _previews
-          .inline(
-            ctx.roomId,
-            ctx.entry.id,
-            name: info.name,
-            mimeType: info.mimeType,
-          )
-          .catchError((Object _) => null)
-          .then((_) {
-            if (!mounted || generation != _generation || !owner.isCurrent) {
-              return;
-            }
-            setState(() => _loading = false);
-          }),
+      load().catchError((Object _) => null).then((_) {
+        if (!mounted || generation != _generation || !owner.isCurrent) {
+          return;
+        }
+        setState(() {
+          _loading = false;
+          if (pdf) _adopt();
+        });
+      }),
     );
   }
 
@@ -117,13 +157,17 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
   Widget build(BuildContext context) {
     final ctx = widget.ctx;
     if (!_owner.isCurrent || !_eligible) return const SizedBox.shrink();
-    final preview = _previews.inlineOrNull(ctx.roomId, ctx.entry.id);
-    if (preview == null && !_loading) return const SizedBox.shrink();
+    final page = _pdf ? _page : null;
+    final preview = _pdf
+        ? null
+        : _previews.inlineOrNull(ctx.roomId, ctx.entry.id);
+    final empty = page == null && preview == null;
+    if (empty && !_loading) return const SizedBox.shrink();
     final colours = DocumentColours.onBubble(ctx.onBubble, ctx.palette.accent);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(
-        label: preview == null
+        label: empty
             ? 'Loading preview'
             : 'Preview of ${MediaInfo.fromEntry(ctx.entry).name}',
         child: Container(
@@ -132,10 +176,19 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
           height: InlineDocumentPreview.height,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: colours.raised,
+            // The page is paper: white whatever the bubble's colour.
+            color: page != null ? Colors.white : colours.raised,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: preview == null
+          child: page != null
+              ? RawImage(
+                  key: const ValueKey('document.inline.pdf'),
+                  image: page,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  filterQuality: FilterQuality.medium,
+                )
+              : preview == null
               ? _Skeleton(colours: colours)
               : ExcludeSemantics(
                   child: InlineDocumentSnippet(

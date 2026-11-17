@@ -48,6 +48,8 @@ DocumentPreview? parseDocument(DocumentRequest request) {
         BoundedZip.parse(request.bytes),
         request.limits,
       ),
+      // Pages are drawn by the platform's renderer, not read as text.
+      DocumentFormat.pdf => null,
     };
   } catch (_) {
     return null;

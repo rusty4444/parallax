@@ -84,7 +84,7 @@ final preview = parseDocument(request);
 | Format | Preview |
 |--------|---------|
 | .docx  | yes     |
-| .pdf   | not yet |
+| .pdf   | yes     |
 ''';
 
 const _csv =

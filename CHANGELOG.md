@@ -6,8 +6,10 @@
 
 - Word (.docx), Excel (.xlsx), PowerPoint (.pptx), Markdown, CSV/TSV and text files (logs, JSON, code) open in the viewer instead of the "can't be previewed" card. Word and Markdown keep headings, bold and italic, lists and tables. A spreadsheet is a scrollable grid with column letters, row numbers and a tab per sheet; tapping a cell shows all of its text with a Copy button. A presentation shows each slide's text. Share, Save and File info stay in the top bar.
 - In the timeline, a document shows its first lines (or first cells) under the file card. Like photo previews this follows Settings → Media → In chats, and it only fetches files up to 4 MB. Tap the preview to open the viewer.
+- PDF files open as pages you scroll through, with a page counter. Pinch or double-tap to zoom; the pages in view are drawn again at a higher resolution so small print stays sharp. In the timeline a PDF shows the top of its first page. A password-protected PDF says so, and a damaged one keeps the file card; both can still be saved or shared.
 - Files are read in memory on a background worker and aren't written to the phone. Reading is bounded: a very large file shows its start and says so, and a damaged or mislabelled file keeps the plain file card.
-- Not previewed yet: PDF, the older .doc/.xls/.ppt formats, and pictures or charts inside documents. Excel dates and times are formatted; currency and percentage formats show the stored number.
+- PDFs are drawn by Android's own PDF renderer in a separate, isolated process that has no access to your messages, keys, files or the network, because a PDF from someone else is untrusted input. If a file crashes or hangs the renderer, only that preview fails.
+- Not previewed yet: the older .doc/.xls/.ppt formats, and pictures or charts inside Office documents. PDF pages are pictures: their text can't be selected or searched, links in them can't be tapped, and there is no password prompt. Excel dates and times are formatted; currency and percentage formats show the stored number.
 
 ### Signing in no longer starts five-minute renewals
 

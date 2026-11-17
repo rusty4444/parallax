@@ -201,13 +201,15 @@ void main() {
   });
 
   testWidgets('documents show a file card instead of a player', (tester) async {
+    // A format with no preview (PDFs and Office files have their own pages:
+    // test/pdf_preview_test.dart, test/file_preview_widgets_test.dart).
     final backend = FakeMediaBackend();
-    final pdf = mediaEntry(
+    final archive = mediaEntry(
       'p',
       EntryKind.file,
-      body: 'Lease.pdf',
+      body: 'Lease.zip',
       content: {
-        'info': {'mimetype': 'application/pdf', 'size': 4096},
+        'info': {'mimetype': 'application/zip', 'size': 4096},
       },
     );
     await tester.pumpWidget(
@@ -215,13 +217,13 @@ void main() {
         home: MediaViewerPager(
           backend: backend,
           roomId: roomId,
-          items: mediaViewerItems(backend, roomId, 'p', entries: [pdf]),
+          items: mediaViewerItems(backend, roomId, 'p', entries: [archive]),
         ),
       ),
     );
     await settle(tester);
     expect(find.byType(MediaViewer), findsNothing);
-    expect(find.text('PDF · 4 KB'), findsOneWidget);
+    expect(find.text('ZIP · 4 KB'), findsOneWidget);
     expect(find.textContaining('can’t be previewed'), findsOneWidget);
     expect(backend.loads, isEmpty);
   });

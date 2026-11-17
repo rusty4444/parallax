@@ -154,8 +154,8 @@ void main() {
       final backend = FakeMediaBackend()
         ..original = (_) => file('x', utf8.encode('data'));
       for (final entry in [
-        // Not a format with a preview.
-        fileEntry(r'$pdf', 'Lease.pdf', mime: 'application/pdf'),
+        // Not formats with a preview.
+        fileEntry(r'$doc', 'Lease.doc', mime: 'application/msword'),
         fileEntry(r'$zip', 'photos.zip'),
         // Larger than the inline limit.
         fileEntry(
@@ -488,7 +488,7 @@ void main() {
       await open(
         tester,
         backend,
-        fileEntry(r'$pdf', 'Lease.pdf', mime: 'application/pdf'),
+        fileEntry(r'$doc', 'Lease.doc', mime: 'application/msword'),
       );
       expect(find.textContaining('can’t be previewed'), findsOneWidget);
       expect(backend.loads, isEmpty);

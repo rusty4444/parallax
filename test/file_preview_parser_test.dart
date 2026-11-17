@@ -74,8 +74,27 @@ void main() {
       );
     });
 
+    test('PDFs are known by extension or type, and are not parsed here', () {
+      expect(documentFormatFor('a.pdf', null), DocumentFormat.pdf);
+      expect(
+        documentFormatFor('A.PDF', 'application/octet-stream'),
+        DocumentFormat.pdf,
+      );
+      expect(documentFormatFor('scan', 'application/pdf'), DocumentFormat.pdf);
+      // Pages are drawn by the platform (pdf_tools.dart), not read as text.
+      expect(
+        parseDocument(
+          DocumentRequest(
+            bytes: Uint8List.fromList('%PDF-1.4'.codeUnits),
+            format: DocumentFormat.pdf,
+            name: 'a.pdf',
+          ),
+        ),
+        isNull,
+      );
+    });
+
     test('files it cannot read are left to the file card', () {
-      expect(documentFormatFor('a.pdf', 'application/pdf'), isNull);
       expect(documentFormatFor('a.doc', 'application/msword'), isNull);
       expect(documentFormatFor('a.xls', 'application/vnd.ms-excel'), isNull);
       expect(documentFormatFor('a.zip', 'application/zip'), isNull);

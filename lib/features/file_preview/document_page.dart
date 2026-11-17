@@ -10,13 +10,15 @@ import '../media/media_features.dart';
 import 'document_loader.dart';
 import 'document_model.dart';
 import 'document_view.dart';
+import 'pdf_view.dart';
 
 /// A file in the media viewer: its preview when Parallax can read the
-/// format (text, Markdown, CSV, Word, Excel, PowerPoint), otherwise
+/// format (text, Markdown, CSV, Word, Excel, PowerPoint, PDF), otherwise
 /// [fallback], the plain file card.
 ///
-/// The file is downloaded and decrypted in memory only, parsed on a
-/// background isolate and never written to disk.
+/// The file is downloaded and decrypted in memory only. Text and Office
+/// files are parsed on a background isolate; PDF pages are drawn by the
+/// platform in an isolated process (see [PdfDocumentPage]).
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
     super.key,
@@ -53,10 +55,15 @@ class _DocumentPageState extends State<DocumentPage> {
         (size == null || size <= maxOriginalBytes);
   }
 
+  /// PDFs have their own page ([PdfDocumentPage]); nothing is loaded here.
+  bool get _pdf =>
+      documentFormatFor(widget.info.name, widget.info.mimeType) ==
+      DocumentFormat.pdf;
+
   @override
   void initState() {
     super.initState();
-    if (_previewable) unawaited(_load());
+    if (_previewable && !_pdf) unawaited(_load());
   }
 
   @override
@@ -72,7 +79,7 @@ class _DocumentPageState extends State<DocumentPage> {
       _generation++;
       _preview = null;
       _status = _Status.unsupported;
-      if (_previewable) unawaited(_load());
+      if (_previewable && !_pdf) unawaited(_load());
     }
   }
 
@@ -116,6 +123,14 @@ class _DocumentPageState extends State<DocumentPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_previewable && _pdf) {
+      return PdfDocumentPage(
+        key: ValueKey('pdf-${widget.roomId}/${widget.eventId}'),
+        backend: widget.backend,
+        loader: widget.loader,
+        fallback: widget.fallback,
+      );
+    }
     switch (_status) {
       case _Status.unsupported:
         return widget.fallback;

@@ -29,7 +29,7 @@ class MediaViewerItem {
   MediaInfo? get info => entry == null ? null : MediaInfo.fromEntry(entry!);
 
   /// Documents show their preview (text, Markdown, CSV, Word, Excel,
-  /// PowerPoint) or a file card instead of a player.
+  /// PowerPoint, PDF) or a file card instead of a player.
   bool get isDocument {
     final entry = this.entry;
     if (entry == null || entry.kind != EntryKind.file) return false;
