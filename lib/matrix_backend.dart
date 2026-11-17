@@ -119,6 +119,10 @@ class MatrixBackend extends ChatBackend
   @visibleForTesting
   static Duration queuedSendLockWait = const Duration(minutes: 2);
 
+  /// How long a send waits for the SDK to renew an expiring access token.
+  @visibleForTesting
+  static Duration tokenRefreshWait = const Duration(minutes: 1);
+
   /// Whether Parallax is on screen (messages arriving in the open room are
   /// only marked read while it is).
   final bool Function() _isAppVisible;
@@ -408,6 +412,7 @@ class MatrixBackend extends ChatBackend
 
   Future<void> _refreshAuthentication(matrix.Client client) async {
     final generation = _securityGeneration;
+    _tokenRenewals++;
     try {
       await _authService(client).refresh();
       if (!_disposed &&
@@ -452,6 +457,72 @@ class MatrixBackend extends ChatBackend
     _setStatus(SessionStatus.ready);
     _scheduleRoomUpdate();
     _restoreOutboxQuietly();
+  }
+
+  /// Access-token renewals started this session (see [_awaitTokenRefresh]).
+  int _tokenRenewals = 0;
+
+  /// Makes sure [client] holds a usable access token before a send.
+  ///
+  /// Access tokens are short-lived. The SDK renews one when it is about to
+  /// run out and reports `softLoggedOut` until the renewal has finished; if
+  /// the renewal fails (no network just after the app comes back), it stays
+  /// in that state until its sync loop tries again, up to 30 seconds later.
+  /// The account, device and keys are the same throughout, so a send waits
+  /// here instead of failing. This also renews a token that ran out while
+  /// the app was in the background, before the send can be refused for it.
+  ///
+  /// Returns when the session is signed in, or is no longer [client]'s (the
+  /// caller's ownership check reports that). Throws when signing in again is
+  /// needed or the renewal doesn't finish within [tokenRefreshWait].
+  Future<void> _awaitTokenRefresh(
+    matrix.Client client, {
+    SendCancellation? cancellation,
+  }) async {
+    final generation = _securityGeneration;
+    bool sameSession() =>
+        !_disposed &&
+        !_loggingOut &&
+        identical(_client, client) &&
+        generation == _securityGeneration &&
+        client.isLogged();
+    bool signedIn() =>
+        client.onLoginStateChanged.value == matrix.LoginState.loggedIn;
+    final deadline = DateTime.now().add(tokenRefreshWait);
+    final cancelled = cancellation?.whenCancelled;
+    var pause = const Duration(milliseconds: 250);
+    while (sameSession() && cancellation?.isCancelled != true) {
+      if (_requiresReauthentication) {
+        throw StateError('Sign in again to send this message');
+      }
+      final expiry = client.accessTokenExpiresAt;
+      final expiring =
+          expiry != null &&
+          expiry.difference(DateTime.now()) <= const Duration(minutes: 1);
+      if (signedIn() && !expiring) return;
+      final left = deadline.difference(DateTime.now());
+      if (left > Duration.zero) {
+        // Joins a renewal that is running, or starts one. The SDK keeps
+        // transient failures to itself (the state stays softLoggedOut).
+        try {
+          await Future.any<void>([
+            client.ensureNotSoftLoggedOut().timeout(left, onTimeout: () {}),
+            ?cancelled,
+          ]);
+        } catch (_) {
+          // A rejected renewal ends the session; the loop condition and the
+          // caller's ownership check handle that.
+        }
+        if (signedIn()) return;
+      }
+      if (!DateTime.now().isBefore(deadline)) {
+        throw StateError('Still reconnecting to your account');
+      }
+      await Future.any<void>([Future<void>.delayed(pause), ?cancelled]);
+      // A renewal started here has just failed: ask the server less often
+      // each time. Waiting for one that can't be joined keeps checking.
+      if (expiring && pause < const Duration(seconds: 4)) pause *= 2;
+    }
   }
 
   MatrixRoomFeatures _roomFeatures() {
@@ -687,18 +758,67 @@ class MatrixBackend extends ChatBackend
   ) async {
     final client = _requireClient();
     final generation = _securityGeneration;
-    bool current() =>
+    // The session this send was accepted for: same client, account, device.
+    bool owned() =>
         !_disposed &&
         !_loggingOut &&
         identical(_client, client) &&
         generation == _securityGeneration &&
-        record.accountKey == _outboxIdentity &&
+        record.accountKey == _outboxIdentity;
+    for (var attempt = 1; ; attempt++) {
+      cancellation.check();
+      if (!owned()) throw StateError('Send belongs to an unavailable session');
+      await _awaitTokenRefresh(client, cancellation: cancellation);
+      final renewals = _tokenRenewals;
+      try {
+        await _transmitQueuedOnce(
+          record,
+          cancellation,
+          onProgress,
+          client,
+          owned,
+        );
+        return;
+      } catch (error) {
+        // The guards refuse to send while an access token is renewed, so a
+        // renewal that began during the attempt is what stopped it. The
+        // session is the same and the server deduplicates on the
+        // transaction ID: wait for the renewal and send again.
+        final renewing =
+            renewals != _tokenRenewals ||
+            client.onLoginStateChanged.value != matrix.LoginState.loggedIn;
+        // Declining to send to unverified devices is an answer, not a
+        // failure to ask about again.
+        final declined =
+            error is StateError &&
+            error.message == 'Encrypted send was cancelled';
+        if (!renewing ||
+            declined ||
+            attempt >= 3 ||
+            cancellation.isCancelled ||
+            !owned()) {
+          rethrow;
+        }
+      }
+    }
+  }
+
+  Future<void> _transmitQueuedOnce(
+    OutboxRecord record,
+    SendCancellation cancellation,
+    void Function(double) onProgress,
+    matrix.Client client,
+    bool Function() owned,
+  ) async {
+    bool current() =>
+        owned() &&
         client.onLoginStateChanged.value == matrix.LoginState.loggedIn;
     void check() {
       cancellation.check();
-      if (!current()) {
+      if (!owned()) {
         throw StateError('Send belongs to an unavailable session');
       }
+      if (!current()) throw StateError('Still reconnecting to your account');
     }
 
     check();
@@ -788,7 +908,12 @@ class MatrixBackend extends ChatBackend
                 inReplyTo: isEdit ? null : reply,
                 threadRootEventId: isEdit ? null : record.threadRootId,
               );
-              check();
+              // The server has answered: only a changed session matters
+              // now, not a token renewal that started meanwhile.
+              cancellation.check();
+              if (!owned()) {
+                throw StateError('Send belongs to an unavailable session');
+              }
               if (eventId == null) {
                 throw StateError('Message was not acknowledged');
               }
@@ -1407,6 +1532,7 @@ class MatrixBackend extends ChatBackend
     _directSendingRooms.add(roomId);
     notifyListeners();
     try {
+      await _awaitTokenRefresh(client);
       await MatrixSendGuard.owned(owner, () async {
         final reply = replyToId == null
             ? null
@@ -1498,6 +1624,7 @@ class MatrixBackend extends ChatBackend
     _directSendingRooms.add(roomId);
     notifyListeners();
     try {
+      await _awaitTokenRefresh(client);
       await MatrixSendGuard.owned(owner, () async {
         for (final image in images) {
           final size = await image.length();
@@ -1567,6 +1694,7 @@ class MatrixBackend extends ChatBackend
     _directSendingRooms.add(roomId);
     notifyListeners();
     try {
+      await _awaitTokenRefresh(client);
       await MatrixSendGuard.owned(owner, () async {
         final size = await file.length();
         _checkSendOwner(owner);
@@ -2014,6 +2142,7 @@ class MatrixBackend extends ChatBackend
         // encryption and final HTTP guard as messages. The content keeps the
         // SDK from sending a relation-only plaintext m.reaction (see
         // reactionEventContent); the guard refuses anything not encrypted.
+        await _awaitTokenRefresh(client);
         await _ensureTrusted(room);
         _requireEncryptedTransport(room);
         final sentId = await _protectSend(
@@ -4303,6 +4432,7 @@ class MatrixBackend extends ChatBackend
       throw StateError('Room is not joined');
     }
     final owner = _sendOwnership(client, room, _securityGeneration);
+    await _awaitTokenRefresh(client);
     return MatrixSendGuard.owned(owner, () async {
       await _ensureTrusted(room);
       _checkSendOwner(owner);
@@ -4342,6 +4472,7 @@ class MatrixBackend extends ChatBackend
       throw StateError('Room is not joined');
     }
     final owner = _sendOwnership(client, room, _securityGeneration);
+    await _awaitTokenRefresh(client);
     return MatrixSendGuard.owned(owner, () async {
       await _ensureTrusted(room);
       _checkSendOwner(owner);

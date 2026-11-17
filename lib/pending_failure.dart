@@ -40,6 +40,10 @@ String pendingFailureReason(String? error) {
       has('encrypted recipients')) {
     return 'couldn’t confirm who can read it (encryption)';
   }
+  if (has('still reconnecting')) return 'still reconnecting to your account';
+  if (has('sign in again')) return 'you need to sign in again';
+  // Stored by builds that failed a send during an access-token renewal.
+  if (has('unavailable session')) return 'the account was reconnecting';
   if (has('not acknowledged')) return 'the server didn’t confirm it';
   if (has('m_forbidden')) return 'the server refused it';
   if (has('undo couldn')) return 'undo couldn’t be saved';

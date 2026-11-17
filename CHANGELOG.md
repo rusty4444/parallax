@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Messages no longer fail while the app reconnects
+
+- A message sent while Parallax was renewing its sign-in failed at once with "Send belongs to an unavailable session". Access tokens last a few minutes, so the renewal runs every few minutes and whenever the app comes back from the background, which is why it mostly happened just after opening a chat. If a renewal failed (no network yet), every send kept failing until the next attempt up to 30 seconds later.
+- Messages, photos, files, reactions, polls and locations now wait for the renewal, for up to a minute, and then send. A send also starts the renewal itself when the token has run out, instead of waiting for the next sync.
+- If a renewal starts while a queued message is on its way, the message is sent again with the same transaction ID, so it can't arrive twice.
+- If the account still can't reconnect after a minute, the message reads "Not sent: still reconnecting to your account" and Retry works once you're back online.
+
 ### Animated notification previews
 
 - Sent videos, GIFs and animated WebP images or stickers play as looping previews inside rich Android notifications, including encrypted rooms and background sync, and fall back to the static thumbnail if sampling fails.
