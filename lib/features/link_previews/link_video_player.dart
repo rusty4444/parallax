@@ -58,7 +58,7 @@ class _NetworkLinkVideoController implements LinkVideoController {
   double get aspectRatio {
     final v = _controller.value;
     if (v.isInitialized) {
-      final corrected = videoDisplayAspectRatio(v.size, v.rotationCorrection);
+      final corrected = videoDisplayAspectRatio(v.size);
       if (corrected != null) return corrected;
     }
     return v.aspectRatio;

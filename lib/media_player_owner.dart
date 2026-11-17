@@ -282,19 +282,19 @@ MediaPlaybackController createNativeMediaPlayer(
     ? _NativeVideoPlayer(file.path)
     : _NativeAudioPlayer(file.path, mime);
 
-/// Display aspect ratio (`width / height`) for a native video frame after
-/// applying [rotationCorrection] degrees clockwise.
+/// Display aspect ratio (`width / height`) of a video from the size that
+/// `video_player` reports.
 ///
-/// Android's `video_player` reports coded stream dimensions in `value.size`
-/// alongside a 90/270-degree `rotationCorrection` when `RotatedBox` handles
-/// rotation in Dart, leaving `value.aspectRatio` inverted for portrait videos.
-double? videoDisplayAspectRatio(Size size, int rotationCorrection) {
+/// That size is already the size the video is shown at: for a phone-camera
+/// portrait recording (stored 1920x1080 with a 90 degree rotation flag) the
+/// Android plugin reports 1080x1920 *and* `rotationCorrection: 90`. The
+/// correction only tells the `VideoPlayer` widget to turn the texture; it
+/// must not be applied to the size as well, or the video plays squashed in a
+/// landscape box. `integration_test/video_rotation_test.dart` checks this on
+/// a device.
+double? videoDisplayAspectRatio(Size size) {
   if (size.width <= 0 || size.height <= 0) return null;
-  final turns = ((rotationCorrection % 360) + 360) % 360;
-  final swapped = turns == 90 || turns == 270;
-  final width = swapped ? size.height : size.width;
-  final height = swapped ? size.width : size.height;
-  final ratio = width / height;
+  final ratio = size.width / size.height;
   return ratio.isFinite && ratio > 0 ? ratio : null;
 }
 
@@ -311,7 +311,7 @@ class _NativeVideoPlayer extends MediaPlaybackController {
   double? get _displayAspectRatio {
     final v = _controller.value;
     if (!v.isInitialized) return null;
-    return videoDisplayAspectRatio(v.size, v.rotationCorrection);
+    return videoDisplayAspectRatio(v.size);
   }
 
   @override

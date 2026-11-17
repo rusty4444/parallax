@@ -195,43 +195,23 @@ void main() {
   });
 
   group('videoDisplayAspectRatio', () {
-    test('swaps coded dimensions for 90/270 rotation', () {
-      // Portrait video: coded 1920x1080 with 90° rotation → display 1080x1920
-      final ratio = videoDisplayAspectRatio(const Size(1920, 1080), 90);
-      expect(ratio, closeTo(1080 / 1920, 0.001));
-      // Same for 270°
+    test('uses the reported size as it is', () {
+      // What the Android plugin reports for a phone-camera portrait video
+      // (stored 1920x1080, rotation 90): the size it is shown at.
       expect(
-        videoDisplayAspectRatio(const Size(1920, 1080), 270),
+        videoDisplayAspectRatio(const Size(1080, 1920)),
         closeTo(1080 / 1920, 0.001),
       );
-    });
-
-    test('keeps dimensions for 0/180 rotation', () {
       expect(
-        videoDisplayAspectRatio(const Size(1920, 1080), 0),
+        videoDisplayAspectRatio(const Size(1920, 1080)),
         closeTo(1920 / 1080, 0.001),
-      );
-      expect(
-        videoDisplayAspectRatio(const Size(1920, 1080), 180),
-        closeTo(1920 / 1080, 0.001),
-      );
-    });
-
-    test('normalizes negative and >360 rotation values', () {
-      expect(
-        videoDisplayAspectRatio(const Size(1920, 1080), -270),
-        closeTo(1080 / 1920, 0.001),
-      );
-      expect(
-        videoDisplayAspectRatio(const Size(1920, 1080), 450),
-        closeTo(1080 / 1920, 0.001),
       );
     });
 
     test('returns null for invalid dimensions', () {
-      expect(videoDisplayAspectRatio(const Size(0, 1080), 0), isNull);
-      expect(videoDisplayAspectRatio(const Size(1920, 0), 90), isNull);
-      expect(videoDisplayAspectRatio(const Size(-1, 1080), 0), isNull);
+      expect(videoDisplayAspectRatio(const Size(0, 1080)), isNull);
+      expect(videoDisplayAspectRatio(const Size(1920, 0)), isNull);
+      expect(videoDisplayAspectRatio(const Size(-1, 1080)), isNull);
     });
   });
 
