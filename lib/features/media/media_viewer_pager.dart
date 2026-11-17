@@ -7,6 +7,7 @@ import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../media_player_owner.dart';
 import '../../media_viewer.dart' show MediaViewer, shutdownMediaViewerPage;
+import '../file_preview/document_page.dart';
 import 'media_actions.dart';
 import 'media_content.dart';
 
@@ -27,7 +28,8 @@ class MediaViewerItem {
 
   MediaInfo? get info => entry == null ? null : MediaInfo.fromEntry(entry!);
 
-  /// Non-previewable documents show a file card instead of a player.
+  /// Documents show their preview (text, Markdown, CSV, Word, Excel,
+  /// PowerPoint) or a file card instead of a player.
   bool get isDocument {
     final entry = this.entry;
     if (entry == null || entry.kind != EntryKind.file) return false;
@@ -238,7 +240,17 @@ class _MediaViewerPagerState extends State<MediaViewerPager> {
   }
 
   Widget _page(MediaViewerItem item) {
-    if (item.isDocument) return _DocumentPage(item: item);
+    if (item.isDocument) {
+      return DocumentPage(
+        key: ValueKey('document-${item.eventId}'),
+        backend: widget.backend,
+        roomId: widget.roomId,
+        eventId: item.eventId,
+        loader: item.loader,
+        info: item.info!,
+        fallback: _DocumentPage(item: item),
+      );
+    }
     final key = _keys.putIfAbsent(item.eventId, GlobalKey.new);
     return MediaViewer(
       key: key,

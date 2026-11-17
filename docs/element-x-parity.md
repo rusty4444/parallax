@@ -108,6 +108,8 @@ Room backgrounds, photo-grid bubbles, avatar collages, double-tap heart, a durab
 
 Round 2 added, from other messaging apps: send later (MSC4140 delayed events; needs homeserver support) and undo send; Note to self, saved messages and chat folders (account data); live location sharing (MSC3672 beacons); custom emoji and sticker packs (MSC2545); slash commands and Element Web chat effects.
 
+Document previews: Word, Excel, PowerPoint, Markdown, CSV and text files open in the media viewer and show their first lines in the timeline (`lib/features/file_preview/`). Element X shows a file card and hands the file to another app.
+
 ## Room-creation failure contract
 
 Only app-owned `RoomCreationFailure` outcomes release create admission:

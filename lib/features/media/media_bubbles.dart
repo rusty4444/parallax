@@ -11,6 +11,7 @@ import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
 import '../../media_viewer.dart';
 import '../../message_image.dart';
+import '../file_preview/inline_document_preview.dart';
 import 'inline_audio.dart';
 import 'media_actions.dart';
 import 'media_content.dart';
@@ -1049,7 +1050,8 @@ class StandaloneSticker extends StatelessWidget {
 }
 
 /// File card: type icon, name, size and type; tap opens the viewer (preview,
-/// save, share, info) and the download button saves directly.
+/// save, share, info) and the download button saves directly. Documents
+/// Parallax can read show their first lines underneath.
 class FileMessageBody extends StatelessWidget {
   const FileMessageBody({super.key, required this.ctx});
   final EntryHookContext ctx;
@@ -1141,6 +1143,11 @@ class FileMessageBody extends StatelessWidget {
               ],
             ),
           ),
+        ),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _open(context, ctx),
+          child: InlineDocumentPreview(ctx: ctx),
         ),
         _caption(ctx, info.caption),
       ],

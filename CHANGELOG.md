@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Document previews
+
+- Word (.docx), Excel (.xlsx), PowerPoint (.pptx), Markdown, CSV/TSV and text files (logs, JSON, code) open in the viewer instead of the "can't be previewed" card. Word and Markdown keep headings, bold and italic, lists and tables. A spreadsheet is a scrollable grid with column letters, row numbers and a tab per sheet; tapping a cell shows all of its text with a Copy button. A presentation shows each slide's text. Share, Save and File info stay in the top bar.
+- In the timeline, a document shows its first lines (or first cells) under the file card. Like photo previews this follows Settings → Media → In chats, and it only fetches files up to 4 MB. Tap the preview to open the viewer.
+- Files are read in memory on a background worker and aren't written to the phone. Reading is bounded: a very large file shows its start and says so, and a damaged or mislabelled file keeps the plain file card.
+- Not previewed yet: PDF, the older .doc/.xls/.ppt formats, and pictures or charts inside documents. Excel dates and times are formatted; currency and percentage formats show the stored number.
+
 ### Messages no longer fail while the app reconnects
 
 - A message sent while Parallax was renewing its sign-in failed at once with "Send belongs to an unavailable session". Access tokens last a few minutes, so the renewal runs every few minutes and whenever the app comes back from the background, which is why it mostly happened just after opening a chat. If a renewal failed (no network yet), every send kept failing until the next attempt up to 30 seconds later.
