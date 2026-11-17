@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'chat_backend.dart';
 import 'features/media/animated_media_image.dart';
+import 'features/media/zoomable_picture.dart';
 import 'media_player_owner.dart';
 import 'messaging_features.dart';
 
@@ -61,7 +62,7 @@ Future<void>? shutdownMediaViewerPage(GlobalKey key) {
 }
 
 class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
-  final _transform = TransformationController();
+  final _transform = PictureTransformationController();
   bool _zoomed = false;
   MediaPlayerOwner? _owner;
   MediaPlaybackController? _listeningPlayer;
@@ -290,7 +291,19 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
     return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
   }
 
+  /// The page under the app bar. A picture may use the strip under the
+  /// system navigation bar, so that zoomed in it fills the screen; controls
+  /// and messages stay clear of it. Callers leave the bottom inset to this.
   Widget _content() {
+    final showsPicture =
+        !_ended && !_loading && !_failed && _owner?.image != null;
+    final content = _contentBody();
+    return showsPicture
+        ? content
+        : SafeArea(top: false, left: false, right: false, child: content);
+  }
+
+  Widget _contentBody() {
     if (_ended) {
       return const Center(child: Text('This media session has ended.'));
     }
@@ -325,23 +338,21 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
     if (image != null) {
       final label = 'Image: ${owner.name ?? 'Attachment'}. Pinch to zoom.';
       final animated = owner.animatedSource;
-      return Center(
-        child: InteractiveViewer(
-          transformationController: _transform,
-          minScale: 1,
-          maxScale: 8,
-          child: animated == null
-              ? Semantics(
-                  label: label,
-                  image: true,
-                  child: RawImage(image: image, fit: BoxFit.contain),
-                )
-              : AnimatedMediaImage(
-                  bytes: animated,
-                  poster: image,
-                  semanticLabel: label,
-                ),
-        ),
+      // Zooming uses the whole page, not just the picture's letterbox.
+      return ZoomablePicture(
+        controller: _transform,
+        naturalSize: Size(image.width.toDouble(), image.height.toDouble()),
+        child: animated == null
+            ? Semantics(
+                label: label,
+                image: true,
+                child: RawImage(image: image, fit: BoxFit.contain),
+              )
+            : AnimatedMediaImage(
+                bytes: animated,
+                poster: image,
+                semanticLabel: label,
+              ),
       );
     }
     final player = owner.player;
@@ -427,7 +438,7 @@ class _MediaViewerState extends State<MediaViewer> with WidgetsBindingObserver {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            body: SafeArea(child: _content()),
+            body: SafeArea(bottom: false, child: _content()),
           ),
         );
 }

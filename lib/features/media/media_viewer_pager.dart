@@ -241,14 +241,19 @@ class _MediaViewerPagerState extends State<MediaViewerPager> {
 
   Widget _page(MediaViewerItem item) {
     if (item.isDocument) {
-      return DocumentPage(
-        key: ValueKey('document-${item.eventId}'),
-        backend: widget.backend,
-        roomId: widget.roomId,
-        eventId: item.eventId,
-        loader: item.loader,
-        info: item.info!,
-        fallback: _DocumentPage(item: item),
+      return SafeArea(
+        top: false,
+        left: false,
+        right: false,
+        child: DocumentPage(
+          key: ValueKey('document-${item.eventId}'),
+          backend: widget.backend,
+          roomId: widget.roomId,
+          eventId: item.eventId,
+          loader: item.loader,
+          info: item.info!,
+          fallback: _DocumentPage(item: item),
+        ),
       );
     }
     final key = _keys.putIfAbsent(item.eventId, GlobalKey.new);
@@ -349,7 +354,10 @@ class _MediaViewerPagerState extends State<MediaViewerPager> {
               ),
           ],
         ),
+        // Each page keeps its own controls clear of the system navigation
+        // bar; a zoomed picture is allowed underneath it.
         body: SafeArea(
+          bottom: false,
           child: _ended
               ? const Center(child: Text('This media session has ended.'))
               : PageView.builder(

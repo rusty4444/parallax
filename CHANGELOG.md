@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Zoomed pictures use the whole screen
+
+- Pinching a picture in the viewer zooms it across the whole page, down to the bottom edge of the screen. Before, the zoomed picture stayed inside the frame it had at rest, so a landscape photo on a portrait phone only ever used a strip across the middle.
+- While the zoomed picture is still smaller than the screen in one direction, it stays centred in that direction. Once it fills the screen you can drag it as far as its own edge; the black bars can't be dragged into view.
+- Long, thin pictures (panoramas, tall screenshots) can zoom further than before, far enough to fill the screen.
+
 ### Recent chats in Android's share menu
 
 - When you share from another app, Android's share menu suggests your most recent Parallax chats, with their pictures, as it does for Element. The suggestions are the top of your chat list, up to eight chats, without invitations, Spaces or chats marked low priority. Android decides how many it shows, usually three per app.
