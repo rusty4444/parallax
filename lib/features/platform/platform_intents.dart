@@ -1,5 +1,5 @@
-// Android share and VIEW intents forwarded by MainActivity over the
-// `parallax/platform_intents` MethodChannel.
+// Android share, VIEW and chat-shortcut intents forwarded by MainActivity
+// over the `parallax/platform_intents` MethodChannel.
 //
 // Kotlin copies shared content:// streams into the app cache (capped at
 // [maxSharedFileBytes] each, [maxSharedFiles] items) and queues one payload per
@@ -53,11 +53,16 @@ final class ShareIntent extends PlatformIntent {
     this.files = const [],
     this.skipped = 0,
     this.tooLarge = 0,
+    this.targetRoomId,
   });
 
   /// Shared text (EXTRA_TEXT, or EXTRA_SUBJECT when there is no text).
   final String? text;
   final List<SharedFile> files;
+
+  /// The chat picked from Android's share suggestions (a sharing shortcut,
+  /// see share_shortcuts.dart); null when Parallax itself was picked.
+  final String? targetRoomId;
 
   /// Items that could not be read or were refused (non-content URIs, the
   /// app's own files, unreadable streams, beyond [maxSharedFiles]).
@@ -76,10 +81,34 @@ final class LinkIntent extends PlatformIntent {
   final Uri uri;
 }
 
+/// A chat shortcut tapped under the launcher icon: open that chat.
+@immutable
+final class OpenRoomIntent extends PlatformIntent {
+  const OpenRoomIntent(this.roomId);
+  final String roomId;
+}
+
+/// Longest room ID Matrix allows.
+const maxRoomIdLength = 255;
+
+/// A room ID from the channel, or null for anything that is not one.
+String? _roomId(Object? value) =>
+    value is String &&
+        value.length > 1 &&
+        value.length <= maxRoomIdLength &&
+        value.startsWith('!') &&
+        !value.contains(RegExp(r'[\u0000-\u0020\u007f]'))
+    ? value
+    : null;
+
 /// Validates a payload from the channel. Returns null for anything malformed.
 PlatformIntent? parsePlatformIntent(Object? raw) {
   if (raw is! Map) return null;
   final kind = raw['kind'];
+  if (kind == 'room') {
+    final roomId = _roomId(raw['roomId']);
+    return roomId == null ? null : OpenRoomIntent(roomId);
+  }
   if (kind == 'link') {
     final value = raw['uri'];
     if (value is! String || value.length > maxMatrixLinkLength) return null;
@@ -108,6 +137,7 @@ PlatformIntent? parsePlatformIntent(Object? raw) {
     files: List.unmodifiable(files),
     skipped: skipped,
     tooLarge: tooLarge,
+    targetRoomId: _roomId(raw['roomId']),
   );
   return intent.isEmpty && skipped == 0 && tooLarge == 0 ? null : intent;
 }

@@ -82,6 +82,10 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="matrix" />
             </intent-filter>
+            <!-- Recent chats suggested in the share sheet (ShareShortcuts.kt). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <!-- Incoming shares (Element X features/share) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

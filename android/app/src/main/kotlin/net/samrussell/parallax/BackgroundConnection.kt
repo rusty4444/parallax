@@ -38,6 +38,7 @@ object ParallaxEngine {
         BackgroundConnection.attachChannel(app, engine)
         VideoTools.register(app, engine.dartExecutor.binaryMessenger)
         PdfTools.register(app, engine.dartExecutor.binaryMessenger)
+        ShareShortcuts.register(app, engine.dartExecutor.binaryMessenger)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ID, engine)
         return engine

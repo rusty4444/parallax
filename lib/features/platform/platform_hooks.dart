@@ -14,17 +14,30 @@ import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
+import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
 import '../../widgets.dart';
 import 'matrix_link_opener.dart';
 import 'platform_intents_host.dart';
+import 'share_shortcuts.dart';
 
-/// Wraps the signed-in app to route share intents and matrix.to links.
+/// Wraps the signed-in app to route share intents and matrix.to links, and
+/// to offer its recent chats in Android's share sheet.
 Widget wrapWithPlatformIntents(
   BuildContext context,
   AppHookContext ctx,
   Widget child,
-) => PlatformIntentsHost(app: ctx, child: child);
+) => PlatformIntentsHost(
+  app: ctx,
+  child: ShareShortcutsHost(
+    // Another account starts from an empty list.
+    key: ValueKey(
+      'share-shortcuts:${BackendSessionOwner.keyFor(ctx.backend) ?? ''}',
+    ),
+    app: ctx,
+    child: child,
+  ),
+);
 
 List<Widget> platformSettingsSections(
   BuildContext context,
@@ -106,7 +119,9 @@ class _LinksAndSharingSection extends StatelessWidget {
               children: [
                 Text(
                   'Share photos, videos, files and text to Parallax from other '
-                  'apps. matrix.to and matrix: links open here too.',
+                  'apps. Android’s share menu suggests your most recent chats, '
+                  'unless a screen lock PIN is set. matrix.to and matrix: links '
+                  'open here too.',
                   style: TextStyle(color: p.muted, fontSize: 12),
                 ),
                 ListTile(

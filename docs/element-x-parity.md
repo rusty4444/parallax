@@ -89,7 +89,7 @@ Baseline: [Element X Android v26.11.0](https://github.com/element-hq/element-x-a
 | Global notification settings (direct chats, groups, @room, invites, calls) | Built | |
 | Sender and message text in notifications; inline reply | Built | `lib/features/notifications/`: fetched and decrypted on the device, so the push provider sees only IDs. Can be turned off in Settings. A reply sent while the app is closed waits until it next opens. |
 | Notification troubleshooting screen | Missing | |
-| Sharing into Parallax; matrix.to and `matrix:` links | Built | Direct-share shortcuts are missing. |
+| Sharing into Parallax; matrix.to and `matrix:` links | Built | Recent chats are suggested in Android's share menu (`lib/features/platform/share_shortcuts.dart`), except while a screen lock PIN is set, as in Element X. Element X publishes a chat when you send to it; Parallax mirrors the top of the chat list. Checked on an Android 15 emulator, not yet on a Samsung phone. |
 
 ## Account and settings
 

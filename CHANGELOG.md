@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Recent chats in Android's share menu
+
+- When you share from another app, Android's share menu suggests your most recent Parallax chats, with their pictures, as it does for Element. The suggestions are the top of your chat list, up to eight chats, without invitations, Spaces or chats marked low priority. Android decides how many it shows, usually three per app.
+- Tapping a suggested chat opens Parallax on "Send to" that chat, showing what you're sharing and a Send button, so nothing goes out until you confirm. The other rooms are listed underneath in case you picked the wrong one.
+- The same chats appear when you long-press the Parallax icon on the home screen. Tapping one opens that chat.
+- Android keeps these names and pictures outside Parallax's screen lock, so none are offered while a screen lock PIN is set (Element X does the same). They are removed when you sign out.
+
 ### Document previews
 
 - Word (.docx), Excel (.xlsx), PowerPoint (.pptx), Markdown, CSV/TSV and text files (logs, JSON, code) open in the viewer instead of the "can't be previewed" card. Word and Markdown keep headings, bold and italic, lists and tables. A spreadsheet is a scrollable grid with column letters, row numbers and a tab per sheet; tapping a cell shows all of its text with a Copy button. A presentation shows each slide's text. Share, Save and File info stay in the top bar.

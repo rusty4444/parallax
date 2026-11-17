@@ -1,12 +1,14 @@
 // Signed-in host for Android intents and notification actions. Mounted by
 // wrapWithPlatformIntents above the signed-in Navigator: it handles one
-// intent at a time on that navigator and wires "Mark as read" for push.
+// intent (share, link or chat shortcut) at a time on that navigator and wires
+// "Mark as read" for push.
 import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
 import '../../push_notifications.dart';
@@ -30,6 +32,9 @@ class PlatformIntentsHost extends StatefulWidget {
   final PlatformIntentSource? source;
   final SharedFileReader? readSharedFile;
 
+  /// How long a chat shortcut waits for the room list after a cold start.
+  static const roomListWait = Duration(seconds: 10);
+
   @override
   State<PlatformIntentsHost> createState() => _PlatformIntentsHostState();
 }
@@ -46,6 +51,9 @@ class _PlatformIntentsHostState extends State<PlatformIntentsHost> {
   /// The share whose route is open; its route future never completes if the
   /// signed-in navigator is torn down, so dispose discards it too.
   ShareIntent? _activeShare;
+
+  /// Completes a chat shortcut's wait for the room list.
+  Completer<bool>? _roomWait;
   bool _draining = false;
   bool _disposed = false;
   PushNotifications? _notifications;
@@ -87,6 +95,8 @@ class _PlatformIntentsHostState extends State<PlatformIntentsHost> {
     _disposed = true;
     _detachPush();
     unawaited(_subscription?.cancel());
+    final roomWait = _roomWait;
+    if (roomWait != null && !roomWait.isCompleted) roomWait.complete(false);
     final abandoned = [
       ...?_activeShare?.files,
       for (final intent in _queue)
@@ -167,7 +177,62 @@ class _PlatformIntentsHostState extends State<PlatformIntentsHost> {
         }
       case ShareIntent():
         await _share(navigator, intent);
+      case OpenRoomIntent(:final roomId):
+        await _openRoom(navigator, roomId);
     }
+  }
+
+  /// Whether [roomId] is a joined room. Right after a cold start the room
+  /// list may still be loading, so this waits for it (bounded).
+  Future<bool> _joined(String roomId) async {
+    final backend = widget.app.backend;
+    bool joined() =>
+        backend.rooms.any((room) => room.id == roomId && !room.invited);
+    if (joined()) return true;
+    if (backend.roomSyncState != RoomSyncState.loading) return false;
+    final done = Completer<bool>();
+    _roomWait = done;
+    void check() {
+      if (done.isCompleted) return;
+      if (!_current) {
+        done.complete(false);
+      } else if (joined()) {
+        done.complete(true);
+      } else if (backend.roomSyncState != RoomSyncState.loading) {
+        done.complete(false);
+      }
+    }
+
+    backend.addListener(check);
+    final deadline = Timer(PlatformIntentsHost.roomListWait, () {
+      if (!done.isCompleted) done.complete(false);
+    });
+    try {
+      return await done.future;
+    } finally {
+      deadline.cancel();
+      backend.removeListener(check);
+      if (identical(_roomWait, done)) _roomWait = null;
+    }
+  }
+
+  /// A chat shortcut is a fresh entry into that chat, like a notification:
+  /// Back then returns to the inbox, not to whatever was open before.
+  Future<void> _openRoom(NavigatorState navigator, String roomId) async {
+    final app = widget.app;
+    final found = await _joined(roomId);
+    if (!_current || !navigator.mounted) return;
+    if (!found) {
+      _snack(navigator, 'That chat is no longer available.');
+      return;
+    }
+    navigator.popUntil((route) => route.isFirst);
+    openRoomRoute(
+      navigator.overlay?.context ?? navigator.context,
+      app.backend,
+      app.palette,
+      roomId,
+    );
   }
 
   Future<void> _share(NavigatorState navigator, ShareIntent share) async {
@@ -191,12 +256,14 @@ class _PlatformIntentsHostState extends State<PlatformIntentsHost> {
                   backend: app.backend,
                   palette: app.palette,
                   share: share,
+                  targetRoomId: share.targetRoomId,
                 )
               : ShareTargetScreen(
                   backend: app.backend,
                   palette: app.palette,
                   share: share,
                   read: read,
+                  targetRoomId: share.targetRoomId,
                 ),
         ),
       );

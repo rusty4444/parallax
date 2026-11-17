@@ -13,6 +13,7 @@ import android.provider.OpenableColumns
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutManagerCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -110,8 +111,9 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
-        // Share (ACTION_SEND/SEND_MULTIPLE) and matrix.to / matrix: VIEW intents.
-        // Dart pulls the queue, so intents that arrive before Dart listens wait.
+        // Share (ACTION_SEND/SEND_MULTIPLE), matrix.to / matrix: VIEW intents and
+        // chat shortcuts. Dart pulls the queue, so intents that arrive before
+        // Dart listens wait.
         val appContext = applicationContext
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "parallax/platform_intents")
         channel.setMethodCallHandler { call, result ->
@@ -162,6 +164,13 @@ class MainActivity : FlutterFragmentActivity() {
                 if (isMatrixLink) {
                     SharedIntentStore.enqueue(app, mapOf("kind" to "link", "uri" to value))
                 }
+            }
+            // A chat shortcut tapped under the launcher icon (ShareShortcuts.kt).
+            ShareShortcuts.ACTION_OPEN_CHAT -> {
+                val roomId = ShareShortcuts.validRoomId(
+                    intent.getStringExtra(ShareShortcuts.EXTRA_ROOM_ID),
+                ) ?: return
+                SharedIntentStore.enqueue(app, mapOf("kind" to "room", "roomId" to roomId))
             }
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
                 // Copy off the main thread; URI grants belong to this app's UID.
@@ -334,6 +343,10 @@ private object SharedIntentStore {
         if (files.isEmpty()) dir.delete()
         return mapOf(
             "kind" to "share",
+            // Set when the user picked a suggested chat in the share sheet.
+            "roomId" to ShareShortcuts.roomIdOf(
+                intent.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID),
+            ),
             "text" to text,
             "subject" to subject,
             "files" to files,

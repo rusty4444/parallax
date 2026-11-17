@@ -1,6 +1,7 @@
 // Receive shares from other apps (Element X features/share): pick a joined
 // room, then queue the shared text and up to ten files through the normal
-// outbox so encryption, recipient trust and retries apply.
+// outbox so encryption, recipient trust and retries apply. A share aimed at a
+// suggested chat (share_shortcuts.dart) offers that chat for one-tap sending.
 import 'dart:async';
 import 'dart:io';
 
@@ -139,11 +140,17 @@ class ShareTargetScreen extends StatefulWidget {
     required this.palette,
     required this.share,
     this.read = _readSharedFile,
+    this.targetRoomId,
   });
   final ChatBackend backend;
   final AppPalette palette;
   final ShareIntent share;
   final SharedFileReader read;
+
+  /// The chat picked in Android's share suggestions. It is offered on its own
+  /// with a Send button, so one tap confirms what is sent and where; the other
+  /// rooms stay listed below. Ignored when it is not a joined room.
+  final String? targetRoomId;
 
   @override
   State<ShareTargetScreen> createState() => _ShareTargetScreenState();
@@ -181,11 +188,27 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
     setState(() {});
   }
 
-  List<ChatRoom> get _rooms {
+  ChatRoom? get _target {
+    final id = widget.targetRoomId;
+    if (id == null) return null;
+    for (final room in widget.backend.rooms) {
+      if (room.id == id && !room.invited) return room;
+    }
+    return null;
+  }
+
+  static String _describe(ChatRoom room) => [
+    if (room.isDirect) 'Direct chat',
+    if (room.encrypted) 'Encrypted',
+  ].join(' · ');
+
+  /// Every other joined room matching the search.
+  List<ChatRoom> _roomsExcept(ChatRoom? target) {
     final query = _query.trim().toLowerCase();
     final rooms = [
       for (final room in widget.backend.rooms)
         if (!room.invited &&
+            room.id != target?.id &&
             (query.isEmpty ||
                 room.name.toLowerCase().contains(query) ||
                 room.id.toLowerCase().contains(query)))
@@ -229,11 +252,69 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
     context,
   )?.showSnackBar(SnackBar(content: Text(message)));
 
+  Widget _targetCard(ChatRoom room) {
+    final p = widget.palette;
+    final description = _describe(room);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Material(
+        color: p.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: p.accent, width: 1.5),
+        ),
+        child: ListTile(
+          key: ValueKey('share-target-${room.id}'),
+          enabled: _sendingTo == null,
+          contentPadding: const EdgeInsets.fromLTRB(14, 6, 12, 6),
+          leading: RoomAvatar(
+            room: room,
+            backend: widget.backend,
+            palette: p,
+            size: 44,
+          ),
+          title: Text(
+            room.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: p.foreground, fontWeight: FontWeight.w700),
+          ),
+          subtitle: description.isEmpty
+              ? null
+              : Text(
+                  description,
+                  style: TextStyle(color: p.muted, fontSize: 12),
+                ),
+          trailing: _sendingTo == room.id
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: p.accent,
+                  ),
+                )
+              : FilledButton.icon(
+                  key: const ValueKey('share-target-send'),
+                  onPressed: _sendingTo == null
+                      ? () => unawaited(_send(room))
+                      : null,
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: const Text('Send'),
+                ),
+          onTap: () => unawaited(_send(room)),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
     final share = widget.share;
-    final rooms = _rooms;
+    final target = _target;
+    final rooms = _roomsExcept(target);
     final dropped = share.skipped + share.tooLarge;
     return Scaffold(
       body: GlowBackdrop(
@@ -261,7 +342,11 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                           Eyebrow('Share', palette: p),
                           const SizedBox(height: 2),
                           Text(
-                            'Send to a room',
+                            target == null
+                                ? 'Send to a room'
+                                : 'Send to ${target.name}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: p.foreground,
                               fontSize: 24,
@@ -336,15 +421,18 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                   ],
                 ),
               ),
+              if (target != null) _targetCard(target),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
                 child: TextField(
                   controller: _search,
                   enabled: _sendingTo == null,
                   onChanged: (value) => setState(() => _query = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search_rounded),
-                    hintText: 'Search rooms',
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    hintText: target == null
+                        ? 'Search rooms'
+                        : 'Or send to another room',
                   ),
                 ),
               ),
@@ -359,9 +447,11 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                         child: Padding(
                           padding: const EdgeInsets.all(28),
                           child: Text(
-                            _query.trim().isEmpty
-                                ? 'No rooms yet. Join or start a conversation first.'
-                                : 'No rooms match “${_query.trim()}”.',
+                            _query.trim().isNotEmpty
+                                ? 'No rooms match “${_query.trim()}”.'
+                                : target != null
+                                ? ''
+                                : 'No rooms yet. Join or start a conversation first.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: p.muted),
                           ),
@@ -395,10 +485,7 @@ class _ShareTargetScreenState extends State<ShareTargetScreen> {
                               ),
                             ),
                             subtitle: Text(
-                              [
-                                if (room.isDirect) 'Direct chat',
-                                if (room.encrypted) 'Encrypted',
-                              ].join(' · '),
+                              _describe(room),
                               style: TextStyle(color: p.muted, fontSize: 12),
                             ),
                             trailing: sending
