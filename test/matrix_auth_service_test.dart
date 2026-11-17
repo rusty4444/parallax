@@ -164,7 +164,9 @@ void main() {
         '$_server/_matrix/client/v3/login',
       );
       final body = jsonDecode(requests.single.body) as Map;
-      expect(body['refresh_token'], isTrue);
+      // A long-lived token, like other clients: asking for refresh tokens
+      // makes Synapse expire the access token every five minutes.
+      expect(body.containsKey('refresh_token'), isFalse);
       expect(body['password'], 'test-password');
     },
   );
@@ -293,14 +295,14 @@ void main() {
   );
 
   test(
-    'SSO carries a nonce, requests refresh tokens and initializes SDK',
+    'SSO carries a nonce, asks for a long-lived token and initializes SDK',
     () async {
       await service.browserLogin(_discovery, oidc: false);
       final login = requests.singleWhere((r) => r.method == 'POST');
       final body = jsonDecode(login.body) as Map<String, dynamic>;
       expect(body['type'], 'm.login.token');
       expect(body['token'], 'single-use');
-      expect(body['refresh_token'], isTrue);
+      expect(body.containsKey('refresh_token'), isFalse);
       expect(client.initCalls, 1);
       expect(client.accessToken, 'new-token');
     },
@@ -542,6 +544,42 @@ void main() {
       });
       expect(database.account!['olm_account'], 'crypto-pickle');
       expect(client.loginCalls, 0);
+    },
+  );
+
+  test(
+    'signing in again swaps a renewing session for a long-lived one',
+    () async {
+      // A session from before: a refresh token and a token about to expire.
+      client.seed();
+      expect(database.account!['refresh_token'], 'old-refresh');
+      // What Synapse answers when refresh tokens aren't asked for: a token
+      // with no expiry and no refresh token.
+      respond = (_) async => _json({
+        'access_token': 'long-lived',
+        'user_id': '@sam:matrix.example',
+        'device_id': 'DEVICE',
+      });
+      await service.reauthenticatePassword('@sam:matrix.example', 'password');
+      final body = jsonDecode(requests.single.body) as Map;
+      expect(body.containsKey('refresh_token'), isFalse);
+      expect(body['device_id'], 'DEVICE');
+      expect(client.accessToken, 'long-lived');
+      expect(database.account!['token'], 'long-lived');
+      // The old refresh token was cancelled by the server with the old
+      // session; it must not be kept to be tried later.
+      expect(database.account!['refresh_token'], isNull);
+      expect(database.account!['token_expires_at'], isNull);
+      // Same device, same encryption keys.
+      expect(database.account!['device_id'], 'DEVICE');
+      expect(database.account!['olm_account'], 'crypto-pickle');
+      // Nothing left to renew: asking says so without contacting the server.
+      requests.clear();
+      await expectLater(
+        service.refresh(),
+        throwsA(isA<ReauthenticationRequired>()),
+      );
+      expect(requests, isEmpty);
     },
   );
 

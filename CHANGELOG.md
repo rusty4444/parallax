@@ -9,6 +9,12 @@
 - Files are read in memory on a background worker and aren't written to the phone. Reading is bounded: a very large file shows its start and says so, and a damaged or mislabelled file keeps the plain file card.
 - Not previewed yet: PDF, the older .doc/.xls/.ppt formats, and pictures or charts inside documents. Excel dates and times are formatted; currency and percentage formats show the stored number.
 
+### Signing in no longer starts five-minute renewals
+
+- Parallax asked the homeserver for a refresh token whenever you signed in with a password or SSO. On Synapse that request is what makes access tokens expire after five minutes, so the app had to renew its sign-in every five minutes for as long as it stayed signed in. Other clients, such as Element, don't ask and get a token that lasts until you sign out. Parallax no longer asks, so a new sign-in is not renewed at all.
+- A session that was signed in with an earlier version keeps renewing until you sign in again. Homeservers that sign in through OIDC (Matrix Authentication Service) always use short-lived tokens; those sessions renew as before.
+- When a session is signed in again in place (after "Sign in again to reconnect"), the refresh token from the earlier sign-in is dropped instead of being kept after the server has cancelled it.
+
 ### Messages no longer fail while the app reconnects
 
 - A message sent while Parallax was renewing its sign-in failed at once with "Send belongs to an unavailable session". Access tokens last a few minutes, so the renewal runs every few minutes and whenever the app comes back from the background, which is why it mostly happened just after opening a chat. If a renewal failed (no network yet), every send kept failing until the next attempt up to 30 seconds later.

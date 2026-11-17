@@ -296,7 +296,7 @@ class MatrixAuthService {
         body: {
           'type': matrix.LoginType.mLoginToken,
           'token': token,
-          'refresh_token': true,
+          // No 'refresh_token': see [passwordLogin].
           if (existing != null) 'device_id': pin.device,
           'initial_device_display_name': 'Parallax',
         },
@@ -579,7 +579,13 @@ class MatrixAuthService {
           user: username,
         ).toJson(),
         'password': password,
-        'refresh_token': true,
+        // Deliberately no 'refresh_token': true. Asking for refresh tokens
+        // makes Synapse issue access tokens that last five minutes, so the
+        // session has to be renewed every few minutes for as long as it
+        // lives (and every renewal is a moment when requests can't be
+        // sent). Without it the token lasts until sign-out, as it does for
+        // Element. OIDC sign-ins always use refresh tokens; those are
+        // handled by [refresh].
         'initial_device_display_name': 'Parallax',
       },
     );
@@ -621,7 +627,7 @@ class MatrixAuthService {
         ).toJson(),
         'password': password,
         'device_id': pin.device,
-        'refresh_token': true,
+        // No 'refresh_token': see [passwordLogin].
       },
     );
     final response = matrix.LoginResponse.fromJson(json);
@@ -719,7 +725,6 @@ class MatrixAuthService {
       }
       existing = current;
     }
-    final previousRefresh = existing?['refresh_token'] as String?;
     if (existing?['olm_account'] != null && client.encryption == null) {
       // SDK soft-init persists encryption?.pickledOlmAccount, not
       // newOlmAccount. Refuse rather than replace a retained pickle with null.
@@ -728,7 +733,12 @@ class MatrixAuthService {
         retryable: false,
       );
     }
-    final nextRefresh = refresh ?? previousRefresh;
+    // Exactly what this sign-in or renewal returned. A renewal that didn't
+    // rotate its refresh token passes the old one in itself ([_refresh]). A
+    // sign-in for an existing device that returns none means the session no
+    // longer has one: the server cancelled the device's earlier tokens, so
+    // keeping the stored one would leave a dead token to be tried later.
+    final nextRefresh = refresh;
     final expiry = expires == null ? null : DateTime.now().add(expires);
     _applyingSession = true;
     try {
