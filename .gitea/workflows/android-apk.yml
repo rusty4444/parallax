@@ -55,8 +55,9 @@ jobs:
       - name: Build arm64 release-optimised test APK
         run: |
           set -euo pipefail
-          # Above the last hand-built number (30030) so CI builds upgrade it.
-          BUILD_NUMBER=$((30100 + ${{ gitea.run_number }}))
+          # Above the last hand-built build (30300, version code 32300) so CI
+          # builds install over it.
+          BUILD_NUMBER=$((30300 + ${{ gitea.run_number }}))
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           # Flutter's arm64 split adds 2000 to the requested build number.
           echo "APK_VERSION_CODE=$((BUILD_NUMBER + 2000))" >> "$GITHUB_ENV"
