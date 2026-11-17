@@ -70,7 +70,6 @@ dependencies:
   mobile_scanner: ^7.5.0
   qr_flutter: ^4.1.0
   cryptography: ^2.9.0
-  phone_numbers_parser: ^9.0.26
 
 dev_dependencies:
   flutter_test:

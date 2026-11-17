@@ -6,8 +6,6 @@ import '../../directory_screen.dart';
 import '../../messaging_features.dart';
 import '../../room_avatar.dart';
 import '../../space_browser_screen.dart';
-import '../bridged_messages/bridged_message_features.dart';
-import '../bridged_messages/new_bridged_message_screen.dart';
 import '../spaces_admin/space_options_sheet.dart' show openCreateSpace;
 import '../spaces_admin/spaces_admin_features.dart';
 import 'admin_ui.dart';
@@ -144,7 +142,6 @@ class _StartChatScreenState extends State<StartChatScreen>
     final p = widget.palette;
     final term = searchController.text.trim();
     final candidates = searchCandidates;
-    final bridgedMessages = bridgedMessageFeaturesOf(widget.backend);
     final recent = [
       for (final room in widget.backend.rooms)
         if (room.isDirect && !room.invited) room,
@@ -217,23 +214,6 @@ class _StartChatScreenState extends State<StartChatScreen>
                                     ),
                                   ),
                           ),
-                          if (bridgedMessages != null)
-                            AdminTile(
-                              key: const ValueKey('startChat.bridgedMessage'),
-                              palette: p,
-                              icon: Icons.add_comment_outlined,
-                              title: 'New bridged message',
-                              subtitle: 'Use a connected messaging account',
-                              onTap: _starting
-                                  ? null
-                                  : () => _push(
-                                      NewBridgedMessageScreen(
-                                        backend: widget.backend,
-                                        palette: p,
-                                        features: bridgedMessages,
-                                      ),
-                                    ),
-                            ),
                           AdminTile(
                             palette: p,
                             icon: Icons.share_outlined,

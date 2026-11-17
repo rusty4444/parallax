@@ -60,14 +60,7 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           # Flutter's arm64 split adds 2000 to the requested build number.
           echo "APK_VERSION_CODE=$((BUILD_NUMBER + 2000))" >> "$GITHUB_ENV"
-          # Bridged-messages test builds: approved Synology HTTPS provisioning
-          # routes (rate-limited, redacted access logs). See docs/new-bridged-messages.md.
-          flutter build apk --release --target-platform android-arm64 --split-per-abi --build-number="$BUILD_NUMBER" \
-            --dart-define=PARALLAX_NEW_BRIDGED_MESSAGES=true \
-            --dart-define=PARALLAX_GMESSAGES_PROVISIONING_URL=https://matrix.samprim.net/gmessages/_matrix/provision \
-            --dart-define=PARALLAX_MESSENGER_PROVISIONING_URL=https://matrix.samprim.net/meta/_matrix/provision \
-            --dart-define=PARALLAX_INSTAGRAM_PROVISIONING_URL=https://matrix.samprim.net/instagram/_matrix/provision \
-            --dart-define=PARALLAX_PHONE_DEFAULT_REGION=AU
+          flutter build apk --release --target-platform android-arm64 --split-per-abi --build-number="$BUILD_NUMBER"
 
       - name: Inspect APK
         run: |
