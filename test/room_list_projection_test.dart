@@ -743,4 +743,143 @@ void main() {
     );
     expect(backend.isFavourite('!a:example.org'), isTrue);
   });
+
+  // --- Edited last messages ------------------------------------------------
+  // An edit's top-level body is only a fallback ("* new text"); mautrix
+  // bridges cut long ones to "* first bytes[edit fallback cut…]"). The
+  // preview must come from m.new_content, never the fallback.
+
+  Future<void> lastEvent(
+    matrix.Room r,
+    Map<String, Object?> content,
+    String batch,
+  ) async {
+    r.lastEvent = matrix.Event(
+      type: matrix.EventTypes.Message,
+      senderId: '@friend:example.org',
+      content: content,
+      room: r,
+      eventId: '\$edit-$batch',
+      originServerTs: DateTime(2026, 11, 18),
+    );
+    backend.debugRoomsSynced(
+      matrix.SyncUpdate(
+        nextBatch: batch,
+        rooms: matrix.RoomsUpdate(join: {r.id: matrix.JoinedRoomUpdate()}),
+      ),
+    );
+    await settle();
+  }
+
+  test('home previews show edited text, not the bridge cut fallback', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    await lastEvent(r, const {
+      'msgtype': 'm.text',
+      'body':
+          "* I've never tried any google model at all tbh. "
+          'Ex[edit fallback cut…]',
+      'm.new_content': {
+        'msgtype': 'm.text',
+        'body':
+            "I've never tried any google model at all tbh. "
+            'Except the one in the demo.',
+      },
+      'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$original'},
+    }, 'edit-bridge');
+    final projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.previewSender, 'Friend');
+    expect(
+      projected.preview,
+      "I've never tried any google model at all tbh. "
+      'Except the one in the demo.',
+    );
+  });
+
+  test(
+    'home previews show edited text without the asterisk fallback',
+    () async {
+      final r = client.getRoomById('!b:example.org')!;
+      await lastEvent(r, const {
+        'msgtype': 'm.text',
+        'body': '* the corrected text',
+        'm.new_content': {'msgtype': 'm.text', 'body': 'the corrected text'},
+        'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$original'},
+      }, 'edit-plain');
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.preview, 'the corrected text');
+    },
+  );
+
+  test('home previews describe media that an edit switched to', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    await lastEvent(r, const {
+      'msgtype': 'm.text',
+      'body': '* photo.jpg',
+      'm.new_content': {
+        'msgtype': 'm.image',
+        'body': 'photo.jpg',
+        'url': 'mxc://example.org/photo',
+      },
+      'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$original'},
+    }, 'edit-media');
+    final projected = backend.rooms.firstWhere((r) => r.id == '!b:example.org');
+    expect(projected.preview, 'Friend sent a photo');
+    expect(projected.previewIncludesSender, isTrue);
+  });
+
+  test(
+    'home previews hide the quoted fallback inside an edited reply',
+    () async {
+      final r = client.getRoomById('!b:example.org')!;
+      await lastEvent(r, const {
+        'msgtype': 'm.text',
+        'body': '* > <@sam.russell:samprim.net> quoted\n\nthe edited reply',
+        'm.new_content': {
+          'msgtype': 'm.text',
+          'body': '> <@sam.russell:samprim.net> quoted\n\nthe edited reply',
+          'm.relates_to': {
+            'm.in_reply_to': {'event_id': r'$original'},
+          },
+        },
+        'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$reply'},
+      }, 'edit-reply');
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.preview, 'the edited reply');
+    },
+  );
+
+  test(
+    'an edit without m.new_content drops only the fallback marker',
+    () async {
+      final r = client.getRoomById('!b:example.org')!;
+      await lastEvent(r, const {
+        'msgtype': 'm.text',
+        'body': '* orphaned fallback text',
+        'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$original'},
+      }, 'edit-orphan');
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.preview, 'orphaned fallback text');
+    },
+  );
+
+  test(
+    'a literal asterisk message that is not an edit keeps its text',
+    () async {
+      final r = client.getRoomById('!b:example.org')!;
+      await lastEvent(r, const {
+        'msgtype': 'm.text',
+        'body': '* not an edit, just a bullet',
+      }, 'edit-bullet');
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.preview, '* not an edit, just a bullet');
+    },
+  );
 }

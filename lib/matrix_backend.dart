@@ -4094,17 +4094,47 @@ class MatrixBackend extends ChatBackend
         }
       }
     }
+    // The last event can be an edit (m.replace). Its top-level body is only
+    // a fallback for old clients ("* new text"; mautrix bridges cut long
+    // ones to "* first bytes[edit fallback cut…]"). The real content lives
+    // in m.new_content — preview that, like the timeline's getDisplayEvent.
+    Map<String, Object?>? editContent;
+    if (event != null &&
+        event.type == matrix.EventTypes.Message &&
+        event.relationshipType == matrix.RelationshipTypes.edit) {
+      final replacement = event.content['m.new_content'];
+      if (replacement is Map<String, Object?>) editContent = replacement;
+    }
+    final previewMsgtype = editContent != null
+        ? editContent['msgtype']
+        : event?.messageType;
+    String? previewBody;
+    var previewIsReply = false;
+    if (event != null && event.type == matrix.EventTypes.Message) {
+      if (editContent != null) {
+        final body = editContent['body'];
+        previewBody = body is String ? body : '';
+        final relation = editContent['m.relates_to'];
+        previewIsReply = relation is Map && relation['m.in_reply_to'] is Map;
+      } else {
+        previewBody = event.text;
+        if (event.relationshipType == matrix.RelationshipTypes.edit &&
+            previewBody.startsWith('* ')) {
+          // Edit without usable m.new_content: drop the fallback marker.
+          previewBody = previewBody.substring(2);
+        }
+        previewIsReply =
+            event.inReplyToEventId(includingFallback: false) != null;
+      }
+    }
     final messagePreview =
         !isDeletion &&
-            event?.type == matrix.EventTypes.Message &&
-            event?.messageType != matrix.MessageTypes.Image &&
-            event?.messageType != matrix.MessageTypes.Video &&
-            event?.messageType != matrix.MessageTypes.File &&
-            event?.messageType != matrix.MessageTypes.Audio
-        ? visibleMessageBody(
-            event!.text,
-            isReply: event.inReplyToEventId(includingFallback: false) != null,
-          )
+            previewBody != null &&
+            previewMsgtype != matrix.MessageTypes.Image &&
+            previewMsgtype != matrix.MessageTypes.Video &&
+            previewMsgtype != matrix.MessageTypes.File &&
+            previewMsgtype != matrix.MessageTypes.Audio
+        ? visibleMessageBody(previewBody, isReply: previewIsReply)
         : null;
     _needMembers(room, [
       ...heroIds.take(4),
@@ -4121,8 +4151,8 @@ class MatrixBackend extends ChatBackend
             event?.senderId != client.userID
         ? oneTimeCodeIn(messagePreview)
         : null;
-    final mediaKind = !isDeletion && event?.type == matrix.EventTypes.Message
-        ? switch (event!.messageType) {
+    final mediaKind = !isDeletion && previewBody != null
+        ? switch (previewMsgtype) {
             matrix.MessageTypes.Image => 'photo',
             matrix.MessageTypes.Video => 'video',
             matrix.MessageTypes.File || matrix.MessageTypes.Audio => 'file',
