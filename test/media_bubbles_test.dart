@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/chat_backend.dart';
 import 'package:parallax/features/media/inline_audio.dart';
@@ -9,6 +10,7 @@ import 'package:parallax/features/media/media_hooks.dart';
 import 'package:parallax/features/media/media_preferences.dart';
 import 'package:parallax/features/media/media_settings_section.dart';
 import 'package:parallax/features/media/voice_waveform.dart';
+import 'package:parallax/features/rich_timeline/message_actions.dart';
 import 'package:parallax/hooks/hook_types.dart';
 import 'package:parallax/media_player_owner.dart';
 import 'package:parallax/message_image.dart';
@@ -297,6 +299,132 @@ void main() {
       ),
     );
     expect(find.text('IMG_2.jpg'), findsNothing);
+  });
+
+  group('links in captions', () {
+    late List<Uri> opened;
+
+    setUp(() {
+      opened = [];
+      final previous = richTimelineLaunchUrl;
+      richTimelineLaunchUrl = (uri) async {
+        opened.add(uri);
+        return true;
+      };
+      addTearDown(() => richTimelineLaunchUrl = previous);
+    });
+
+    Widget bubble(ChatEntry entry) => MaterialApp(
+      home: Scaffold(
+        body: ListView(
+          children: [
+            MessageBubble(
+              entry: entry,
+              backend: FakeMediaBackend(),
+              roomId: roomId,
+              palette: palette,
+              group: false,
+              onHeart: () {},
+              onAction: () {},
+              onReaction: (_) {},
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // A real tap on the link's first glyph. The bubble also listens for a
+    // double tap, so a single tap only counts once that wait is over.
+    Future<void> tapText(WidgetTester tester, String text) async {
+      for (final element in find.byType(RichText).evaluate()) {
+        final rich = element.widget as RichText;
+        final start = rich.text.toPlainText().indexOf(text);
+        if (start < 0) continue;
+        final paragraph = element.renderObject! as RenderParagraph;
+        final boxes = paragraph.getBoxesForSelection(
+          TextSelection(baseOffset: start, extentOffset: start + text.length),
+        );
+        if (boxes.isEmpty) continue;
+        await tester.tapAt(
+          paragraph.localToGlobal(boxes.first.toRect().center),
+        );
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump();
+        return;
+      }
+      fail('No text "$text" on screen');
+    }
+
+    testWidgets('a bridged post link under its picture opens when tapped', (
+      tester,
+    ) async {
+      // What the Messenger bridge sends for a shared Facebook post: the
+      // post's picture, captioned with the post's link.
+      const link = 'https://www.facebook.com/share/p/1AbCdEfGhJ/';
+      await tester.pumpWidget(
+        bubble(
+          mediaEntry(
+            r'$post',
+            EntryKind.image,
+            body: link,
+            formattedBody: '<a href="$link">$link</a>',
+            content: {
+              'msgtype': 'm.image',
+              'filename': 'image.jpg',
+              'format': 'org.matrix.custom.html',
+              'formatted_body': '<a href="$link">$link</a>',
+              'external_url': link,
+              'info': {'w': 526, 'h': 526, 'mimetype': 'image/jpeg'},
+            },
+          ),
+        ),
+      );
+      expect(find.byType(MessageImage), findsOneWidget);
+      await tapText(tester, link);
+      expect(opened, [Uri.parse(link)]);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a link typed in a plain caption opens too', (tester) async {
+      await tester.pumpWidget(
+        bubble(
+          mediaEntry(
+            r'$clip',
+            EntryKind.video,
+            body: 'Full match at https://example.org/match.',
+            content: {
+              'msgtype': 'm.video',
+              'filename': 'clip.mp4',
+              'info': {'w': 320, 'h': 180, 'mimetype': 'video/mp4'},
+            },
+          ),
+        ),
+      );
+      await tapText(tester, 'https://example.org/match');
+      expect(opened, [Uri.parse('https://example.org/match')]);
+    });
+
+    testWidgets('an emoji-only caption stays caption-sized', (tester) async {
+      await tester.pumpWidget(
+        bubble(
+          mediaEntry(
+            r'$party',
+            EntryKind.image,
+            body: '🎉🎉',
+            content: {
+              'filename': 'party.jpg',
+              'info': {'w': 400, 'h': 300},
+            },
+          ),
+        ),
+      );
+      final caption = tester.widget<RichText>(
+        find.byWidgetPredicate(
+          (widget) => widget is RichText && widget.text.toPlainText() == '🎉🎉',
+        ),
+      );
+      expect(caption.text.style!.fontSize, 15);
+    });
   });
 
   testWidgets('file card shows type icon, size and type label', (tester) async {

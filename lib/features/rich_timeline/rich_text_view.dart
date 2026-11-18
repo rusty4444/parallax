@@ -68,6 +68,7 @@ class MessageContentView extends StatefulWidget {
     this.onPermalink,
     this.onCopyTarget,
     this.backend,
+    this.largeEmoji = true,
   });
 
   final ChatEntry entry;
@@ -83,6 +84,10 @@ class MessageContentView extends StatefulWidget {
   /// signed-in backend known to the packs module; without one, emoticons
   /// show their `:shortcode:` alt text.
   final ChatBackend? backend;
+
+  /// Show a message made only of a few emoji larger. Off for media
+  /// captions.
+  final bool largeEmoji;
 
   @override
   State<MessageContentView> createState() => _MessageContentViewState();
@@ -132,6 +137,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       widget.palette,
       widget.ownUserId,
       widget.backend,
+      widget.largeEmoji,
       _revealed.length,
     );
     if (key != _key || _built == null) {
@@ -194,6 +200,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       revealed: _revealed,
       reveal: _reveal,
       backend: widget.backend,
+      largeEmoji: widget.largeEmoji,
     );
     final formatted = entry.formattedBody;
     if (formatted != null &&
@@ -202,7 +209,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       final rendered = renderer.renderHtml(formatted, leading: leading);
       if (rendered != null) return rendered;
     }
-    if (leading.isEmpty && isEmojiOnly(entry.body)) {
+    if (widget.largeEmoji && leading.isEmpty && isEmojiOnly(entry.body)) {
       return Text(
         entry.body.trim(),
         style: base.copyWith(fontSize: (base.fontSize ?? 15) * 2.2),
@@ -314,6 +321,7 @@ class _Renderer {
     required this.revealed,
     required this.reveal,
     this.backend,
+    this.largeEmoji = true,
   });
 
   final TextStyle base;
@@ -329,6 +337,7 @@ class _Renderer {
   final Set<int> revealed;
   final void Function(int index) reveal;
   final ChatBackend? backend;
+  final bool largeEmoji;
   int _spoilers = 0;
   int _chars = 0;
   int _emoticons = 0;
@@ -367,7 +376,7 @@ class _Renderer {
     }
     messageContext = fragment.text ?? '';
     final fontSize = base.fontSize ?? 15;
-    _emoticonSize = leading.isEmpty && _onlyEmoticons(fragment)
+    _emoticonSize = largeEmoji && leading.isEmpty && _onlyEmoticons(fragment)
         ? (fontSize * 2.4).clamp(28.0, 48.0)
         : (fontSize * 1.45).clamp(14.0, 32.0);
     final block = _BlockBuilder(this);

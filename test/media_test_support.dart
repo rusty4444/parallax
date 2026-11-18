@@ -22,11 +22,13 @@ ChatEntry mediaEntry(
   bool redacted = false,
   DateTime? time,
   String sender = '@alice:example.org',
+  String? formattedBody,
 }) => ChatEntry(
   id: id,
   sender: sender,
   senderName: sender == me ? 'Me' : 'Alice',
   body: body,
+  formattedBody: formattedBody,
   time: time ?? DateTime.utc(2026, 11, 10, 9, 30),
   mine: mine,
   kind: kind,

@@ -14,17 +14,20 @@ import 'permalinks.dart';
 import 'rich_text_view.dart';
 import 'rich_timeline_features.dart';
 
-/// Renders a message's text (plain or formatted) inside a bubble.
+/// Renders a message's text (plain or formatted) inside a bubble. Media
+/// captions use it too, with [largeEmoji] off.
 Widget buildMessageText(
   BuildContext context,
   EntryHookContext ctx, {
   required TextStyle style,
+  bool largeEmoji = true,
 }) {
   final features = richTimelineFeaturesOf(ctx.backend);
   return MessageContentView(
     backend: ctx.backend,
     entry: ctx.entry,
     style: style,
+    largeEmoji: largeEmoji,
     palette: ctx.palette,
     ownUserId: ctx.backend.userId,
     resolveName: features == null

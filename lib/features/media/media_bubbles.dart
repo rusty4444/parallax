@@ -12,6 +12,7 @@ import '../../hooks/hook_types.dart';
 import '../../media_viewer.dart';
 import '../../message_image.dart';
 import '../file_preview/inline_document_preview.dart';
+import '../rich_timeline/rich_timeline_hooks.dart';
 import 'inline_audio.dart';
 import 'media_actions.dart';
 import 'media_content.dart';
@@ -33,15 +34,28 @@ void _open(BuildContext context, EntryHookContext ctx) => unawaited(
   ),
 );
 
-Widget _caption(EntryHookContext ctx, String? caption) => caption == null
-    ? const SizedBox.shrink()
-    : Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Text(
-          caption,
-          style: TextStyle(color: ctx.onBubble, fontSize: 15, height: 1.35),
-        ),
-      );
+Widget _caption(EntryHookContext ctx, String? caption) =>
+    caption == null ? const SizedBox.shrink() : _Caption(ctx);
+
+/// A media caption, drawn like message text so its links, mentions and
+/// formatting work. Bridges caption the picture of a shared post with the
+/// post's link, which has to open when tapped.
+class _Caption extends StatelessWidget {
+  const _Caption(this.ctx);
+  final EntryHookContext ctx;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: buildMessageText(
+      context,
+      ctx,
+      style: TextStyle(color: ctx.onBubble, fontSize: 15, height: 1.35),
+      // A caption stays caption-sized under its picture.
+      largeEmoji: false,
+    ),
+  );
+}
 
 /// Image with Element X caption rules: the body is shown under the image only
 /// when the event has a separate, different `filename`.

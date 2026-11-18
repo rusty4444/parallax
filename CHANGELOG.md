@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Links in captions can be tapped
+
+- A link in the caption of a photo, video, audio message or file opens when you tap it. Before, captions were plain text. The usual case is a Facebook post shared in Messenger: the bridge sends the post's picture with the post's link as its caption, so the picture appeared but the link under it did nothing.
+- Captions are drawn like message text, so mentions, formatting and tap-to-copy on codes and phone numbers work in them too. An emoji-only caption keeps its normal size.
+
 ### Zoomed pictures use the whole screen
 
 - Pinching a picture in the viewer zooms it across the whole page, down to the bottom edge of the screen. Before, the zoomed picture stayed inside the frame it had at rest, so a landscape photo on a portrait phone only ever used a strip across the middle.
