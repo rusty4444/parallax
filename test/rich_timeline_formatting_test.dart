@@ -147,6 +147,115 @@ void main() {
       );
     });
 
+    test('display-name mention pills keep the name as anchor text', () {
+      // Regression: the SDK pill syntax labels anchors with the raw MXID,
+      // which mautrix-teams forwards as the visible Teams mention text.
+      final content = composeTextMessage(
+        '@Quinn Harper check your messages when you can',
+        ownUserId: me,
+        mentionLabels: const {
+          'Quinn Harper': '@meta_555000111:samprim.net',
+        },
+      );
+      expect(
+        content['body'],
+        '@meta_555000111:samprim.net check your messages when you can',
+      );
+      expect(content['m.mentions'], {
+        'user_ids': ['@meta_555000111:samprim.net'],
+      });
+      expect(
+        content['formatted_body'],
+        contains(
+          '<a href="https://matrix.to/#/@meta_555000111:samprim.net">'
+          'Quinn Harper</a>',
+        ),
+      );
+      expect(
+        content['formatted_body'],
+        isNot(contains('>@meta_555000111:samprim.net</a>')),
+      );
+    });
+
+    test('pill relabel leaves custom link text and unlabelled IDs alone', () {
+      final content = composeTextMessage(
+        '[Bob](https://matrix.to/#/@bob:example.org) and '
+        '@alice:example.org and @Quinn Harper',
+        ownUserId: me,
+        mentionLabels: const {
+          'Quinn Harper': '@meta_555000111:samprim.net',
+        },
+      );
+      final html = content['formatted_body'] as String;
+      expect(
+        html,
+        contains('<a href="https://matrix.to/#/@bob:example.org">Bob</a>'),
+      );
+      expect(
+        html,
+        contains(
+          '<a href="https://matrix.to/#/@alice:example.org">'
+          '@alice:example.org</a>',
+        ),
+      );
+      expect(
+        html,
+        contains(
+          '<a href="https://matrix.to/#/@meta_555000111:samprim.net">'
+          'Quinn Harper</a>',
+        ),
+      );
+    });
+
+    test('pill relabel escapes display names with HTML characters', () {
+      final content = composeTextMessage(
+        '@Sam & Co <team> hi',
+        ownUserId: me,
+        mentionLabels: const {'Sam & Co <team>': '@samco:example.org'},
+      );
+      final html = content['formatted_body'] as String;
+      expect(
+        html,
+        contains(
+          '<a href="https://matrix.to/#/@samco:example.org">'
+          'Sam &amp; Co &lt;team&gt;</a>',
+        ),
+      );
+      expect(content['m.mentions'], {
+        'user_ids': ['@samco:example.org'],
+      });
+    });
+
+    test('pill relabel applies to edits and skips code spans', () {
+      final edit = composeTextMessage(
+        '@Quinn Harper again',
+        ownUserId: me,
+        editEventId: r'$original',
+        mentionLabels: const {
+          'Quinn Harper': '@meta_555000111:samprim.net',
+        },
+      );
+      final newContent = edit['m.new_content'] as Map;
+      expect(
+        newContent['formatted_body'],
+        contains(
+          '<a href="https://matrix.to/#/@meta_555000111:samprim.net">'
+          'Quinn Harper</a>',
+        ),
+      );
+      final code = composeTextMessage(
+        '`@meta_555000111:samprim.net` stays literal',
+        ownUserId: me,
+        mentionLabels: const {
+          'Quinn Harper': '@meta_555000111:samprim.net',
+        },
+      );
+      final html = code['formatted_body'] as String?;
+      if (html != null) {
+        expect(html, isNot(contains('Quinn Harper')));
+      }
+    });
+
     test('email addresses and @roomful are not mentions', () {
       final content = composeTextMessage('mail sam@example.org about @roomful');
       expect(content['m.mentions'], <String, Object?>{});

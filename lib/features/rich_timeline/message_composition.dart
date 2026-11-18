@@ -40,7 +40,7 @@ Map<String, Object?> composeTextMessage(
   final html = markdownToMatrixHtml(body);
   if (html != null) {
     content['format'] = 'org.matrix.custom.html';
-    content['formatted_body'] = html;
+    content['formatted_body'] = relabelMentionPills(html, mentionLabels);
   }
   final mentions = mentionsFor(
     body,
@@ -250,6 +250,51 @@ String restoreMentionLabels(String text, Map<String, String> labels) {
     );
   }
   return result;
+}
+
+/// Restores display-name text on mention pills whose anchor text is the raw
+/// Matrix ID. Autocomplete inserts display names, [restoreMentionLabels] swaps
+/// them for IDs in the plain body, and the SDK's pill syntax then builds
+/// anchors labelled with the ID itself. Bridges such as mautrix-teams use the
+/// anchor text as the remote mention's visible name, so an ID-labelled pill
+/// shows the raw MXID on the far side (e.g. Teams). The ID stays in the href,
+/// the plain body and `m.mentions`; only the visible pill text goes back to
+/// the display name. Anchors with custom text are left alone.
+String relabelMentionPills(String html, Map<String, String> labels) {
+  if (labels.isEmpty || !html.contains('matrix.to/#/@')) return html;
+  final names = <String, String>{};
+  for (final entry in labels.entries) {
+    final label = entry.key.trim();
+    if (label.isNotEmpty && label != entry.value) {
+      names[entry.value] = label;
+    }
+  }
+  if (names.isEmpty) return html;
+  const prefix = 'https://matrix.to/#/';
+  final fragment = html_parser.parseFragment(html);
+  var changed = false;
+  void visit(dom.Node node) {
+    for (final child in node.nodes.toList()) {
+      if (child is! dom.Element) continue;
+      if (child.localName == 'a') {
+        final href = child.attributes['href'];
+        if (href != null && href.startsWith(prefix)) {
+          final id = href.substring(prefix.length);
+          final name = names[id];
+          if (name != null && child.text == id) {
+            child.nodes
+              ..clear()
+              ..add(dom.Text(name));
+            changed = true;
+          }
+        }
+      }
+      visit(child);
+    }
+  }
+
+  visit(fragment);
+  return changed ? fragment.outerHtml : html;
 }
 
 /// The plain-text pill label for a user, for composer insertion.
