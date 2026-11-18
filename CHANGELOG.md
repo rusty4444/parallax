@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Copy a code from the chat list
+
+- When the latest message in an unread chat has a one-time code, the chat's row on the home screen shows a "Copy ‘123456’" button under the preview, as Google Messages does. Tapping it copies the code and says "Code copied". The chat isn't opened and stays unread.
+- The button uses the same code detection as tapping a code inside a message and the Copy button on a notification. It goes once the chat is read. It isn't offered for your own messages, for phone numbers, or for messages longer than 1,000 characters.
+
 ### Links in captions can be tapped
 
 - A link in the caption of a photo, video, audio message or file opens when you tap it. Before, captions were plain text. The usual case is a Facebook post shared in Messenger: the bridge sends the post's picture with the post's link as its caption, so the picture appeared but the link under it did nothing.

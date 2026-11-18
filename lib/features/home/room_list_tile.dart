@@ -19,6 +19,7 @@ class RoomListTile extends StatelessWidget {
     this.onLongPress,
     this.onAccept,
     this.onDecline,
+    this.onCopyCode,
     this.favourite = false,
     this.failedSend = false,
     this.compact = false,
@@ -35,6 +36,10 @@ class RoomListTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onAccept;
   final VoidCallback? onDecline;
+
+  /// Copies the one-time code of an unread last message. Without it the
+  /// row offers no Copy button.
+  final ValueChanged<String>? onCopyCode;
   final bool favourite;
   final bool failedSend;
   final bool compact;
@@ -90,6 +95,13 @@ class RoomListTile extends StatelessWidget {
     final avatarSize = style == HomeRowStyle.compact ? 40.0 : 52.0;
     // Invitations always say what they are; otherwise the setting decides.
     final previewLines = room.invited ? 2 : preview.maxLines;
+    // As in Google Messages: an unread code can be copied from the list.
+    final code =
+        onCopyCode != null &&
+            !room.invited &&
+            (room.unread > 0 || room.manuallyUnread)
+        ? room.previewCode
+        : null;
     final previewText = room.invited
         ? (room.isDirect ? 'Invited you to chat' : 'Invited you to join')
         : room.preview.isEmpty
@@ -236,6 +248,15 @@ class RoomListTile extends StatelessWidget {
                   ],
                 ),
               ],
+              if (code != null) ...[
+                SizedBox(height: dense ? 6 : 8),
+                _CopyCodeButton(
+                  key: ValueKey('copy-code-${room.id}'),
+                  code: code,
+                  palette: p,
+                  onPressed: () => onCopyCode!(code),
+                ),
+              ],
               if (room.invited && (onAccept != null || onDecline != null)) ...[
                 const SizedBox(height: 10),
                 Row(
@@ -321,6 +342,66 @@ class RoomListTile extends StatelessWidget {
       ],
     );
   }
+}
+
+/// "Copy ‘123456’" under an unread row whose last message has a one-time
+/// code, so the code can be copied without opening the chat.
+class _CopyCodeButton extends StatelessWidget {
+  const _CopyCodeButton({
+    super.key,
+    required this.code,
+    required this.palette,
+    required this.onPressed,
+  });
+  final String code;
+  final AppPalette palette;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: 'Copy code $code',
+    excludeSemantics: true,
+    child: Material(
+      color: palette.accent.withValues(alpha: 0.14),
+      shape: StadiumBorder(
+        side: BorderSide(color: palette.accent.withValues(alpha: 0.5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPressed,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 36),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 13),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.content_copy_rounded,
+                  size: 15,
+                  color: palette.accent,
+                ),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    'Copy ‘$code’',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: palette.foreground,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _Badge extends StatelessWidget {

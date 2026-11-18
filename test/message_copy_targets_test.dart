@@ -71,6 +71,34 @@ void main() {
     );
   });
 
+  group('the home row offers one-time codes only', () {
+    test('a code', () {
+      expect(
+        oneTimeCodeIn('Your one-time code is 123456. Do not share it.'),
+        '123456',
+      );
+    });
+
+    test('not a phone number or an IP address', () {
+      expect(oneTimeCodeIn('Call me on +61 400 123 456'), isNull);
+      expect(oneTimeCodeIn('Server 192.168.1.1'), isNull);
+      expect(oneTimeCodeIn('See you at 6'), isNull);
+      expect(oneTimeCodeIn(''), isNull);
+    });
+
+    test('a code after a phone number', () {
+      expect(
+        oneTimeCodeIn('Call +61 400 123 456 and enter login code 123456'),
+        '123456',
+      );
+    });
+
+    test('long messages are not scanned', () {
+      final filler = 'word ' * (maxOneTimeCodeMessageLength ~/ 5);
+      expect(oneTimeCodeIn('Your code is 123456. $filler'), isNull);
+    });
+  });
+
   test('IP addresses are tappable values but not notification actions', () {
     const text = 'Server 192.168.1.1';
     expect(messageCopyTarget(text), isNull);

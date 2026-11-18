@@ -466,6 +466,51 @@ void main() {
     }
   });
 
+  test('an unread code from someone else is offered for copying', () async {
+    final r = client.getRoomById('!b:example.org')!;
+    var batch = 2;
+    Future<String?> code(
+      String body, {
+      required int unread,
+      String sender = '@friend:example.org',
+    }) async {
+      r.notificationCount = unread;
+      r.lastEvent = matrix.Event(
+        type: matrix.EventTypes.Message,
+        senderId: sender,
+        content: {'msgtype': 'm.text', 'body': body},
+        room: r,
+        eventId: '\$code-$batch',
+        originServerTs: DateTime(2026, 11, 13),
+      );
+      backend.debugRoomsSynced(
+        matrix.SyncUpdate(
+          nextBatch: '${batch++}',
+          rooms: matrix.RoomsUpdate(
+            join: {'!b:example.org': matrix.JoinedRoomUpdate()},
+          ),
+        ),
+      );
+      await settle();
+      final projected = backend.rooms.firstWhere(
+        (r) => r.id == '!b:example.org',
+      );
+      expect(projected.preview, body);
+      expect(projected.unread, unread);
+      return projected.previewCode;
+    }
+
+    const sms = 'Your verification code is 671152. Don’t share it.';
+    expect(await code(sms, unread: 1), '671152');
+    // Read: nothing to offer.
+    expect(await code(sms, unread: 0), isNull);
+    // Your own message, sent from another device while others are unread.
+    expect(await code(sms, unread: 2, sender: '@me:example.org'), isNull);
+    // Not a code.
+    expect(await code('Call me on +61 400 123 456', unread: 1), isNull);
+    expect(await code('See you at 6', unread: 1), isNull);
+  });
+
   test('a sync touching one room projects only that room', () async {
     final before = {for (final r in backend.rooms) r.id: r};
     client.getRoomById('!b:example.org')!.lastEvent = matrix.Event(

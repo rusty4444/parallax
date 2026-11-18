@@ -205,6 +205,22 @@ List<MessageCopyMatch> messageCopyMatches(
   return matches;
 }
 
+/// Longest message scanned for a code to offer on the home screen. One-time
+/// code messages are short; a longer one is skipped rather than cut, because
+/// a cut could land inside a number.
+const maxOneTimeCodeMessageLength = 1000;
+
+/// The one-time code in [text], if it has one. The home row of an unread
+/// chat offers to copy it; phone numbers and IP addresses are not offered
+/// there.
+String? oneTimeCodeIn(String text) {
+  if (text.length > maxOneTimeCodeMessageLength) return null;
+  for (final match in messageCopyMatches(text)) {
+    if (match.kind == MessageCopyKind.oneTimeCode) return match.value;
+  }
+  return null;
+}
+
 /// The single value a notification should offer. A code wins over a phone
 /// number. IP addresses stay tappable in the message and are not notification
 /// actions.

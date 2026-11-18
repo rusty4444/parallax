@@ -687,6 +687,18 @@ class _InboxScreenState extends State<InboxScreen> {
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
 
+  /// Copies the one-time code offered on an unread row. The chat stays
+  /// unread: nothing was opened.
+  Future<void> _copyCode(String code) async {
+    Haptics.selection();
+    try {
+      await Clipboard.setData(ClipboardData(text: code));
+      if (mounted && _owner.isCurrent) _showError('Code copied');
+    } catch (_) {
+      if (mounted && _owner.isCurrent) _showError('Couldn’t copy the code.');
+    }
+  }
+
   void _open(String id) {
     if (!mounted || !_owner.isCurrent) return;
     Navigator.of(context).push(
@@ -1024,6 +1036,7 @@ class _InboxScreenState extends State<InboxScreen> {
       onLongPress: room.invited ? null : () => _showRoomActions(room),
       onAccept: () => _acceptInvite(room),
       onDecline: () => _declineInvite(room),
+      onCopyCode: _copyCode,
     );
   }
 

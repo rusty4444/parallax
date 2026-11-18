@@ -10,6 +10,7 @@ import 'package:parallax/features/home/room_list_filters.dart';
 import 'package:parallax/haptics.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/room_screen.dart';
 import 'package:parallax/space_browser_screen.dart';
 import 'package:parallax/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,6 +33,7 @@ ChatRoom _room(
   String preview = '',
   String? sender,
   bool previewIncludesSender = false,
+  String? code,
 }) => ChatRoom(
   id: id,
   name: name ?? id,
@@ -48,6 +50,7 @@ ChatRoom _room(
   notificationMode: mode,
   previewSender: sender,
   previewIncludesSender: previewIncludesSender,
+  previewCode: code,
 );
 
 List<String> _ids(List<ChatRoom> rooms) => [for (final r in rooms) r.id];
@@ -345,6 +348,92 @@ void main() {
       expect(find.text('Team'), findsOneWidget);
       expect(find.byTooltip('Mentioned'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
+    });
+
+    testWidgets('an unread code is copied from its row without opening it', (
+      tester,
+    ) async {
+      const sms = 'Your verification code is 671152. Don’t share it.';
+      backend.roomList = [
+        _room(
+          '!google:x.org',
+          name: 'Google',
+          direct: true,
+          unread: 1,
+          preview: sms,
+          code: '671152',
+        ),
+        // Read, and an invitation: no button.
+        _room('!bank:x.org', name: 'Bank', preview: sms, code: '671152'),
+        _room('!inv:x.org', name: 'Invitation', invited: true, code: '671152'),
+      ];
+      await pump(tester);
+      final copy = find.text('Copy ‘671152’');
+      expect(copy, findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('room-!google:x.org')),
+          matching: copy,
+        ),
+        findsOneWidget,
+      );
+      // Under the preview, inside the row.
+      expect(
+        tester.getTopLeft(copy).dy,
+        greaterThan(tester.getBottomLeft(find.text(sms).first).dy),
+      );
+
+      await tester.tap(copy);
+      await tester.pumpAndSettle();
+      expect(clipboard, ['671152']);
+      expect(find.text('Code copied'), findsOneWidget);
+      expect(haptics, ['HapticFeedbackType.lightImpact']);
+      // Only the button was pressed: the chat is not opened or marked read.
+      expect(find.byType(RoomScreen), findsNothing);
+      expect(backend.activeRoomId, isNull);
+      expect(backend.calls, isEmpty);
+      expect(copy, findsOneWidget);
+
+      // Once the chat is read the button goes.
+      await tester.longPress(find.text('Google'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mark as read'));
+      await tester.pumpAndSettle();
+      expect(copy, findsNothing);
+    });
+
+    testWidgets('the copy button fits every row style on a narrow phone', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = AppearancePreferences();
+      addTearDown(prefs.dispose);
+      backend.roomList = [
+        _room(
+          '!codes:x.org',
+          name: 'A sender with a very long name that has to be cut short',
+          unread: 120,
+          highlights: 1,
+          preview: 'Your code is ABCD-1234-EFGH. Do not share it with anyone.',
+          sender: 'Mia',
+          code: 'ABCD-1234-EFGH',
+        ),
+      ];
+      await pump(tester, prefs: prefs);
+      await tester.binding.setSurfaceSize(const Size(320, 700));
+      for (final style in HomeRowStyle.values) {
+        for (final preview in HomePreview.values) {
+          await prefs.setHomeRowStyle(style);
+          await prefs.setHomePreview(preview);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('copy-code-!codes:x.org')),
+            findsOneWidget,
+            reason: '$style $preview',
+          );
+          expect(tester.takeException(), isNull, reason: '$style $preview');
+        }
+      }
     });
 
     testWidgets('Space switcher filters to Space children', (tester) async {

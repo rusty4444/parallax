@@ -116,6 +116,7 @@ class ChatRoom {
     this.isPublic = false,
     this.previewSender,
     this.previewIncludesSender = false,
+    this.previewCode,
     this.canonicalAlias,
     this.network,
   });
@@ -157,6 +158,10 @@ class ChatRoom {
   /// Whether [preview] already includes [previewSender], as in
   /// "Chris sent a photo", rather than being a message body.
   final bool previewIncludesSender;
+
+  /// A one-time code in the last message, when that message is unread and
+  /// from someone else. The home row offers to copy it.
+  final String? previewCode;
   final String? canonicalAlias;
 
   /// The app the chat comes from (bridged or native Matrix); null when
@@ -197,6 +202,8 @@ class ChatRoom {
     isPublic: isPublic,
     previewSender: previewSender,
     previewIncludesSender: previewIncludesSender,
+    // A replaced preview is no longer the message the code came from.
+    previewCode: preview == null ? previewCode : null,
     canonicalAlias: canonicalAlias,
     network: network,
   );
@@ -223,6 +230,7 @@ bool sameChatRoom(ChatRoom a, ChatRoom b) {
       a.isPublic != b.isPublic ||
       a.previewSender != b.previewSender ||
       a.previewIncludesSender != b.previewIncludesSender ||
+      a.previewCode != b.previewCode ||
       a.canonicalAlias != b.canonicalAlias ||
       a.network != b.network ||
       a.tags.length != b.tags.length ||

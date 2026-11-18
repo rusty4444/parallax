@@ -76,6 +76,7 @@ ChatRoom _room(
   int unread = 0,
   bool favourite = false,
   String? sender,
+  String? code,
 }) => ChatRoom(
   id: id,
   name: name,
@@ -85,6 +86,7 @@ ChatRoom _room(
   unread: unread,
   favourite: favourite,
   previewSender: sender,
+  previewCode: code,
 );
 
 HomeFakeBackend _homeBackend() => HomeFakeBackend()
@@ -100,6 +102,15 @@ HomeFakeBackend _homeBackend() => HomeFakeBackend()
     _room('!m:x', 'Matrix Donkeys', 'Encrypted message', sender: 'You'),
     _room('!i:x', 'Is This Real?', 'Yardwork multitasking', sender: 'You'),
     _room('!h:x', 'hayander', 'Encrypted message', direct: true, unread: 2),
+    _room(
+      '!c:x',
+      'Google',
+      'Your Google verification code is 671152. Don’t share your code with '
+          'anyone.',
+      direct: true,
+      unread: 1,
+      code: '671152',
+    ),
     _room('!t:x', 'Team', 'Standup moved to 10', sender: 'Mia', unread: 4),
     _room('!a:x', 'Alex', 'See you then', direct: true),
   ]

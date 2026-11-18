@@ -33,6 +33,7 @@ import 'key_query_validation.dart';
 import 'media_disk_cache.dart';
 import 'media_download.dart';
 import 'matrix_send_guard.dart';
+import 'message_copy_targets.dart';
 import 'message_text.dart';
 import 'recipient_trust.dart';
 import 'reaction_summary.dart';
@@ -4111,6 +4112,15 @@ class MatrixBackend extends ChatBackend
       if (messagePreview != null)
         ...room.mentionsMissingLocally(messagePreview),
     ]);
+    final unread = room.notificationCount;
+    final markedUnread = room.markedUnread;
+    // Only an unread message from someone else is scanned for a code.
+    final previewCode =
+        messagePreview != null &&
+            (unread > 0 || markedUnread) &&
+            event?.senderId != client.userID
+        ? oneTimeCodeIn(messagePreview)
+        : null;
     final mediaKind = !isDeletion && event?.type == matrix.EventTypes.Message
         ? switch (event!.messageType) {
             matrix.MessageTypes.Image => 'photo',
@@ -4134,6 +4144,7 @@ class MatrixBackend extends ChatBackend
       isPublic: room.joinRules == matrix.JoinRules.public,
       previewSender: previewSender,
       previewIncludesSender: mediaKind != null && previewSender != null,
+      previewCode: previewCode,
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       network: room.parallaxNetwork,
       id: room.id,
@@ -4156,8 +4167,8 @@ class MatrixBackend extends ChatBackend
           ? 'Encrypted message'
           : '',
       lastActivity: event?.originServerTs,
-      unread: room.notificationCount,
-      manuallyUnread: room.markedUnread,
+      unread: unread,
+      manuallyUnread: markedUnread,
       avatarUrl: room.parallaxAvatar,
       encrypted: room.encrypted,
       isDirect: isDirect,
