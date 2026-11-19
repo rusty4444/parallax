@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'hooks/hook_types.dart';
 import 'message_image.dart';
 import 'room_avatar.dart';
 import 'timeline/double_tap_react.dart';
 import 'timeline/message_bubble.dart';
+import 'timeline/message_hover_menu.dart';
 import 'timeline/reaction_pills.dart';
 import 'timeline/swipe_reply.dart';
 import 'features/appearance/bubble_colours.dart';
@@ -23,6 +25,7 @@ class GalleryBubble extends StatelessWidget {
     required this.onAction,
     required this.onReaction,
     this.onReply,
+    this.hoverActionsBuilder,
     this.showSender = false,
   });
 
@@ -35,16 +38,15 @@ class GalleryBubble extends StatelessWidget {
   final void Function(ChatEntry, String) onReaction;
   final ValueChanged<ChatEntry>? onReply;
 
+  /// Desktop hover quick actions, per photo (as long-press is per photo).
+  final List<MessageActionItem> Function(ChatEntry entry)? hoverActionsBuilder;
+
   /// Show the sender's avatar beside the gallery (first of a run, others'
   /// messages, outside direct chats).
   final bool showSender;
 
-  Widget _photo(ChatEntry entry, double width, double height) => SwipeReply(
-    key: ValueKey('swipe-photo-${entry.id}'),
-    palette: palette,
-    mine: entry.mine,
-    onReply: entry.redacted || onReply == null ? null : () => onReply!(entry),
-    child: DoubleTapReact(
+  Widget _photo(ChatEntry entry, double width, double height) {
+    final photo = DoubleTapReact(
       onDoubleTap: () => onHeart(entry),
       onLongPress: () => onAction(entry),
       child: MessageImage(
@@ -59,8 +61,22 @@ class GalleryBubble extends StatelessWidget {
         // Mosaic cells keep their fixed grid shape.
         autoAspect: false,
       ),
-    ),
-  );
+    );
+    final builder = hoverActionsBuilder;
+    return SwipeReply(
+      key: ValueKey('swipe-photo-${entry.id}'),
+      palette: palette,
+      mine: entry.mine,
+      onReply: entry.redacted || onReply == null ? null : () => onReply!(entry),
+      child: builder == null
+          ? photo
+          : MessageHoverMenu(
+              actionsBuilder: () => builder(entry),
+              palette: palette,
+              child: photo,
+            ),
+    );
+  }
 
   Widget _layout(double width) {
     final half = (width - 4) / 2;

@@ -11,6 +11,7 @@ import 'feature_settings_scope.dart';
 import 'features/reactions/reaction_hooks.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
 import 'features/reactions/quick_reaction_settings.dart';
+import 'features/rich_timeline/message_actions.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/scheduled/undo_send.dart';
 import 'hooks/registry.dart';
@@ -752,6 +753,102 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     });
   }
 
+  /// Full emoji picker → reaction. Shared by the action sheet's "more
+  /// reactions" and the desktop hover bar's react button.
+  Future<void> _pickReaction(ChatEntry entry) async {
+    final emoji = await pickEmoji(
+      context,
+      palette: widget.palette,
+      forReaction: true,
+    );
+    if (emoji != null && mounted && _owner.isCurrent) {
+      await _react(entry, emoji);
+    }
+  }
+
+  Future<void> _openThread(ChatEntry entry) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => ThreadScreen(
+        backend: widget.backend,
+        roomId: widget.roomId,
+        root: entry,
+      ),
+    ),
+  );
+
+  void _editEntry(ChatEntry entry) {
+    unawaited(_flushDraft());
+    setState(() {
+      _advanceComposerContext();
+      _editing = entry;
+      _replyingTo = null;
+      // Element X formatting survives editing (HTML → composer markdown).
+      _setDraft(composerTextForEdit(entry));
+    });
+  }
+
+  /// Desktop hover quick actions, in Discord's order: react, reply, thread,
+  /// edit (own text), pin (when permitted), more. Every button reuses the
+  /// action sheet's own path, so the two menus can never drift apart.
+  /// Resolved on hover, not per timeline build.
+  List<MessageActionItem> _hoverActions(ChatEntry entry) {
+    if (!mounted ||
+        !_owner.isCurrent ||
+        entry.redacted ||
+        entry.kind == EntryKind.state) {
+      return const [];
+    }
+    final remote = hasServerEventId(entry);
+    final pin = messageActionsFor(context, _entryContext(entry))
+        .where(
+          (item) => item.id == 'reactions.pin' || item.id == 'reactions.unpin',
+        )
+        .firstOrNull;
+    final canEdit =
+        entry.mine &&
+        const {
+          EntryKind.text,
+          EntryKind.emote,
+          EntryKind.notice,
+        }.contains(entry.kind);
+    return [
+      if (reactionsAllowed(_roomContext(_currentRoom)))
+        MessageActionItem(
+          id: 'hover.react',
+          icon: Icons.add_reaction_outlined,
+          label: 'Add reaction',
+          onSelected: (_) => _pickReaction(entry),
+        ),
+      MessageActionItem(
+        id: 'hover.reply',
+        icon: Icons.reply_rounded,
+        label: 'Reply',
+        onSelected: (_) async => _replyToEntry(entry),
+      ),
+      if (_features != null && remote)
+        MessageActionItem(
+          id: 'hover.thread',
+          icon: Icons.forum_outlined,
+          label: 'Open thread',
+          onSelected: (_) => _openThread(entry),
+        ),
+      if (canEdit)
+        MessageActionItem(
+          id: 'hover.edit',
+          icon: Icons.edit_outlined,
+          label: 'Edit message',
+          onSelected: (_) async => _editEntry(entry),
+        ),
+      ?pin,
+      MessageActionItem(
+        id: 'hover.more',
+        icon: Icons.more_horiz_rounded,
+        label: 'More actions',
+        onSelected: (_) => _showActions(entry),
+      ),
+    ];
+  }
+
   Future<void> _showActions(ChatEntry entry) async {
     if (!mounted || !_owner.isCurrent || entry.redacted) return;
     Haptics.longPress();
@@ -916,26 +1013,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       return;
     }
     if (choice == _moreReactions) {
-      final emoji = await pickEmoji(
-        context,
-        palette: widget.palette,
-        forReaction: true,
-      );
-      if (emoji != null && mounted && _owner.isCurrent) {
-        await _react(entry, emoji);
-      }
+      await _pickReaction(entry);
       return;
     }
     if (choice == 'thread') {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ThreadScreen(
-            backend: widget.backend,
-            roomId: widget.roomId,
-            root: entry,
-          ),
-        ),
-      );
+      await _openThread(entry);
     } else if (choice == 'receipts') {
       await showMessageReceipts(
         context,
@@ -966,14 +1048,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     } else if (choice == 'reply') {
       _replyToEntry(entry);
     } else if (choice == 'edit') {
-      unawaited(_flushDraft());
-      setState(() {
-        _advanceComposerContext();
-        _editing = entry;
-        _replyingTo = null;
-        // Element X formatting survives editing (HTML → composer markdown).
-        _setDraft(composerTextForEdit(entry));
-      });
+      _editEntry(entry);
     } else if (choice == 'delete') {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -1620,6 +1695,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                   onAction: _showActions,
                                   onReaction: _react,
                                   onReply: _replyToEntry,
+                                  hoverActionsBuilder: _hoverActions,
                                   onLoadOlder: _loadOlder,
                                 ),
                           // Chat effects and other full-screen overlays.
