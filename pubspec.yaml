@@ -1,5 +1,5 @@
 name: parallax
-description: "Parallax — a vivid, focused Matrix messenger for Android."
+description: "Parallax — a vivid, focused Matrix messenger for Android, iPhone, iPad and Mac."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -59,6 +59,8 @@ dependencies:
   emoji_picker_flutter: ^4.5.4
   webview_flutter: ^4.14.1
   webview_flutter_android: ^4.14.1
+  # iOS/macOS WKWebView implementation (Element Call inline media playback).
+  webview_flutter_wkwebview: ^3.26.2
   geolocator: ^14.0.1
   flutter_map: ^8.3.2
   latlong2: ^0.10.1
@@ -73,6 +75,13 @@ dependencies:
   # Document previews: Markdown, and the XML inside .docx/.xlsx/.pptx files.
   markdown: ^7.3.1
   xml: ^7.0.1
+  # Apple (iOS/macOS) port. sqflite has no macOS implementation: the SDK
+  # database runs on sqlite3 via FFI there (sqlite3_flutter_libs bundles the
+  # dylib). iOS keeps sqflite's native implementation.
+  sqflite_common_ffi: ^2.3.4
+  sqlite3_flutter_libs: ^0.5.42
+  # PDFium renderer for PDF previews on iOS/macOS (Android uses PdfRenderer).
+  pdfx: ^2.9.2
 
 dev_dependencies:
   flutter_test:

@@ -2,7 +2,7 @@
 
 ![Parallax](assets/parallax_icon.png)
 
-Parallax is an Android messaging app for [Matrix](https://matrix.org), written in Flutter and separate from the Element X fork. It was previously called MatriXpress.
+Parallax is a messaging app for [Matrix](https://matrix.org), written in Flutter for Android, iPhone, iPad and Mac, and separate from the Element X fork. It was previously called MatriXpress.
 
 The logo shows three message bubbles offset like layers, in crimson, vermilion and amber, to suggest the parallax effect. The default **Parallax** theme uses those colours on a dark ink background. **Parallax Day** is the light version, and the older Ultraviolet, Afterglow and Daybreak palettes are still available. Settings can switch between the two Parallax themes automatically to follow the system's light or dark mode.
 
@@ -23,7 +23,19 @@ Parallax covers the features Element X Android v26.11.0 turns on by default, plu
 - **Account and settings:** profile, sessions, blocked users, account management, sign out (warns if key backup isn't on) and account deactivation.
 - **Parallax extras:** room backgrounds, per-room bubble colours (yours and theirs, with automatic or custom text colour), Messenger-style reactions on the bubble's bottom edge, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.
 
-Ideas from other messaging apps for after parity are in [docs/feature-ideas.md](docs/feature-ideas.md).
+Ideas from other messaging apps after parity are in [docs/feature-ideas.md](docs/feature-ideas.md).
+
+## Apple platforms (iPhone, iPad, iPhone Fold, Mac)
+
+The same Dart codebase runs on iOS, iPadOS and macOS (`feat/apple-port`). The Android app is unchanged.
+
+- **Adaptive layout.** Windows wider than 600 pt on their shortest side — iPad in any orientation, the iPhone Fold unfolded, and normal Mac windows — show the room list beside the open chat (master-detail). Folding the iPhone Fold, resizing into iPad Split View, or narrowing a Mac window moves the open chat to a full-screen route and back, so no conversation is lost across the transition. iPhone portrait/landscape and the Fold's outer screen keep the phone flow.
+- **Feature parity.** Sign-in (password/OIDC/SSO), verification and recovery, E2EE (vodozemac builds for iOS and macOS), the timeline, reactions, threads, polls, spaces, media, voice messages, Element Call (WKWebView on both platforms), file previews and the on-device search index all run from the shared code. PDF previews use PDFium through `pdfx` instead of Android's isolated PdfRenderer process, with the same timeouts and pixel caps. Video probing/compression uses AVFoundation behind the same `parallax/video` channel.
+- **Notifications.** The built-in delivery shows notifications fetched and decrypted on the device while Parallax is running, with Reply / Mark as read / copy actions. iOS and macOS do not allow Android's persistent foreground-service connection, and UnifiedPush/Firebase delivery are Android-only for now, so notifications do not arrive while the app is fully closed. This is stated in Settings → Notifications on the device.
+- **Secure window.** While a recovery secret is shown, iOS covers the app-switcher snapshot with an overlay (screenshots while active cannot be blocked on iOS); macOS excludes the window from screen capture and sharing.
+- **Database.** iOS uses sqflite; macOS uses sqlite3 via FFI (`sqflite_common_ffi` + `sqlite3_flutter_libs`). The SDK database is inside the app sandbox (macOS App Sandbox enabled) with no SQLCipher layer, as on Android.
+
+**Nothing on the Apple platforms has been tested against a live homeserver, a second Matrix client or a physical device yet** — the same acceptance gate as the Android parity ledger applies.
 
 ## What hasn't been verified
 
@@ -67,6 +79,21 @@ flutter build apk --release --target-platform android-arm64 --split-per-abi --bu
 For a visual check without a device, run `PARALLAX_SCREENSHOT_DIR=/tmp/shots flutter test test/visual`. It renders the login, inbox and room screens in both Parallax themes.
 
 To regenerate the launcher and notification icons, run `python3 tools/generate_icon.py` (requires Pillow).
+
+### iOS / macOS
+
+Requirements: Xcode (with the iOS SDK), CocoaPods, and `rustup` with the Apple targets (for the encryption plugin):
+
+```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
+flutter pub get
+(cd ios && pod install)
+flutter build ios --release --no-codesign   # device build; sign in Xcode to install
+flutter build ios --simulator               # simulator build
+flutter build macos --release
+```
+
+The bundle ID is `net.samrussell.parallax` on both platforms. The OIDC redirect scheme `net.samrusselltech.parallax` and the `matrix:` link scheme are registered in the runners; native Swift handlers for video tools, permissions, the secure window and link intents live in `apple/ParallaxApple.swift`.
 
 ## Licences
 

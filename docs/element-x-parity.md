@@ -118,6 +118,25 @@ Only app-owned `RoomCreationFailure` outcomes release create admission:
 - `rejected`: the SDK create operation returns a recognised refusal code: `M_FORBIDDEN`, `M_UNAUTHORIZED`, `M_UNKNOWN_TOKEN`, `M_MISSING_TOKEN`, `M_USER_DEACTIVATED`, `M_GUEST_ACCESS_FORBIDDEN`, `M_LIMIT_EXCEEDED`, `M_RESOURCE_LIMIT_EXCEEDED`, `M_BAD_JSON`, `M_NOT_JSON`, `M_MISSING_PARAM`, `M_INVALID_PARAM`, `M_UNSUPPORTED_ROOM_VERSION`, `M_ROOM_IN_USE`, or `M_EXCLUSIVE`. Show a sanitised error and permit another explicit submission, never automatic resend. The SDK does not preserve HTTP status on generated API exceptions, so other codes are deliberately not assumed safe.
 - Every other error, including arbitrary `StateError`/`ArgumentError`, `M_UNKNOWN`, generic server errors, malformed acknowledgements and transport loss, retains the original future and admission lock as uncertain. In particular, the session-change check **after** a successful create is not evidence of rejection. A pending-header deadline is presentation only, not cancellation or permission to resend.
 
+## Apple platforms (iPhone, iPad, iPhone Fold, Mac)
+
+The `feat/apple-port` branch runs the same Dart codebase on iOS, iPadOS and macOS. Every "Built" row above applies to the Apple platforms too unless listed here; **none of it has been checked against a live homeserver, a second client or a physical Apple device yet.** The Android rows remain the reference.
+
+| Area | Status on Apple | Notes |
+|---|---|---|
+| Adaptive layout (iPad, unfolded iPhone Fold, Mac) | Built | Master-detail above 600 pt shortest side; fold/unfold and Split View transitions keep the open chat (`lib/features/home/adaptive_layout.dart`, `test/adaptive_layout_test.dart`). iPhone and the Fold's outer screen keep the phone flow. |
+| E2EE (vodozemac) | Built, unverified | `flutter_vodozemac` is an FFI plugin for iOS and macOS; Rust targets `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `aarch64-apple-darwin`. Needs a two-device live test. |
+| Database | Built | sqflite on iOS; sqlite3 via FFI on macOS (`apple_bootstrap.dart`). Same `SafeMatrixDatabase` guards. |
+| PDF previews | Built | PDFium through `pdfx` in-process (`pdfx_pdf_tools.dart`), same timeouts/pixel caps as Android; no isolated process (see security doc). |
+| Video probe/compress/frames | Built, unverified | AVFoundation behind the same `parallax/video` channel (`apple/ParallaxApple.swift`); 720p-class compression with the caller's bitrate. |
+| Element Call | Built, unverified | WKWebView on iOS and macOS (`webview_flutter_wkwebview`), inline media without a user gesture, camera/mic permission requests mapped to the same grant checks. |
+| Notifications | Partial | Built-in delivery while the app runs, with Reply/Mark as read/copy actions and image attachments (`notification_renderer.dart` Darwin details). No persistent background connection, no APNs/Firebase or UnifiedPush delivery yet: nothing arrives while fully closed. |
+| Secure window | Partial | iOS app-switcher overlay; macOS window capture/sharing exclusion. iOS cannot block screenshots while active. |
+| Share into Parallax | Partial | iOS share extension hands items to the app (same caps, explicit Send). Android Direct Share suggestions have no iOS equivalent; macOS has no share-in. |
+| Links / OIDC callback | Built, unverified | `matrix:` scheme and `net.samrusselltech.parallax:/auth` registered in both runners; same Dart validation. Universal links need a hosted `apple-app-site-association` (not set up). |
+| Runtime permissions | Built | Camera/microphone via AVCaptureDevice behind the same `parallax/permissions` channel; location/photos/Face ID through the plugins' own prompts. |
+| QR sign-in, app lock, voice, location, packs, threads, polls, spaces, search | Built | Shared code; `mobile_scanner`, `local_auth`, `record`, `geolocator` all support iOS/macOS. Device acceptance still required. |
+
 ## Acceptance tests before claiming parity
 
 1. On disposable accounts, with Parallax and Element X side by side, test:

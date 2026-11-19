@@ -27,6 +27,7 @@ class RoomListTile extends StatelessWidget {
     this.busy = false,
     this.style = HomeRowStyle.cards,
     this.preview = HomePreview.long,
+    this.selected = false,
   });
 
   final ChatRoom room;
@@ -52,6 +53,9 @@ class RoomListTile extends StatelessWidget {
   /// Lines of last-message preview: none, one or two. Invitations always
   /// say what they are.
   final HomePreview preview;
+
+  /// Open in the detail pane beside the list (wide adaptive layout).
+  final bool selected;
 
   static String timeLabel(
     BuildContext context,
@@ -294,10 +298,16 @@ class RoomListTile extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: room.invited ? inviteTint : p.surface,
+          color: selected
+              ? Color.alphaBlend(p.accent.withValues(alpha: 0.12), p.surface)
+              : room.invited
+              ? inviteTint
+              : p.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: room.invited
+            side: selected
+                ? BorderSide(color: p.accent.withValues(alpha: 0.55))
+                : room.invited
                 ? BorderSide(color: p.secondary.withValues(alpha: 0.5))
                 : BorderSide.none,
           ),
@@ -318,7 +328,11 @@ class RoomListTile extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Material(
-          color: room.invited ? inviteTint : Colors.transparent,
+          color: selected
+              ? p.accent.withValues(alpha: 0.10)
+              : room.invited
+              ? inviteTint
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             onTap: onTap,

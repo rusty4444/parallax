@@ -17,13 +17,16 @@ import 'push_notifications.dart';
 import 'room_screen.dart';
 import 'security_overlay.dart';
 import 'widgets.dart';
+import 'features/home/adaptive_layout.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
+import 'features/platform/apple_bootstrap.dart';
 import 'features/platform/background_connection.dart';
 import 'haptics.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  initializeApplePlatform();
   runApp(const ParallaxApp());
 }
 
@@ -72,6 +75,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   VisualTheme _style = defaultVisualTheme;
   bool _followSystemTheme = false;
   GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final AdaptiveLayoutController _adaptiveLayout = AdaptiveLayoutController();
+  final RoomRouteObserver _roomRoutes = RoomRouteObserver();
   String? _accountKey;
   String? _userId;
   bool _authenticated = false;
@@ -148,6 +153,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       // Replacing the navigator removes *all* pushed decrypted routes, rather
       // than merely changing the home widget underneath a media/thread route.
       _navigatorKey = GlobalKey<NavigatorState>();
+      _adaptiveLayout.clear();
+      _roomRoutes.reset();
       _authenticated = false;
       _scheduleRebuild();
     }
@@ -547,6 +554,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         : Future<void>.value();
     unawaited(_releaseOwnedResources(cleanup));
     if (_ownsPreferences) _preferences.dispose();
+    _adaptiveLayout.dispose();
+    _roomRoutes.dispose();
     super.dispose();
   }
 
@@ -576,6 +585,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       animation: _preferences,
       builder: (context, _) => MaterialApp(
         navigatorKey: _navigatorKey,
+        navigatorObservers: [_roomRoutes],
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style),
@@ -664,13 +674,20 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               backend: _backend,
               palette: p,
             ),
-            SessionStatus.ready => InboxScreen(
-              backend: _backend,
+            SessionStatus.ready => AdaptiveShell(
+              controller: _adaptiveLayout,
+              observer: _roomRoutes,
               palette: p,
-              style: _style,
-              onThemeChanged: _changeTheme,
-              followSystemTheme: _followSystemTheme,
-              onFollowSystemTheme: _followSystem,
+              roomBuilder: (roomId) =>
+                  RoomScreen(backend: _backend, palette: p, roomId: roomId),
+              inbox: InboxScreen(
+                backend: _backend,
+                palette: p,
+                style: _style,
+                onThemeChanged: _changeTheme,
+                followSystemTheme: _followSystemTheme,
+                onFollowSystemTheme: _followSystem,
+              ),
             ),
             SessionStatus.offline => Scaffold(
               body: GlowBackdrop(

@@ -126,6 +126,7 @@ class NoteToSelfTile extends StatelessWidget {
     this.compact = false,
     this.busy = false,
     this.previewLines = 2,
+    this.selected = false,
   });
 
   final ChatRoom room;
@@ -134,6 +135,9 @@ class NoteToSelfTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool compact;
   final bool busy;
+
+  /// Open in the detail pane beside the list (wide adaptive layout).
+  final bool selected;
 
   /// Lines of last-note preview (0 hides it), as the home setting chooses.
   final int previewLines;
@@ -148,10 +152,15 @@ class NoteToSelfTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
-        color: Color.alphaBlend(p.accent.withValues(alpha: 0.07), p.surface),
+        color: Color.alphaBlend(
+          p.accent.withValues(alpha: selected ? 0.16 : 0.07),
+          p.surface,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: p.accent.withValues(alpha: 0.35)),
+          side: BorderSide(
+            color: p.accent.withValues(alpha: selected ? 0.7 : 0.35),
+          ),
         ),
         child: InkWell(
           onTap: busy ? null : onTap,

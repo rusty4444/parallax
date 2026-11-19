@@ -7,6 +7,7 @@ import 'app_theme.dart';
 import 'appearance_preferences.dart';
 import 'chat_backend.dart';
 import 'created_room_wait.dart';
+import 'features/home/adaptive_layout.dart';
 import 'features/home/home_features.dart';
 import 'features/home/room_list_filters.dart';
 import 'features/home/room_list_menu.dart';
@@ -701,8 +702,16 @@ class _InboxScreenState extends State<InboxScreen> {
 
   void _open(String id) {
     if (!mounted || !_owner.isCurrent) return;
+    // Wide windows (iPad, unfolded iPhone Fold, Mac): select the chat in the
+    // detail pane instead of pushing a route.
+    final wide = AdaptiveLayoutHost.of(context);
+    if (wide != null) {
+      wide.select(id);
+      return;
+    }
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      buildRoomRoute(
+        roomId: id,
         builder: (_) => RoomScreen(
           backend: widget.backend,
           palette: widget.palette,
@@ -1008,6 +1017,7 @@ class _InboxScreenState extends State<InboxScreen> {
     required bool hideInviteAvatars,
     required String? noteId,
   }) {
+    final selectedId = AdaptiveLayoutHost.of(context)?.selectedRoomId;
     if (room.id == noteId) {
       return NoteToSelfTile(
         key: ValueKey('room-${room.id}'),
@@ -1016,6 +1026,7 @@ class _InboxScreenState extends State<InboxScreen> {
         compact: compact || rowStyle == HomeRowStyle.compact,
         previewLines: homePreview.maxLines,
         busy: _pendingRoomAction == room.id,
+        selected: selectedId == room.id,
         onTap: () => _open(room.id),
         onLongPress: () => _showRoomActions(room),
       );
@@ -1032,6 +1043,7 @@ class _InboxScreenState extends State<InboxScreen> {
       busy: _pendingRoomAction == room.id,
       style: rowStyle,
       preview: homePreview,
+      selected: selectedId == room.id,
       onTap: room.invited ? () => _showInvitation(room) : () => _open(room.id),
       onLongPress: room.invited ? null : () => _showRoomActions(room),
       onAccept: () => _acceptInvite(room),

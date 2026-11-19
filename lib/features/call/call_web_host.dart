@@ -2,11 +2,14 @@
 // WebViewWidgetMessageInterceptor + CallScreenView WebView setup).
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 /// JavaScript channel the injected listener posts to (same name as Element
 /// X's `LISTENER_NAME`).
@@ -91,7 +94,22 @@ class WebViewCallHost implements CallWebHost {
     required this.onLoadError,
     required this.onPageFinished,
   }) {
-    _controller = WebViewController(onPermissionRequest: _onPermissionRequest);
+    // Element Call plays remote audio/video inline without a user gesture;
+    // WKWebView defaults forbid both. Only pass WebKit params when the real
+    // platform is WebKit (tests install a fake platform).
+    final PlatformWebViewControllerCreationParams creationParams =
+        !kIsWeb &&
+            (Platform.isIOS || Platform.isMacOS) &&
+            WebViewPlatform.instance is WebKitWebViewPlatform
+        ? WebKitWebViewControllerCreationParams(
+            allowsInlineMediaPlayback: true,
+            mediaTypesRequiringUserAction: const <PlaybackMediaTypes>{},
+          )
+        : const PlatformWebViewControllerCreationParams();
+    _controller = WebViewController.fromPlatformCreationParams(
+      creationParams,
+      onPermissionRequest: _onPermissionRequest,
+    );
     _ready = _configure(background);
   }
 

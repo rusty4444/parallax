@@ -1,6 +1,6 @@
 # Security, privacy and preview limitations
 
-Parallax is an independently built Android Matrix client. This is a personal test preview, not a security certification or a claim of Element X parity. Automated transport, storage and widget tests do not establish live end-to-end encryption interoperability.
+Parallax is an independently built Matrix client for Android and Apple platforms. This is a personal test preview, not a security certification or a claim of Element X parity. Automated transport, storage and widget tests do not establish live end-to-end encryption interoperability.
 
 ## Local data
 
@@ -46,6 +46,19 @@ Notifications show the sender, message text and media previews, like Element X. 
 Decrypted previews are bounded downloads, re-encoded and written to `cache/notification_media/` in the app sandbox; Android's system UI reads only the image attached to a posted notification through a non-exported FileProvider. Recent notification lines, the notification settings and quick replies waiting to be sent are stored in the private app support directory (excluded from backup). They are scoped to one account and device and deleted on sign-out. Quick replies are only sent by the running app through the normal recipient-trust and encryption guards, never from a background isolate.
 
 Notification navigation and actions must be bound to the active account/device, not merely a room ID from an old payload. See [push setup](push-notifications.md) for the actual configuration contract and limitations.
+
+## Apple platforms (iOS / iPadOS / macOS)
+
+The Apple port runs the same Dart code and the same encryption, send-guard and recipient-trust checks. Platform differences:
+
+- **Storage.** The SDK database lives in the app sandbox: sqflite on iOS, sqlite3 via FFI on macOS (App Sandbox enabled, keychain-backed secure storage). There is no SQLCipher layer, as on Android. macOS backups (Time Machine) can include the app container; treat a compromised Mac like a compromised rooted phone.
+- **PDF previews.** iOS and macOS have no isolated-process PDF renderer, so PDFium (through `pdfx`, the same hardened parser Chrome uses) runs **in-process**. The same bounds apply — 30 s open / 20 s per page timeouts, an 8 MP pixel cap, 4 MB inline / 25 MB opened file limits, no scripts/forms/links, password-protected files refused — but a PDF that crashes the parser takes down the app, not a separate process.
+- **Secure window.** While a recovery credential is displayed, iOS covers the app-switcher snapshot with an opaque overlay; iOS cannot block screenshots or screen recording while the app is active, so treat the credential screen as visible to anyone who can capture the screen. macOS sets the window's sharing type to none, excluding it from screen capture and sharing while the lease is held.
+- **Notifications.** The built-in delivery posts notifications from the running app's own sync; there is no persistent background connection and no push gateway on Apple platforms yet, so nothing is fetched or decrypted while Parallax is fully closed. Quick replies are handed to the running app and sent through the normal guards; with the app closed they wait until it next opens. Notification content follows the same Settings → Notifications choices; lock-screen hiding is controlled by iOS/macOS system settings.
+- **Sharing and links.** `matrix:` links and the OIDC callback are handled by the runners and validated by the same Dart link/auth checks as Android. Shared items from the iOS share sheet are copied into the app's private cache before sending, with the same per-file and count caps; nothing is sent without the user pressing Send.
+- **Calls.** Element Call runs in WKWebView with camera/microphone granted only to the call origin and only what the user allowed; media plays inline without a user gesture. As on Android, this needs a MatrixRTC/LiveKit homeserver and a live two-device test.
+
+None of the Apple behaviour has been verified on a physical device or against a live homeserver yet.
 
 ## Required live acceptance checks
 

@@ -32,6 +32,62 @@ const callChannelName = 'Calls';
 
 const _accent = Color(0xFFFF5A36);
 
+/// Darwin (iOS/macOS) notification categories. iOS categories are registered
+/// once at plugin initialisation, so the copy variants are separate
+/// categories picked per notification (Android adds the action inline).
+const darwinMessageCategory = 'parallax.message';
+const darwinCopyCodeCategory = 'parallax.message.copy_code';
+const darwinCopyPhoneCategory = 'parallax.message.copy_phone';
+const darwinCallCategory = 'parallax.call';
+const darwinInviteCategory = 'parallax.invite';
+const darwinGenericMarkReadCategory = 'parallax.generic.mark_read';
+
+final _darwinReplyAction = DarwinNotificationAction.text(
+  pushReplyActionId,
+  'Reply',
+  buttonTitle: 'Send',
+  placeholder: 'Message',
+);
+
+final _darwinMarkReadAction = DarwinNotificationAction.plain(
+  pushMarkReadActionId,
+  'Mark as read',
+  options: {DarwinNotificationActionOption.foreground},
+);
+
+/// Register in [DarwinInitializationSettings.notificationCategories].
+final darwinNotificationCategories = <DarwinNotificationCategory>[
+  DarwinNotificationCategory(
+    darwinMessageCategory,
+    actions: [_darwinReplyAction, _darwinMarkReadAction],
+    options: {DarwinNotificationCategoryOption.hiddenPreviewShowTitle},
+  ),
+  DarwinNotificationCategory(
+    darwinCopyCodeCategory,
+    actions: [
+      DarwinNotificationAction.plain(pushCopyCodeActionId, 'Copy code'),
+      _darwinReplyAction,
+      _darwinMarkReadAction,
+    ],
+    options: {DarwinNotificationCategoryOption.hiddenPreviewShowTitle},
+  ),
+  DarwinNotificationCategory(
+    darwinCopyPhoneCategory,
+    actions: [
+      DarwinNotificationAction.plain(pushCopyPhoneActionId, 'Copy number'),
+      _darwinReplyAction,
+      _darwinMarkReadAction,
+    ],
+    options: {DarwinNotificationCategoryOption.hiddenPreviewShowTitle},
+  ),
+  DarwinNotificationCategory(darwinCallCategory),
+  DarwinNotificationCategory(darwinInviteCategory),
+  DarwinNotificationCategory(
+    darwinGenericMarkReadCategory,
+    actions: [_darwinMarkReadAction],
+  ),
+];
+
 int _fnv(String value) {
   var hash = 0x811c9dc5;
   for (final unit in utf8.encode(value)) {
@@ -267,11 +323,29 @@ RenderedNotification renderRoomThread(
       copyTarget: copyTarget,
     ),
   );
+  final darwinCategory = copyTarget == null
+      ? darwinMessageCategory
+      : copyTarget.kind == MessageCopyKind.oneTimeCode
+      ? darwinCopyCodeCategory
+      : darwinCopyPhoneCategory;
+  final previewImage = latest.imagePath;
+  final darwin = DarwinNotificationDetails(
+    threadIdentifier: thread.roomId,
+    categoryIdentifier: darwinCategory,
+    interruptionLevel: highlight
+        ? InterruptionLevel.timeSensitive
+        : InterruptionLevel.active,
+    presentSound: alert,
+    attachments: [
+      if (previewImage != null && fileExists(previewImage))
+        DarwinNotificationAttachment(previewImage),
+    ],
+  );
   return RenderedNotification(
     id: roomNotificationId(thread.roomId),
     title: thread.isDirect ? latest.senderName : thread.roomName,
     body: latest.fromMe ? latest.text : '${latest.senderName}: ${latest.text}',
-    details: NotificationDetails(android: details),
+    details: NotificationDetails(android: details, iOS: darwin, macOS: darwin),
     payload: jsonEncode(
       notificationPayload(
         registrationId: registrationId,
@@ -341,6 +415,14 @@ RenderedNotification renderReplyStatus(
       onlyAlertOnce: true,
       silent: true,
     ),
+    iOS: DarwinNotificationDetails(
+      categoryIdentifier: darwinMessageCategory,
+      presentSound: false,
+    ),
+    macOS: DarwinNotificationDetails(
+      categoryIdentifier: darwinMessageCategory,
+      presentSound: false,
+    ),
   ),
   payload: jsonEncode(
     notificationPayload(registrationId: registrationId, roomId: roomId),
@@ -392,6 +474,14 @@ RenderedNotification renderSummary(
           summaryText: 'Parallax',
         ),
       ),
+      iOS: const DarwinNotificationDetails(
+        threadIdentifier: 'parallax.summary',
+        presentSound: false,
+      ),
+      macOS: const DarwinNotificationDetails(
+        threadIdentifier: 'parallax.summary',
+        presentSound: false,
+      ),
     ),
   );
 }
@@ -420,6 +510,14 @@ RenderedNotification renderCall(
       largeIcon: _bitmap(event.line.senderAvatarPath),
       audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
     ),
+    iOS: const DarwinNotificationDetails(
+      categoryIdentifier: darwinCallCategory,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    ),
+    macOS: const DarwinNotificationDetails(
+      categoryIdentifier: darwinCallCategory,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    ),
   ),
   payload: jsonEncode(
     notificationPayload(registrationId: registrationId, roomId: event.roomId),
@@ -445,6 +543,12 @@ RenderedNotification renderInvite(
       category: AndroidNotificationCategory.social,
       color: _accent,
       largeIcon: _bitmap(event.line.senderAvatarPath ?? event.roomAvatarPath),
+    ),
+    iOS: const DarwinNotificationDetails(
+      categoryIdentifier: darwinInviteCategory,
+    ),
+    macOS: const DarwinNotificationDetails(
+      categoryIdentifier: darwinInviteCategory,
     ),
   ),
   payload: jsonEncode(

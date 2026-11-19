@@ -11,6 +11,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:matrix/matrix.dart' as matrix;
 
 import 'features/notifications/background_push.dart';
+import 'features/notifications/notification_renderer.dart'
+    show darwinGenericMarkReadCategory, darwinNotificationCategories;
 import 'features/platform/background_connection.dart';
 import 'features/platform/unified_push.dart';
 
@@ -1148,7 +1150,9 @@ class PushNotifications extends ChangeNotifier {
       PushStatus.active,
       configuration.isInApp
           ? (driver is InAppPushDriver && !driver.connected
-                ? 'Notifications are on, but Android did not allow the background connection, so they arrive only while Parallax is running.'
+                ? (!kIsWeb && defaultTargetPlatform == TargetPlatform.android
+                      ? 'Notifications are on, but Android did not allow the background connection, so they arrive only while Parallax is running.'
+                      : 'Notifications are on. They arrive while Parallax is running; iPhone, iPad and Mac do not allow the persistent background connection Android uses.')
                 : 'Notifications are on. Parallax stays connected to your homeserver in the background.')
           : configuration.isUnifiedPush
           ? 'Notifications are on through UnifiedPush via ${configuration.gatewayUrl!.host}.'
@@ -1453,8 +1457,19 @@ Future<void> initializePushLocalNotifications(
   void Function(Map<String, dynamic>)? onMarkRead,
 }) async {
   final initialized = await local.initialize(
-    settings: const InitializationSettings(
-      android: AndroidInitializationSettings('@drawable/ic_stat_parallax'),
+    settings: InitializationSettings(
+      android: const AndroidInitializationSettings(
+        '@drawable/ic_stat_parallax',
+      ),
+      // iOS/macOS: the system permission prompt appears here (notifications
+      // are on by default, as on Android). Categories carry the same Reply /
+      // Mark as read / copy actions the Android notifications use.
+      iOS: DarwinInitializationSettings(
+        notificationCategories: darwinNotificationCategories,
+      ),
+      macOS: DarwinInitializationSettings(
+        notificationCategories: darwinNotificationCategories,
+      ),
     ),
     onDidReceiveNotificationResponse: onOpen == null
         ? null
@@ -1511,6 +1526,16 @@ NotificationDetails genericPushNotificationDetails(PushEnvelope envelope) =>
       android: envelope.eventId == null
           ? _genericAndroidDetails
           : _markReadAndroidDetails,
+      iOS: DarwinNotificationDetails(
+        categoryIdentifier: envelope.eventId == null
+            ? null
+            : darwinGenericMarkReadCategory,
+      ),
+      macOS: DarwinNotificationDetails(
+        categoryIdentifier: envelope.eventId == null
+            ? null
+            : darwinGenericMarkReadCategory,
+      ),
     );
 
 Future<void> showGenericPushNotification(

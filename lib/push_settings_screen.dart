@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -47,7 +48,11 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
     _batteryExempt = widget.connection.isIgnoringBatteryOptimizations();
     final config = widget.notifications.configuration;
     final firebase = config.isUnifiedPush ? null : config;
-    _provider = config.provider;
+    // UnifiedPush and the Firebase driver are Android-only; Apple platforms
+    // always use the built-in in-app connection.
+    _provider = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+        ? config.provider
+        : PushProvider.inApp;
     _gateway = TextEditingController(
       text: firebase?.gatewayUrl?.toString() ?? '',
     );
@@ -538,6 +543,8 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
         final notifications = widget.notifications;
         final editable =
             !notifications.enabled && !notifications.busy && !_actionBusy;
+        final androidDelivery =
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
         final unifiedPush = _provider == PushProvider.unifiedPush;
         final inApp = _provider == PushProvider.inApp;
         return ListView(
@@ -595,37 +602,53 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            SegmentedButton<PushProvider>(
-              segments: const [
-                ButtonSegment(
-                  value: PushProvider.inApp,
-                  icon: Icon(Icons.sync_rounded),
-                  label: Text('Built in'),
+            if (!androidDelivery)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Built-in connection: Parallax keeps its own Matrix sync '
+                    'running and shows notifications fetched and decrypted '
+                    'on this device. On iPhone, iPad and Mac this works while '
+                    'Parallax is running; iOS does not allow the persistent '
+                    'background connection Android uses. UnifiedPush and '
+                    'Firebase delivery are Android-only for now.',
+                  ),
                 ),
-                ButtonSegment(
-                  value: PushProvider.firebase,
-                  icon: Icon(Icons.cloud_outlined),
-                  label: Text('Firebase'),
-                ),
-                ButtonSegment(
-                  value: PushProvider.unifiedPush,
-                  icon: Icon(Icons.hub_outlined),
-                  label: Text('UnifiedPush'),
-                ),
-              ],
-              selected: {_provider},
-              // Switching turns the current delivery off first.
-              onSelectionChanged: !notifications.busy && !_actionBusy
-                  ? (selection) => unawaited(_selectProvider(selection.first))
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            if (inApp)
-              ..._inAppSection()
-            else if (unifiedPush)
-              ..._unifiedPushSection(notifications, editable)
-            else
-              ..._firebaseSection(notifications, editable),
+              )
+            else ...[
+              SegmentedButton<PushProvider>(
+                segments: const [
+                  ButtonSegment(
+                    value: PushProvider.inApp,
+                    icon: Icon(Icons.sync_rounded),
+                    label: Text('Built in'),
+                  ),
+                  ButtonSegment(
+                    value: PushProvider.firebase,
+                    icon: Icon(Icons.cloud_outlined),
+                    label: Text('Firebase'),
+                  ),
+                  ButtonSegment(
+                    value: PushProvider.unifiedPush,
+                    icon: Icon(Icons.hub_outlined),
+                    label: Text('UnifiedPush'),
+                  ),
+                ],
+                selected: {_provider},
+                // Switching turns the current delivery off first.
+                onSelectionChanged: !notifications.busy && !_actionBusy
+                    ? (selection) => unawaited(_selectProvider(selection.first))
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              if (inApp)
+                ..._inAppSection()
+              else if (unifiedPush)
+                ..._unifiedPushSection(notifications, editable)
+              else
+                ..._firebaseSection(notifications, editable),
+            ],
             if (notifications.status == PushStatus.error) ...[
               const SizedBox(height: 12),
               OutlinedButton(
@@ -637,7 +660,12 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
             ],
             const SizedBox(height: 20),
             Text(
-              inApp
+              !androidDelivery
+                  ? 'Notifications show content fetched and decrypted on this '
+                        'device; you can hide it under Settings → Notifications. '
+                        'While Parallax is closed, new messages appear when you '
+                        'next open it.'
+                  : inApp
                   ? 'Android shows a small “Parallax is connected” notification '
                         'while the connection runs; you can hide it in Android’s '
                         'notification settings without stopping it. Some phone '

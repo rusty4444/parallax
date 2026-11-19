@@ -190,7 +190,12 @@ Future<bool> startDefaultNotifications(
   }
   if (!isCurrent()) return failed;
   if (!notifications.enabled) await notifications.enable(consent: true);
-  if (notifications.active && isCurrent()) await askBatteryExemptionOnce();
+  if (notifications.active &&
+      isCurrent() &&
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android) {
+    await askBatteryExemptionOnce();
+  }
   return failed;
 }
 
@@ -255,9 +260,15 @@ class InAppPushDriver implements PushDriver, PushActionSource {
     if (!configuration.isInApp) {
       throw StateError('Not the built-in delivery');
     }
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      throw UnsupportedError('Built-in notifications support Android only.');
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'Built-in notifications are not supported on web.',
+      );
     }
+    // Android runs the foreground-service background connection; Apple
+    // platforms deliver from the live sync while Parallax is running (the
+    // platform guards in MethodChannelBackgroundConnection make start() a
+    // no-op there, so [connected] stays false and the status says so).
     final local = localNotifications ??= FlutterLocalNotificationsPlugin();
     await initializePushLocalNotifications(
       local,
@@ -268,6 +279,36 @@ class InAppPushDriver implements PushDriver, PushActionSource {
 
   @override
   Future<PushPermission> requestPermission() async {
+    if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android) {
+      final darwin = localNotifications
+          ?.resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >();
+      final macos = localNotifications
+          ?.resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin
+          >();
+      try {
+        final granted = darwin != null
+            ? await darwin.requestPermissions(
+                alert: true,
+                badge: true,
+                sound: true,
+              )
+            : macos != null
+            ? await macos.requestPermissions(
+                alert: true,
+                badge: true,
+                sound: true,
+              )
+            : null;
+        return granted == true
+            ? PushPermission.authorized
+            : PushPermission.denied;
+      } catch (_) {
+        return PushPermission.denied;
+      }
+    }
     final android = localNotifications
         ?.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin

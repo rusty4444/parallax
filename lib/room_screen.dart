@@ -1352,11 +1352,15 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                       child: Row(
                         children: [
-                          IconButton(
-                            tooltip: 'Back to rooms',
-                            onPressed: () => Navigator.pop(context),
-                            icon: const Icon(Icons.arrow_back_rounded),
-                          ),
+                          // Embedded in the wide layout's detail pane there
+                          // is no route to pop; the chat stays beside the
+                          // room list.
+                          if (Navigator.canPop(context))
+                            IconButton(
+                              tooltip: 'Back to rooms',
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(Icons.arrow_back_rounded),
+                            ),
                           if (room == null)
                             InitialAvatar(
                               name: widget.roomId,
