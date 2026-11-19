@@ -83,6 +83,8 @@ dependencies:
   webview_windows: ^0.4.0
   # PDFium renderer for PDF previews on Windows (Android uses PdfRenderer).
   pdfx: ^2.9.2
+  # Custom blended title bar on desktop (hidden native caption, system drag).
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:

@@ -13,11 +13,13 @@ list(APPEND FLUTTER_PLUGIN_LIST
   local_auth_windows
   pdfx
   record_windows
+  screen_retriever_windows
   share_plus
   sqlite3_flutter_libs
   url_launcher_windows
   video_player_win
   webview_windows
+  window_manager
   window_to_front
 )
 

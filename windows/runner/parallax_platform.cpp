@@ -170,6 +170,68 @@ const PROPERTYKEY kPKeyTitle = {
      {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}},
     5};
 
+// Reads the clipboard as PNG bytes: the raw "PNG" format when present
+// (browsers, Snipping Tool), otherwise CF_DIB / CF_DIBV5 converted through
+// GDI+. Empty when the clipboard holds no image.
+std::vector<uint8_t> ReadClipboardImage(HWND hwnd) {
+  std::vector<uint8_t> result;
+  if (!OpenClipboard(hwnd)) return result;
+  const UINT png_format = RegisterClipboardFormatW(L"PNG");
+  HANDLE data = GetClipboardData(png_format);
+  if (data) {
+    const SIZE_T size = GlobalSize(data);
+    void* ptr = GlobalLock(data);
+    if (ptr && size > 0) {
+      const auto* bytes = static_cast<const uint8_t*>(ptr);
+      result.assign(bytes, bytes + size);
+    }
+    if (ptr) GlobalUnlock(data);
+  }
+  if (result.empty()) {
+    HANDLE dib = GetClipboardData(CF_DIB);
+    if (!dib) dib = GetClipboardData(CF_DIBV5);
+    if (dib) {
+      void* ptr = GlobalLock(dib);
+      if (ptr) {
+        auto* header = reinterpret_cast<BITMAPINFOHEADER*>(ptr);
+        const int colors =
+            header->biClrUsed
+                ? static_cast<int>(header->biClrUsed)
+                : (header->biBitCount <= 8 ? (1 << header->biBitCount) : 0);
+        const auto* pixels = reinterpret_cast<const uint8_t*>(ptr) +
+                             header->biSize + colors * sizeof(RGBQUAD);
+        HDC dc = GetDC(nullptr);
+        HBITMAP bitmap = CreateDIBitmap(
+            dc, header, CBM_INIT, pixels,
+            reinterpret_cast<BITMAPINFO*>(ptr), DIB_RGB_COLORS);
+        ReleaseDC(nullptr, dc);
+        if (bitmap) {
+          Gdiplus::Bitmap image(bitmap, nullptr);
+          DeleteObject(bitmap);
+          CLSID png_clsid;
+          IStream* stream = SHCreateMemStream(nullptr, 0);
+          if (stream && FindPngEncoder(&png_clsid) &&
+              image.Save(stream, &png_clsid, nullptr) == Gdiplus::Ok) {
+            STATSTG stat{};
+            stream->Stat(&stat, STATFLAG_NONAME);
+            result.resize(stat.cbSize.LowPart);
+            LARGE_INTEGER zero{};
+            stream->Seek(zero, STREAM_SEEK_SET, nullptr);
+            ULONG read = 0;
+            stream->Read(result.data(), static_cast<ULONG>(result.size()),
+                         &read);
+            if (read != result.size()) result.clear();
+          }
+          if (stream) stream->Release();
+        }
+      }
+      GlobalUnlock(dib);
+    }
+  }
+  CloseClipboard();
+  return result;
+}
+
 }  // namespace
 
 ParallaxPlatform::ParallaxPlatform(HWND window, Win32Window* owner,
@@ -197,6 +259,7 @@ ParallaxPlatform::~ParallaxPlatform() {
   secure_ = nullptr;
   permissions_ = nullptr;
   connection_ = nullptr;
+  clipboard_ = nullptr;
   if (gdiplus_token_) Gdiplus::GdiplusShutdown(gdiplus_token_);
 }
 
@@ -331,6 +394,23 @@ void ParallaxPlatform::RegisterChannels(flutter::FlutterEngine* engine) {
           result->Success(EV(true));
         } else {
           result->NotImplemented();
+        }
+      });
+
+  clipboard_ = std::make_unique<flutter::MethodChannel<EV>>(
+      messenger, "parallax/clipboard", codec);
+  clipboard_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<EV>& call,
+             std::unique_ptr<flutter::MethodResult<EV>> result) {
+        if (call.method_name() != "readImage") {
+          result->NotImplemented();
+          return;
+        }
+        auto bytes = ReadClipboardImage(window_);
+        if (bytes.empty()) {
+          result->Success();
+        } else {
+          result->Success(EV(bytes));
         }
       });
 }

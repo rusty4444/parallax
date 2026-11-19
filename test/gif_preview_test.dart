@@ -29,12 +29,7 @@ ChatEntry gifEntry(
   body: '$id.gif',
   content: {
     'msgtype': 'm.image',
-    'info': {
-      'mimetype': mime,
-      'size': size,
-      'w': ?w,
-      'h': ?h,
-    },
+    'info': {'mimetype': mime, 'size': size, 'w': ?w, 'h': ?h},
   },
 );
 
@@ -80,7 +75,11 @@ void main() {
     ) async {
       final backend = gifBackend();
       await tester.pumpWidget(
-        host(ImageMessageBody(ctx: hookFor(backend, gifEntry('g', w: 400, h: 200)))),
+        host(
+          ImageMessageBody(
+            ctx: hookFor(backend, gifEntry('g', w: 400, h: 200)),
+          ),
+        ),
       );
       await settle(tester);
       final image = tester.widget<Image>(find.byType(Image));
@@ -93,7 +92,9 @@ void main() {
       final backend = gifBackend();
       await tester.pumpWidget(
         host(
-          ImageMessageBody(ctx: hookFor(backend, gifEntry('g', w: 1000, h: 200))),
+          ImageMessageBody(
+            ctx: hookFor(backend, gifEntry('g', w: 1000, h: 200)),
+          ),
         ),
       );
       await settle(tester);
@@ -109,7 +110,9 @@ void main() {
       final backend = gifBackend();
       await tester.pumpWidget(
         host(
-          ImageMessageBody(ctx: hookFor(backend, gifEntry('g', w: 200, h: 800))),
+          ImageMessageBody(
+            ctx: hookFor(backend, gifEntry('g', w: 200, h: 800)),
+          ),
         ),
       );
       await settle(tester);
@@ -142,7 +145,11 @@ void main() {
         ..previewBytes = null
         ..original = (_) => throw StateError('original unavailable');
       await tester.pumpWidget(
-        host(ImageMessageBody(ctx: hookFor(backend, gifEntry('g', w: 400, h: 200)))),
+        host(
+          ImageMessageBody(
+            ctx: hookFor(backend, gifEntry('g', w: 400, h: 200)),
+          ),
+        ),
       );
       await settle(tester);
       expect(find.text('Image unavailable'), findsOneWidget);
@@ -179,7 +186,10 @@ void main() {
 
     testWidgets('gallery mosaics keep their fixed grid cells', (tester) async {
       final backend = gifBackend();
-      final entries = [gifEntry('a', w: 400, h: 200), gifEntry('b', w: 200, h: 800)];
+      final entries = [
+        gifEntry('a', w: 400, h: 200),
+        gifEntry('b', w: 200, h: 800),
+      ];
       await tester.pumpWidget(
         host(
           GalleryBubble(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
@@ -78,6 +79,29 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   /// Tablet/foldable detail-pane selection (see two_pane.dart).
   late final _twoPane = TwoPaneController();
+
+  /// User-chosen list pane width from dragging the divider (desktop).
+  double? _paneWidthOverride;
+
+  void _savePaneWidth() {
+    final width = _paneWidthOverride;
+    if (width == null) return;
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setDouble(kTwoPaneWidthPref, width))
+          .catchError((Object _) => false),
+    );
+  }
+
+  void _resetPaneWidth() {
+    setState(() => _paneWidthOverride = null);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.remove(kTwoPaneWidthPref))
+          .catchError((Object _) => false),
+    );
+  }
+
   bool _windowSyncScheduled = false;
 
   @override
@@ -86,6 +110,16 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _twoPane.register(widget.backend);
     _twoPane.addListener(_twoPaneChanged);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) {
+            final width = prefs.getDouble(kTwoPaneWidthPref);
+            if (mounted && width != null) {
+              setState(() => _paneWidthOverride = width);
+            }
+          })
+          .catchError((Object _) {}),
+    );
     _creation.addListener(_creationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _creationChanged());
     _messageIndex = localMessageSearchOf(widget.backend);
@@ -197,9 +231,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _twoPane.wide = false;
       final selected = _twoPane.selectedRoomId;
       final chatAlreadyOpen = widget.roomRoutes?.rooms.isNotEmpty ?? false;
-      if (selected != null &&
-          !chatAlreadyOpen &&
-          (_route?.isCurrent ?? true)) {
+      if (selected != null && !chatAlreadyOpen && (_route?.isCurrent ?? true)) {
         Navigator.of(context).push(
           RoomRoute(
             backend: widget.backend,
@@ -1298,22 +1330,43 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           constraints.maxWidth,
           features: MediaQuery.displayFeaturesOf(context),
         );
+        // A physical hinge keeps the hardware-aligned gap; otherwise the
+        // divider is drag-resizable and the chosen width persists.
+        final hinge = split.gapWidth > 1;
+        final listWidth = hinge
+            ? split.listWidth
+            : clampTwoPaneWidth(
+                _paneWidthOverride ?? split.listWidth,
+                constraints.maxWidth,
+              );
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              width: split.listWidth,
+              width: listWidth,
               child: MediaQuery.removePadding(
                 context: context,
                 removeRight: true,
                 child: inbox,
               ),
             ),
-            // Hairline divider, or the hinge gap on a dual-screen device.
-            SizedBox(
-              width: split.gapWidth,
-              child: ColoredBox(color: p.stroke),
-            ),
+            if (hinge)
+              SizedBox(
+                width: split.gapWidth,
+                child: ColoredBox(color: p.stroke),
+              )
+            else
+              PaneDivider(
+                palette: p,
+                onDrag: (dx) => setState(() {
+                  _paneWidthOverride = clampTwoPaneWidth(
+                    listWidth + dx,
+                    constraints.maxWidth,
+                  );
+                }),
+                onDragEnd: _savePaneWidth,
+                onReset: _resetPaneWidth,
+              ),
             Expanded(
               child: MediaQuery.removePadding(
                 context: context,

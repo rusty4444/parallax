@@ -74,6 +74,7 @@ class ParallaxPlatform {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> secure_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> permissions_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> connection_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> clipboard_;
 };
 
 // Registers the per-user matrix: URL protocol so matrix: links open here.

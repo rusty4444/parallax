@@ -12,6 +12,20 @@ import 'room_screen.dart';
 const double kTwoPaneMinWidth = 600;
 const double kTwoPaneMinHeight = 480;
 
+/// Desktop drag-resize bounds: both panes stay usable at any window width.
+const double kTwoPaneMinListWidth = 280;
+const double kTwoPaneMinDetailWidth = 320;
+
+/// Persisted user-chosen list pane width (desktop divider drag).
+const String kTwoPaneWidthPref = 'two_pane_list_width';
+
+double clampTwoPaneWidth(double width, double windowWidth) => width.clamp(
+  kTwoPaneMinListWidth,
+  windowWidth - kTwoPaneMinDetailWidth < kTwoPaneMinListWidth
+      ? kTwoPaneMinListWidth
+      : windowWidth - kTwoPaneMinDetailWidth,
+);
+
 bool isTwoPaneWindow(Size size) =>
     size.width >= kTwoPaneMinWidth && size.height >= kTwoPaneMinHeight;
 
@@ -37,6 +51,37 @@ bool isTwoPaneWindow(Size size) =>
     }
   }
   return (listWidth: (width * 0.4).clamp(300.0, 420.0), gapWidth: 1);
+}
+
+/// A draggable divider between the two panes (desktop). Dragging resizes the
+/// list pane; double-clicking restores the default split. On a physical hinge
+/// the plain gap is used instead, so the panes stay aligned with the hardware.
+class PaneDivider extends StatelessWidget {
+  const PaneDivider({
+    super.key,
+    required this.palette,
+    required this.onDrag,
+    required this.onDragEnd,
+    required this.onReset,
+  });
+
+  final AppPalette palette;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragEnd;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.resizeColumn,
+    child: GestureDetector(
+      key: const ValueKey('two-pane-divider'),
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
+      onHorizontalDragEnd: (_) => onDragEnd(),
+      onDoubleTap: onReset,
+      child: VerticalDivider(width: 9, thickness: 1, color: palette.stroke),
+    ),
+  );
 }
 
 /// A chat route that carries its room id, so a widening window (unfold,

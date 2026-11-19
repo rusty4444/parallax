@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:matrix/matrix.dart' as matrix;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
@@ -22,16 +23,22 @@ import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/platform/background_connection.dart';
+import 'features/platform/desktop_title_bar.dart';
 import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   assert(() {
     _installDebugLog();
     return true;
   }());
   initializeWindowsPlatform();
+  if (Platform.isWindows) {
+    // Replace the native caption with the blended DesktopTitleBar.
+    await windowManager.ensureInitialized();
+    await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+  }
   runApp(const ParallaxApp());
 }
 
@@ -614,11 +621,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style),
-        builder: (context, child) => FeatureSettingsScope(
-          preferences: _preferences,
-          draftStore: _draftStore,
-          notifications: _pushReady ? _notifications : null,
-          child: _AppTextScale(
+        builder: (context, child) {
+          final content = _AppTextScale(
             factor: _preferences.textScale,
             child: Column(
               children: [
@@ -661,8 +665,21 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                 ),
               ],
             ),
-          ),
-        ),
+          );
+          return FeatureSettingsScope(
+            preferences: _preferences,
+            draftStore: _draftStore,
+            notifications: _pushReady ? _notifications : null,
+            child: Platform.isWindows
+                ? Column(
+                    children: [
+                      DesktopTitleBar(palette: p),
+                      Expanded(child: content),
+                    ],
+                  )
+                : content,
+          );
+        },
         // Only the session status picks the screen. Rebuilding on every
         // backend notification (each sync, each timeline update of an open
         // room) rebuilt the whole inbox underneath the room on screen.
