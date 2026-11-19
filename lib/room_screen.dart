@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'app_theme.dart';
@@ -1350,6 +1351,15 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       ],
                     ),
               child: SafeArea(
+                // Full-screen room route on a narrow desktop window: clear
+                // the shell's top-right caption buttons. Embedded detail
+                // panes already get this clearance from the inbox.
+                minimum:
+                    (!widget.embedded &&
+                        !kIsWeb &&
+                        defaultTargetPlatform == TargetPlatform.windows)
+                    ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+                    : EdgeInsets.zero,
                 child: Column(
                   children: [
                     Container(

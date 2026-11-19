@@ -1359,10 +1359,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             else
               PaneDivider(
                 palette: p,
-                topExtension:
-                    (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-                    ? kDesktopTitleBarHeight
-                    : 0,
                 onDrag: (dx) => setState(() {
                   _paneWidthOverride = clampTwoPaneWidth(
                     listWidth + dx,
@@ -1376,7 +1372,16 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               child: MediaQuery.removePadding(
                 context: context,
                 removeLeft: true,
-                child: _detailPane(context),
+                // Clear the top-right caption buttons overlaid by the shell.
+                child:
+                    (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+                    ? Padding(
+                        padding: const EdgeInsets.only(
+                          top: kDesktopTitleBarHeight,
+                        ),
+                        child: _detailPane(context),
+                      )
+                    : _detailPane(context),
               ),
             ),
           ],
@@ -1803,7 +1808,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 children: [
                   Padding(
                     padding: twoPane
-                        ? const EdgeInsets.fromLTRB(16, 16, 8, 0)
+                        ? const EdgeInsets.fromLTRB(16, 4, 8, 0)
                         : const EdgeInsets.fromLTRB(22, 22, 16, 0),
                     child: Row(
                       children: [

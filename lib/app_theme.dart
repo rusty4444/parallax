@@ -301,6 +301,9 @@ LinearGradient accentGradient(AppPalette palette) => LinearGradient(
 /// extends up through it so the section split runs to the top of the window.
 const double kDesktopTitleBarHeight = 36;
 
+/// Width of one window caption button (minimize / maximize / close).
+const double kDesktopCaptionButtonWidth = 46;
+
 class GlowBackdrop extends StatelessWidget {
   const GlowBackdrop({
     super.key,

@@ -64,20 +64,12 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
     return SizedBox(
       key: const ValueKey('desktop-title-bar'),
       height: kDesktopTitleBarHeight,
-      // Transparent: the shell GlowBackdrop gradient runs continuously
-      // behind the bar, so it blends with whatever theme is active. The
-      // brand lives in the inbox header, not here.
+      // Caption buttons only, pinned to the top-right of the window by the
+      // shell. The drag region is a separate strip behind the content so the
+      // inbox brand can sit flush at the top-left.
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Empty drag region (double-click maximizes).
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => windowManager.startDragging(),
-              onDoubleTap: _toggleMaximize,
-              child: const SizedBox.expand(),
-            ),
-          ),
           _CaptionButton(
             palette: p,
             tooltip: 'Minimize',
@@ -127,8 +119,8 @@ class _CaptionButton extends StatelessWidget {
       message: tooltip,
       waitDuration: const Duration(milliseconds: 600),
       child: SizedBox(
-        width: 46,
-        height: 36,
+        width: kDesktopCaptionButtonWidth,
+        height: kDesktopTitleBarHeight,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
