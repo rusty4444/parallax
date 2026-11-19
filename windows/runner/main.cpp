@@ -21,6 +21,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  // Load the FFI libraries before the Flutter engine creates its ANGLE/D3D11
+  // device. Some NVIDIA drivers fault when a DLL is loaded after device
+  // creation (flutter/flutter#129764), which TDRs the GPU and leaves the EGL
+  // context permanently lost: a white window while Dart keeps running.
+  // Loading them here means Dart's DynamicLibrary.open reuses these modules.
+  LoadLibraryW(L"vodozemac_bindings_dart.dll");
+  LoadLibraryW(L"sqlite3.dll");
+
   // One Matrix client per user: a second launch hands its command line
   // (shared files, matrix: links, jump-list chats) to the running window.
   HANDLE single_instance =
