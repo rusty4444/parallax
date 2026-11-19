@@ -63,6 +63,7 @@ class PaneDivider extends StatelessWidget {
     required this.onDrag,
     required this.onDragEnd,
     required this.onReset,
+    this.topExtension = 0,
   });
 
   final AppPalette palette;
@@ -70,18 +71,37 @@ class PaneDivider extends StatelessWidget {
   final VoidCallback onDragEnd;
   final VoidCallback onReset;
 
+  /// Extra height painted above the divider so the split reaches the top of
+  /// the window through the (transparent) desktop title bar. Zero on tablets.
+  final double topExtension;
+
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: SystemMouseCursors.resizeColumn,
-    child: GestureDetector(
-      key: const ValueKey('two-pane-divider'),
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
-      onHorizontalDragEnd: (_) => onDragEnd(),
-      onDoubleTap: onReset,
-      child: VerticalDivider(width: 9, thickness: 1, color: palette.stroke),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final handle = MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        key: const ValueKey('two-pane-divider'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
+        onHorizontalDragEnd: (_) => onDragEnd(),
+        onDoubleTap: onReset,
+        child: VerticalDivider(width: 9, thickness: 1, color: palette.stroke),
+      ),
+    );
+    if (topExtension <= 0) return handle;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          top: -topExtension,
+          bottom: 0,
+          left: 4,
+          child: SizedBox(width: 1, child: ColoredBox(color: palette.stroke)),
+        ),
+        handle,
+      ],
+    );
+  }
 }
 
 /// A chat route that carries its room id, so a widening window (unfold,

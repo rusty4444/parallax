@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app_theme.dart';
-import '../../widgets.dart';
 
 class DesktopTitleBar extends StatefulWidget {
   const DesktopTitleBar({super.key, required this.palette});
@@ -64,29 +63,19 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
     final p = widget.palette;
     return SizedBox(
       key: const ValueKey('desktop-title-bar'),
-      height: 36,
+      height: kDesktopTitleBarHeight,
       // Transparent: the shell GlowBackdrop gradient runs continuously
-      // behind the bar, so it blends with whatever theme is active.
+      // behind the bar, so it blends with whatever theme is active. The
+      // brand lives in the inbox header, not here.
       child: Row(
         children: [
-          // Brand mark + empty space form the drag region.
+          // Empty drag region (double-click maximizes).
           Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onPanStart: (_) => windowManager.startDragging(),
               onDoubleTap: _toggleMaximize,
-              child: Row(
-                children: [
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CustomPaint(
-                      painter: const ParallaxMarkPainter(scale: 0.92),
-                    ),
-                  ),
-                ],
-              ),
+              child: const SizedBox.expand(),
             ),
           ),
           _CaptionButton(

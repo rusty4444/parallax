@@ -297,6 +297,10 @@ LinearGradient accentGradient(AppPalette palette) => LinearGradient(
   ],
 );
 
+/// Height of the Windows desktop title bar strip. The two-pane divider
+/// extends up through it so the section split runs to the top of the window.
+const double kDesktopTitleBarHeight = 36;
+
 class GlowBackdrop extends StatelessWidget {
   const GlowBackdrop({
     super.key,

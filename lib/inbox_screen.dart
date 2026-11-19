@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1358,6 +1359,10 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             else
               PaneDivider(
                 palette: p,
+                topExtension:
+                    (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+                    ? kDesktopTitleBarHeight
+                    : 0,
                 onDrag: (dx) => setState(() {
                   _paneWidthOverride = clampTwoPaneWidth(
                     listWidth + dx,
@@ -1389,33 +1394,44 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final known =
         id != null && widget.backend.rooms.any((room) => room.id == id);
     if (!known) {
-      return GlowBackdrop(
-        palette: p,
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  BrandMark(palette: p, size: 72),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Select a conversation',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: p.foreground,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
+      // The detail pane has no Scaffold of its own; without a Material the
+      // placeholder text inherits the framework fallback style (48px, yellow
+      // underline). A transparent Material supplies the theme text style.
+      return Material(
+        type: MaterialType.transparency,
+        child: GlowBackdrop(
+          palette: p,
+          child: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BrandMark(palette: p, size: 72),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Select a conversation',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: p.foreground,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.none,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Choose a chat from the list to start reading.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: p.muted, fontSize: 13),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'Choose a chat from the list to start reading.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: p.muted,
+                        fontSize: 13,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1796,33 +1812,50 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                           const SizedBox(width: 13),
                         ],
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Desktop blends the brand into the title bar;
-                              // don't repeat the name above the inbox.
-                              if (!twoPane)
-                                Text(
-                                  'Parallax',
-                                  style: TextStyle(
-                                    color: p.foreground,
-                                    fontSize: 23,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -1.1,
-                                  ),
+                          child: twoPane
+                              ? Row(
+                                  children: [
+                                    BrandMark(palette: p, size: 44),
+                                    const SizedBox(width: 13),
+                                    Flexible(
+                                      child: Text(
+                                        'Parallax',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: p.foreground,
+                                          fontSize: 26,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.8,
+                                          decoration: TextDecoration.none,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Parallax',
+                                      style: TextStyle(
+                                        color: p.foreground,
+                                        fontSize: 23,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -1.1,
+                                      ),
+                                    ),
+                                    Text(
+                                      'YOUR SPACE TO CONNECT',
+                                      style: TextStyle(
+                                        color: p.secondary,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.7,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              if (!twoPane)
-                                Text(
-                                  'YOUR SPACE TO CONNECT',
-                                  style: TextStyle(
-                                    color: p.secondary,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.7,
-                                  ),
-                                ),
-                            ],
-                          ),
                         ),
                         IconButton(
                           key: const ValueKey('home.search_toggle'),
