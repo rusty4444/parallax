@@ -6,17 +6,28 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import 'video_prep.dart';
+
+/// Runs one helper process to completion; tests inject a fake so no
+/// ffmpeg binaries are needed.
+typedef VideoHelperRunner =
+    Future<ProcessResult> Function(
+      String tool,
+      List<String> arguments,
+      Duration timeout,
+    );
 
 class WindowsVideoTools implements VideoTools {
   WindowsVideoTools({
     this.toolDirectory,
     this.compressTimeout = const Duration(minutes: 5),
     this.probeTimeout = const Duration(seconds: 30),
+    @visibleForTesting this.helperRunner,
+    @visibleForTesting this.pathLookup = true,
   });
 
   /// Directory holding ffmpeg.exe and ffprobe.exe. Defaults to the app
@@ -24,6 +35,12 @@ class WindowsVideoTools implements VideoTools {
   final String? toolDirectory;
   final Duration compressTimeout;
   final Duration probeTimeout;
+
+  /// Injected process runner (tests).
+  final VideoHelperRunner? helperRunner;
+
+  /// Whether a bare tool name may be resolved through PATH.
+  final bool pathLookup;
 
   String? _ffmpeg;
   String? _ffprobe;
@@ -37,7 +54,7 @@ class WindowsVideoTools implements VideoTools {
       name, // PATH lookup
     ];
     for (final candidate in candidates) {
-      if (candidate == name) return candidate;
+      if (candidate == name) return pathLookup ? candidate : null;
       if (File(candidate).existsSync()) return candidate;
     }
     return null;
@@ -50,6 +67,15 @@ class WindowsVideoTools implements VideoTools {
     List<String> arguments,
     Duration timeout,
   ) async {
+    final runner = helperRunner;
+    if (runner != null) {
+      final result = await runner(tool, arguments, timeout);
+      return _ProcessResult(
+        result.exitCode,
+        Uint8List.fromList((result.stdout as List).cast<int>()),
+        '${result.stderr}',
+      );
+    }
     final process = await Process.start(tool, arguments);
     final stdoutBytes = <int>[];
     final stderrText = StringBuffer();
