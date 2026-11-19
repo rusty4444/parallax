@@ -19,14 +19,18 @@ class _FakePlatform extends PdfxPlatform {
   final Future<pdfx.PdfDocument> Function() _open;
 
   @override
-  Future<pdfx.PdfDocument> openData(FutureOr<Uint8List> data, {String? password}) =>
+  Future<pdfx.PdfDocument> openData(
+    FutureOr<Uint8List> data, {
+    String? password,
+  }) => _open();
+
+  @override
+  Future<pdfx.PdfDocument> openFile(String filePath, {String? password}) =>
       _open();
 
   @override
-  Future<pdfx.PdfDocument> openFile(String filePath, {String? password}) => _open();
-
-  @override
-  Future<pdfx.PdfDocument> openAsset(String name, {String? password}) => _open();
+  Future<pdfx.PdfDocument> openAsset(String name, {String? password}) =>
+      _open();
 }
 
 class _FakeDocument extends pdfx.PdfDocument {
@@ -37,7 +41,10 @@ class _FakeDocument extends pdfx.PdfDocument {
   final openedPages = <int>[];
 
   @override
-  Future<pdfx.PdfPage> getPage(int pageNumber, {bool autoCloseAndroid = false}) async {
+  Future<pdfx.PdfPage> getPage(
+    int pageNumber, {
+    bool autoCloseAndroid = false,
+  }) async {
     openedPages.add(pageNumber);
     return _FakePage(this, pageNumber);
   }
@@ -153,7 +160,9 @@ void main() {
   });
 
   test('maps other failures to unreadable', () async {
-    PdfxPlatform.instance = _FakePlatform(() async => throw StateError('broken'));
+    PdfxPlatform.instance = _FakePlatform(
+      () async => throw StateError('broken'),
+    );
     expect(
       () => WindowsPdfTools().open(Uint8List(8)),
       throwsA(

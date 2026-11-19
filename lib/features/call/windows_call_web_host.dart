@@ -115,32 +115,42 @@ class WindowsWebViewCallHost implements CallWebHost {
     await _controller.setBackgroundColor(background);
     await _controller.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
     await _controller.addScriptToExecuteOnDocumentCreated(_windowsBridgeScript);
-    _subscriptions.add(_controller.url.listen((url) {
-      _lastUrl = url;
-    }));
-    _subscriptions.add(_controller.loadingState.listen((state) {
-      if (_disposed || state != LoadingState.navigationCompleted) return;
-      final uri = Uri.tryParse(_lastUrl);
-      if (uri != null && sameCallOrigin(uri, page)) onPageFinished();
-    }));
-    _subscriptions.add(_controller.onLoadError.listen((status) {
-      if (!_disposed) onLoadError(status.name);
-    }));
-    _subscriptions.add(_controller.webMessage.listen((message) {
-      if (_disposed) return;
-      if (message is Map && message['__parallaxOpenExternal'] is String) {
-        final uri = Uri.tryParse(message['__parallaxOpenExternal'] as String);
-        if (uri != null &&
-            (uri.scheme == 'https' || uri.scheme == 'mailto')) {
-          unawaited(
-            launchUrl(uri, mode: LaunchMode.externalApplication)
-                .catchError((Object _) => false),
-          );
+    _subscriptions.add(
+      _controller.url.listen((url) {
+        _lastUrl = url;
+      }),
+    );
+    _subscriptions.add(
+      _controller.loadingState.listen((state) {
+        if (_disposed || state != LoadingState.navigationCompleted) return;
+        final uri = Uri.tryParse(_lastUrl);
+        if (uri != null && sameCallOrigin(uri, page)) onPageFinished();
+      }),
+    );
+    _subscriptions.add(
+      _controller.onLoadError.listen((status) {
+        if (!_disposed) onLoadError(status.name);
+      }),
+    );
+    _subscriptions.add(
+      _controller.webMessage.listen((message) {
+        if (_disposed) return;
+        if (message is Map && message['__parallaxOpenExternal'] is String) {
+          final uri = Uri.tryParse(message['__parallaxOpenExternal'] as String);
+          if (uri != null &&
+              (uri.scheme == 'https' || uri.scheme == 'mailto')) {
+            unawaited(
+              launchUrl(
+                uri,
+                mode: LaunchMode.externalApplication,
+              ).catchError((Object _) => false),
+            );
+          }
+          return;
         }
-        return;
-      }
-      onMessage(jsonEncode(message));
-    }));
+        onMessage(jsonEncode(message));
+      }),
+    );
   }
 
   Future<WebviewPermissionDecision> _onPermission(
@@ -160,10 +170,8 @@ class WindowsWebViewCallHost implements CallWebHost {
   }
 
   @override
-  Widget build(BuildContext context) => Webview(
-    _controller,
-    permissionRequested: _onPermission,
-  );
+  Widget build(BuildContext context) =>
+      Webview(_controller, permissionRequested: _onPermission);
 
   @override
   Future<void> load(Uri url) async {

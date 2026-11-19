@@ -26,7 +26,9 @@ void main() {
     test('accepts drive-letter paths with backslashes', () {
       final intent =
           parsePlatformIntent(
-                _share(r'C:\Users\sam\AppData\Local\Temp\parallax\shared_intents\1\a.png'),
+                _share(
+                  r'C:\Users\sam\AppData\Local\Temp\parallax\shared_intents\1\a.png',
+                ),
               )
               as ShareIntent;
       expect(intent.files.single.name, 'a.png');
@@ -60,7 +62,8 @@ void main() {
 
     test('refuses paths outside the share cache', () {
       final intent =
-          parsePlatformIntent(_share(r'C:\Users\sam\secret.png')) as ShareIntent;
+          parsePlatformIntent(_share(r'C:\Users\sam\secret.png'))
+              as ShareIntent;
       expect(intent.files, isEmpty);
       expect(intent.skipped, 1);
     });
@@ -93,7 +96,9 @@ void main() {
 
     test('refuses Windows drive paths', () {
       final intent =
-          parsePlatformIntent(_share(r'C:\temp\parallax\shared_intents\1\a.png'))
+          parsePlatformIntent(
+                _share(r'C:\temp\parallax\shared_intents\1\a.png'),
+              )
               as ShareIntent;
       expect(intent.files, isEmpty);
       expect(intent.skipped, 1);
@@ -136,7 +141,10 @@ void main() {
 
   group('Windows notification details', () {
     test('generic alerts carry Windows details without actions', () {
-      const envelope = PushEnvelope(registrationId: 'r', roomId: '!room:example.org');
+      const envelope = PushEnvelope(
+        registrationId: 'r',
+        roomId: '!room:example.org',
+      );
       final details = genericPushNotificationDetails(envelope);
       expect(details.windows, isNotNull);
       expect(details.windows!.actions, isEmpty);

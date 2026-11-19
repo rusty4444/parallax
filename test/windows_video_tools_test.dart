@@ -112,7 +112,8 @@ void main() {
 
     test('returns null when ffprobe fails', () async {
       final tools = make(
-        runner: (tool, arguments, timeout) async => ProcessResult(1, 0, [], 'bad'),
+        runner: (tool, arguments, timeout) async =>
+            ProcessResult(1, 0, [], 'bad'),
       );
       expect(await tools.probe('C:/videos/clip.mp4'), isNull);
     });
@@ -148,10 +149,15 @@ void main() {
 
     test('throws when the helper fails', () async {
       final tools = make(
-        runner: (tool, arguments, timeout) async => ProcessResult(1, 0, [], 'bad'),
+        runner: (tool, arguments, timeout) async =>
+            ProcessResult(1, 0, [], 'bad'),
       );
       expect(
-        () => tools.compress('C:/videos/clip.mp4', shortSide: 720, videoBitrate: 1000000),
+        () => tools.compress(
+          'C:/videos/clip.mp4',
+          shortSide: 720,
+          videoBitrate: 1000000,
+        ),
         throwsA(isA<FormatException>()),
       );
     });
@@ -161,7 +167,11 @@ void main() {
       addTearDown(() => empty.deleteSync(recursive: true));
       final tools = make(directory: empty.path);
       expect(
-        () => tools.compress('C:/videos/clip.mp4', shortSide: 720, videoBitrate: 1000000),
+        () => tools.compress(
+          'C:/videos/clip.mp4',
+          shortSide: 720,
+          videoBitrate: 1000000,
+        ),
         throwsA(isA<FormatException>()),
       );
     });

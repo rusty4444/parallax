@@ -79,7 +79,9 @@ class WindowsVideoTools implements VideoTools {
     final process = await Process.start(tool, arguments);
     final stdoutBytes = <int>[];
     final stderrText = StringBuffer();
-    final stdoutDone = process.stdout.listen(stdoutBytes.addAll).asFuture<void>();
+    final stdoutDone = process.stdout
+        .listen(stdoutBytes.addAll)
+        .asFuture<void>();
     final stderrDone = process.stderr
         .transform(utf8.decoder)
         .listen(stderrText.write)
@@ -109,12 +111,16 @@ class WindowsVideoTools implements VideoTools {
     if (ffprobe == null || ffmpeg == null) return null;
     try {
       final result = await _run(ffprobe, [
-        '-v', 'error',
-        '-select_streams', 'v:0',
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
         '-show_entries',
         'stream=width,height,duration:stream_tags=rotate:stream_side_data_list',
-        '-show_entries', 'format=duration',
-        '-of', 'json',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'json',
         path,
       ], probeTimeout);
       if (result.exitCode != 0) return null;
@@ -140,8 +146,9 @@ class WindowsVideoTools implements VideoTools {
       final format = json['format'];
       final durationValue =
           stream['duration'] ?? (format is Map ? format['duration'] : null);
-      final seconds =
-          durationValue == null ? null : double.tryParse('$durationValue');
+      final seconds = durationValue == null
+          ? null
+          : double.tryParse('$durationValue');
       final durationMs = seconds == null ? null : (seconds * 1000).round();
       final poster = await _poster(ffmpeg, path);
       return VideoInfo(
@@ -180,13 +187,18 @@ class WindowsVideoTools implements VideoTools {
   Future<(Uint8List, int, int)?> _poster(String ffmpeg, String path) async {
     try {
       final result = await _run(ffmpeg, [
-        '-v', 'error',
-        '-i', path,
-        '-frames:v', '1',
+        '-v',
+        'error',
+        '-i',
+        path,
+        '-frames:v',
+        '1',
         '-vf',
         "scale='min(iw,800)':'min(ih,800)':force_original_aspect_ratio=decrease",
-        '-f', 'image2pipe',
-        '-c:v', 'mjpeg',
+        '-f',
+        'image2pipe',
+        '-c:v',
+        'mjpeg',
         'pipe:1',
       ], probeTimeout);
       if (result.exitCode != 0 || result.stdout.isEmpty) return null;
@@ -216,19 +228,31 @@ class WindowsVideoTools implements VideoTools {
         "scale=w='if(gt(iw,ih),-2,$shortSide)':h='if(gt(iw,ih),$shortSide,-2)'";
     try {
       final result = await _run(ffmpeg, [
-        '-v', 'error',
+        '-v',
+        'error',
         '-y',
-        '-i', path,
-        '-vf', scale,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-b:v', '$videoBitrate',
-        '-maxrate', '$videoBitrate',
-        '-bufsize', '${videoBitrate * 2}',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '128000',
-        '-movflags', '+faststart',
+        '-i',
+        path,
+        '-vf',
+        scale,
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-b:v',
+        '$videoBitrate',
+        '-maxrate',
+        '$videoBitrate',
+        '-bufsize',
+        '${videoBitrate * 2}',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128000',
+        '-movflags',
+        '+faststart',
         output,
       ], compressTimeout);
       if (result.exitCode != 0 || !File(output).existsSync()) {
@@ -261,14 +285,20 @@ class WindowsVideoTools implements VideoTools {
           : durationMs.clamp(1, maxDurationMs);
       final fps = maxFrames * 1000 / sampledMs;
       final result = await _run(ffmpeg, [
-        '-v', 'error',
-        '-t', '${sampledMs / 1000}',
-        '-i', path,
+        '-v',
+        'error',
+        '-t',
+        '${sampledMs / 1000}',
+        '-i',
+        path,
         '-vf',
         "fps=$fps,scale='min($maxEdge,iw)':'min($maxEdge,ih)':force_original_aspect_ratio=decrease",
-        '-frames:v', '$maxFrames',
-        '-f', 'image2pipe',
-        '-c:v', 'mjpeg',
+        '-frames:v',
+        '$maxFrames',
+        '-f',
+        'image2pipe',
+        '-c:v',
+        'mjpeg',
         'pipe:1',
       ], probeTimeout);
       if (result.exitCode != 0) return null;

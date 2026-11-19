@@ -30,9 +30,11 @@ class WindowsPdfTools implements PdfTools {
     } on TimeoutException {
       throw const PdfException(PdfFailure.unreadable);
     } catch (error) {
-      throw PdfException(_isPasswordError(error)
-          ? PdfFailure.passwordProtected
-          : PdfFailure.unreadable);
+      throw PdfException(
+        _isPasswordError(error)
+            ? PdfFailure.passwordProtected
+            : PdfFailure.unreadable,
+      );
     }
     try {
       // Sizes of the first pages only; later ones are assumed to match the
@@ -106,7 +108,10 @@ class _WindowsPdfDocument implements PdfDocument {
     if (fullHeight <= 0) fullHeight = 1;
     if (renderWidth * fullHeight > _maxRenderPixels) {
       renderWidth = (_maxRenderPixels / fullHeight).floor();
-      fullHeight = (renderWidth * size.height / size.width).round().clamp(1, _maxRenderPixels);
+      fullHeight = (renderWidth * size.height / size.width).round().clamp(
+        1,
+        _maxRenderPixels,
+      );
     }
     if (renderWidth <= 0) throw const PdfException(PdfFailure.unreadable);
     pdfx.PdfPage? page;
@@ -138,9 +143,11 @@ class _WindowsPdfDocument implements PdfDocument {
     } on TimeoutException {
       throw const PdfException(PdfFailure.unreadable);
     } catch (error) {
-      throw PdfException(WindowsPdfTools._isPasswordError(error)
-          ? PdfFailure.passwordProtected
-          : PdfFailure.unreadable);
+      throw PdfException(
+        WindowsPdfTools._isPasswordError(error)
+            ? PdfFailure.passwordProtected
+            : PdfFailure.unreadable,
+      );
     } finally {
       try {
         await page?.close();
