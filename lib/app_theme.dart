@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Visual themes. [parallax] is the brand default; the others are alternatives.
@@ -253,6 +254,13 @@ ThemeData _buildTheme(VisualTheme style) {
       foregroundColor: palette.foreground,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
+      // Full-screen AppBars (media viewer, room details, settings, …) share
+      // the window with the shell's top-right caption buttons on Windows;
+      // keep their actions to the left of those buttons.
+      actionsPadding:
+          (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+          ? const EdgeInsets.only(right: 3 * kDesktopCaptionButtonWidth)
+          : null,
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: palette.accent,
