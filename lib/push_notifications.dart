@@ -1455,6 +1455,11 @@ Future<void> initializePushLocalNotifications(
   final initialized = await local.initialize(
     settings: const InitializationSettings(
       android: AndroidInitializationSettings('@drawable/ic_stat_parallax'),
+      windows: WindowsInitializationSettings(
+        appName: 'Parallax',
+        appUserModelId: 'net.samrussell.parallax',
+        guid: 'b7f3c9d2-4e8a-4f1b-9c6d-2a5e8f0b3d71',
+      ),
     ),
     onDidReceiveNotificationResponse: onOpen == null
         ? null
@@ -1511,6 +1516,16 @@ NotificationDetails genericPushNotificationDetails(PushEnvelope envelope) =>
       android: envelope.eventId == null
           ? _genericAndroidDetails
           : _markReadAndroidDetails,
+      windows: envelope.eventId == null
+          ? const WindowsNotificationDetails()
+          : const WindowsNotificationDetails(
+              actions: [
+                WindowsAction(
+                  content: 'Mark as read',
+                  arguments: pushMarkReadActionId,
+                ),
+              ],
+            ),
     );
 
 Future<void> showGenericPushNotification(

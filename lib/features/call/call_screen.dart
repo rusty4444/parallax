@@ -73,7 +73,7 @@ class CallScreen extends StatefulWidget {
     required this.palette,
     this.audioOnly = false,
     this.permissions = const PlatformPermissions(),
-    this.webHostFactory = createWebViewCallHost,
+    this.webHostFactory = createPlatformCallWebHost,
     this.keepAwake = const WakelockKeepAwake(),
     this.loadTimeout = const Duration(seconds: 30),
     this.hangupGrace = const Duration(seconds: 2),

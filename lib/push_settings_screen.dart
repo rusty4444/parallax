@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'features/platform/background_connection.dart';
 import 'features/platform/unified_push.dart';
+import 'features/platform/windows_bootstrap.dart';
 import 'push_notifications.dart';
 
 /// Edits client configuration only, never gateway/server credentials. The app
@@ -596,22 +597,25 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
             ),
             const SizedBox(height: 8),
             SegmentedButton<PushProvider>(
-              segments: const [
-                ButtonSegment(
+              segments: [
+                const ButtonSegment(
                   value: PushProvider.inApp,
                   icon: Icon(Icons.sync_rounded),
                   label: Text('Built in'),
                 ),
-                ButtonSegment(
-                  value: PushProvider.firebase,
-                  icon: Icon(Icons.cloud_outlined),
-                  label: Text('Firebase'),
-                ),
-                ButtonSegment(
-                  value: PushProvider.unifiedPush,
-                  icon: Icon(Icons.hub_outlined),
-                  label: Text('UnifiedPush'),
-                ),
+                // Firebase and UnifiedPush delivery are Android-only.
+                if (!isWindowsDesktop) ...[
+                  const ButtonSegment(
+                    value: PushProvider.firebase,
+                    icon: Icon(Icons.cloud_outlined),
+                    label: Text('Firebase'),
+                  ),
+                  const ButtonSegment(
+                    value: PushProvider.unifiedPush,
+                    icon: Icon(Icons.hub_outlined),
+                    label: Text('UnifiedPush'),
+                  ),
+                ],
               ],
               selected: {_provider},
               // Switching turns the current delivery off first.
@@ -638,12 +642,20 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
             const SizedBox(height: 20),
             Text(
               inApp
-                  ? 'Android shows a small “Parallax is connected” notification '
-                        'while the connection runs; you can hide it in Android’s '
-                        'notification settings without stopping it. Some phone '
-                        'makers stop background apps anyway. Notifications show '
-                        'content fetched and decrypted on this device; you can '
-                        'hide it under Settings → Notifications.'
+                  ? (isWindowsDesktop
+                        ? 'Parallax keeps its Matrix connection running while the '
+                              'app is open, and keeps running in the notification '
+                              'area when you close the window, so notifications '
+                              'still arrive. Use the tray icon’s Quit to stop it '
+                              'completely. Notifications show content fetched and '
+                              'decrypted on this device; you can hide it under '
+                              'Settings → Notifications.'
+                        : 'Android shows a small “Parallax is connected” notification '
+                              'while the connection runs; you can hide it in Android’s '
+                              'notification settings without stopping it. Some phone '
+                              'makers stop background apps anyway. Notifications show '
+                              'content fetched and decrypted on this device; you can '
+                              'hide it under Settings → Notifications.')
                   : unifiedPush
                   ? 'Parallax uses UnifiedPush automatically when a distributor '
                         'app such as ntfy is installed, and its built-in '

@@ -20,10 +20,12 @@ import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/platform/background_connection.dart';
+import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  initializeWindowsPlatform();
   runApp(const ParallaxApp());
 }
 

@@ -18,6 +18,7 @@ import 'voice_recorder.dart';
 import 'haptics.dart';
 import 'features/media/video_prep.dart';
 import 'features/media/image_editor_screen.dart';
+import 'features/platform/windows_bootstrap.dart';
 
 typedef MediaPicker = Future<MediaSelection?> Function();
 
@@ -440,6 +441,15 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   }
 
   Future<MediaSelection?> _pickImage(ImageSource source) async {
+    if (isWindowsDesktop) {
+      // Desktop has no camera capture: pick an image file instead.
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a photo',
+        type: FileType.image,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final image = await ImagePicker().pickImage(source: source);
     if (image == null) return null;
     return _fromFile(image);
@@ -447,12 +457,29 @@ class _RichMessageComposerState extends State<RichMessageComposer>
 
   /// Gallery: photos and videos.
   Future<MediaSelection?> _pickGalleryMedia() async {
+    if (isWindowsDesktop) {
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a photo or video',
+        type: FileType.media,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final picked = await ImagePicker().pickMedia();
     if (picked == null) return null;
     return _fromFile(picked);
   }
 
   Future<MediaSelection?> _recordVideo() async {
+    if (isWindowsDesktop) {
+      // Desktop has no camera recording: pick an existing video file.
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a video',
+        type: FileType.video,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final video = await ImagePicker().pickVideo(
       source: ImageSource.camera,
       maxDuration: const Duration(minutes: 4),

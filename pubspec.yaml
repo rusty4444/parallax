@@ -73,6 +73,16 @@ dependencies:
   # Document previews: Markdown, and the XML inside .docx/.xlsx/.pptx files.
   markdown: ^7.3.1
   xml: ^7.0.1
+  # Windows desktop port. sqflite has no Windows implementation: the SDK
+  # database runs on sqlite3 via FFI (sqlite3_flutter_libs bundles the DLL).
+  sqflite_common_ffi: ^2.3.4
+  sqlite3_flutter_libs: ^0.5.42
+  # Windows video playback (Media Foundation) behind the video_player API.
+  video_player_win: ^3.2.2
+  # WebView2 host for the Element Call widget on Windows.
+  webview_windows: ^0.4.0
+  # PDFium renderer for PDF previews on Windows (Android uses PdfRenderer).
+  pdfx: ^2.9.2
 
 dev_dependencies:
   flutter_test:
