@@ -1,13 +1,14 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
 import 'chat_backend.dart';
 import 'created_room_wait.dart';
-import 'features/home/adaptive_layout.dart';
 import 'features/home/home_features.dart';
 import 'features/home/room_list_filters.dart';
 import 'features/home/room_list_menu.dart';
@@ -28,12 +29,14 @@ import 'directory_screen.dart';
 import 'feature_settings_scope.dart';
 import 'messaging_features.dart';
 import 'room_picture_sheet.dart';
+import 'room_background_store.dart';
 import 'space_browser_screen.dart';
 import 'user_directory_screen.dart';
 import 'message_search_screen.dart';
 import 'room_screen.dart';
 import 'room_sync_panel.dart';
 import 'settings_screen.dart';
+import 'two_pane.dart';
 import 'widgets.dart';
 import 'haptics.dart';
 
@@ -46,6 +49,8 @@ class InboxScreen extends StatefulWidget {
     required this.onThemeChanged,
     this.followSystemTheme = false,
     this.onFollowSystemTheme,
+    this.roomRoutes,
+    this.backgroundStore,
   });
   final ChatBackend backend;
   final AppPalette palette;
@@ -56,17 +61,66 @@ class InboxScreen extends StatefulWidget {
   final bool followSystemTheme;
   final ValueChanged<bool>? onFollowSystemTheme;
 
+  /// The root navigator's chat-route tracker. When the window widens
+  /// (unfold, rotate), open chat routes are absorbed into the detail pane.
+  final RoomRouteObserver? roomRoutes;
+
+  /// Test seam: the detail pane's room background store (the real one needs
+  /// path_provider, which widget tests do not answer).
+  @visibleForTesting
+  final RoomBackgroundStore? backgroundStore;
+
   @override
   State<InboxScreen> createState() => _InboxScreenState();
 }
 
-class _InboxScreenState extends State<InboxScreen> {
+class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   late final _owner = BackendSessionOwner(widget.backend);
   late final _creation = RoomCreationRequest.forBackend(widget.backend);
+
+  /// Tablet/foldable detail-pane selection (see two_pane.dart).
+  late final _twoPane = TwoPaneController();
+
+  /// User-chosen list pane width from dragging the divider (desktop).
+  double? _paneWidthOverride;
+
+  void _savePaneWidth() {
+    final width = _paneWidthOverride;
+    if (width == null) return;
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setDouble(kTwoPaneWidthPref, width))
+          .catchError((Object _) => false),
+    );
+  }
+
+  void _resetPaneWidth() {
+    setState(() => _paneWidthOverride = null);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.remove(kTwoPaneWidthPref))
+          .catchError((Object _) => false),
+    );
+  }
+
+  bool _windowSyncScheduled = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _twoPane.register(widget.backend);
+    _twoPane.addListener(_twoPaneChanged);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) {
+            final width = prefs.getDouble(kTwoPaneWidthPref);
+            if (mounted && width != null) {
+              setState(() => _paneWidthOverride = width);
+            }
+          })
+          .catchError((Object _) {}),
+    );
     _creation.addListener(_creationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _creationChanged());
     _messageIndex = localMessageSearchOf(widget.backend);
@@ -117,15 +171,77 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _messageDebounce?.cancel();
     _messageGeneration++;
     _deviceSetup++;
     _changes.dispose();
     _createdRoomWait?.cancel();
     _creation.detach(_creationChanged);
+    _twoPane.unregister(widget.backend);
+    _twoPane.removeListener(_twoPaneChanged);
+    _twoPane.dispose();
     _owner.release();
     _search.dispose();
     super.dispose();
+  }
+
+  void _twoPaneChanged() {
+    if (mounted && _owner.isCurrent) setState(() {});
+  }
+
+  /// A covered inbox is not re-laid out when the window resizes, so the
+  /// LayoutBuilder alone misses fold/unfold while a chat route is on top.
+  /// Metrics notifications reach every observer regardless.
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final view = View.of(context);
+    final size = view.physicalSize / view.devicePixelRatio;
+    _scheduleWindowSync(isTwoPaneWindow(size));
+  }
+
+  void _scheduleWindowSync(bool wide) {
+    if (wide == _twoPane.wide || _windowSyncScheduled) return;
+    _windowSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _windowSyncScheduled = false;
+      if (!mounted || !_owner.isCurrent) return;
+      _applyWindowMode(wide);
+    });
+  }
+
+  /// Fold/unfold, rotation and split-screen change the window class.
+  /// Widening absorbs open chat routes into the detail pane; narrowing
+  /// keeps the selected chat on screen by pushing it as a phone route.
+  void _applyWindowMode(bool wide) {
+    if (wide == _twoPane.wide) return;
+    if (wide) {
+      final routes = widget.roomRoutes?.rooms ?? const <RoomRoute>[];
+      final top = routes.isEmpty ? null : routes.last;
+      _twoPane.wide = true;
+      if (top != null) {
+        final navigator = Navigator.of(context);
+        // Remove only chat routes; other screens (settings, media) stay.
+        for (final route in routes) {
+          navigator.removeRoute(route);
+        }
+        _twoPane.select(top.roomId);
+      }
+    } else {
+      _twoPane.wide = false;
+      final selected = _twoPane.selectedRoomId;
+      final chatAlreadyOpen = widget.roomRoutes?.rooms.isNotEmpty ?? false;
+      if (selected != null && !chatAlreadyOpen && (_route?.isCurrent ?? true)) {
+        Navigator.of(context).push(
+          RoomRoute(
+            backend: widget.backend,
+            palette: widget.palette,
+            roomId: selected,
+          ),
+        );
+      }
+    }
   }
 
   bool _favourite(ChatRoom room) {
@@ -702,21 +818,12 @@ class _InboxScreenState extends State<InboxScreen> {
 
   void _open(String id) {
     if (!mounted || !_owner.isCurrent) return;
-    // Wide windows (iPad, unfolded iPhone Fold, Mac): select the chat in the
-    // detail pane instead of pushing a route.
-    final wide = AdaptiveLayoutHost.of(context);
-    if (wide != null) {
-      wide.select(id);
-      return;
-    }
-    Navigator.of(context).push(
-      buildRoomRoute(
+    unawaited(
+      openRoom(
+        context,
+        backend: widget.backend,
+        palette: widget.palette,
         roomId: id,
-        builder: (_) => RoomScreen(
-          backend: widget.backend,
-          palette: widget.palette,
-          roomId: id,
-        ),
       ),
     );
   }
@@ -1017,7 +1124,8 @@ class _InboxScreenState extends State<InboxScreen> {
     required bool hideInviteAvatars,
     required String? noteId,
   }) {
-    final selectedId = AdaptiveLayoutHost.of(context)?.selectedRoomId;
+    // WhatsApp-style tint on the chat open in the detail pane.
+    final selected = _twoPane.wide && room.id == _twoPane.selectedRoomId;
     if (room.id == noteId) {
       return NoteToSelfTile(
         key: ValueKey('room-${room.id}'),
@@ -1026,7 +1134,7 @@ class _InboxScreenState extends State<InboxScreen> {
         compact: compact || rowStyle == HomeRowStyle.compact,
         previewLines: homePreview.maxLines,
         busy: _pendingRoomAction == room.id,
-        selected: selectedId == room.id,
+        selected: selected,
         onTap: () => _open(room.id),
         onLongPress: () => _showRoomActions(room),
       );
@@ -1043,7 +1151,7 @@ class _InboxScreenState extends State<InboxScreen> {
       busy: _pendingRoomAction == room.id,
       style: rowStyle,
       preview: homePreview,
-      selected: selectedId == room.id,
+      selected: selected,
       onTap: room.invited ? () => _showInvitation(room) : () => _open(room.id),
       onLongPress: room.invited ? null : () => _showRoomActions(room),
       onAccept: () => _acceptInvite(room),
@@ -1210,10 +1318,141 @@ class _InboxScreenState extends State<InboxScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = isTwoPaneWindow(
+          Size(constraints.maxWidth, constraints.maxHeight),
+        );
+        _scheduleWindowSync(wide);
+        final inbox = _buildInbox(context, twoPane: wide);
+        if (!wide) return inbox;
+        final p = widget.palette;
+        final split = twoPaneSplit(
+          constraints.maxWidth,
+          features: MediaQuery.displayFeaturesOf(context),
+        );
+        // A physical hinge keeps the hardware-aligned gap; otherwise the
+        // divider is drag-resizable and the chosen width persists.
+        final hinge = split.gapWidth > 1;
+        final listWidth = hinge
+            ? split.listWidth
+            : clampTwoPaneWidth(
+                _paneWidthOverride ?? split.listWidth,
+                constraints.maxWidth,
+              );
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: listWidth,
+              child: MediaQuery.removePadding(
+                context: context,
+                removeRight: true,
+                child: inbox,
+              ),
+            ),
+            if (hinge)
+              SizedBox(
+                width: split.gapWidth,
+                child: ColoredBox(color: p.stroke),
+              )
+            else
+              PaneDivider(
+                palette: p,
+                onDrag: (dx) => setState(() {
+                  _paneWidthOverride = clampTwoPaneWidth(
+                    listWidth + dx,
+                    constraints.maxWidth,
+                  );
+                }),
+                onDragEnd: _savePaneWidth,
+                onReset: _resetPaneWidth,
+              ),
+            Expanded(
+              child: MediaQuery.removePadding(
+                context: context,
+                removeLeft: true,
+                child: _detailPane(context),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// The right pane: the selected chat, or a calm placeholder (Messenger /
+  /// WhatsApp on tablets). A room that disappeared (left, removed) falls
+  /// back to the placeholder instead of an empty timeline.
+  Widget _detailPane(BuildContext context) {
+    final p = widget.palette;
+    final id = _twoPane.selectedRoomId;
+    final known =
+        id != null && widget.backend.rooms.any((room) => room.id == id);
+    if (!known) {
+      // The detail pane has no Scaffold of its own; without a Material the
+      // placeholder text inherits the framework fallback style (48px, yellow
+      // underline). A transparent Material supplies the theme text style.
+      return Material(
+        type: MaterialType.transparency,
+        child: GlowBackdrop(
+          palette: p,
+          child: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BrandMark(palette: p, size: 72),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Select a conversation',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: p.foreground,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Choose a chat from the list to start reading.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: p.muted,
+                        fontSize: 13,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return RoomScreen(
+      key: ValueKey('two-pane-$id'),
+      backend: widget.backend,
+      palette: p,
+      roomId: id,
+      embedded: true,
+      backgroundStore: widget.backgroundStore,
+    );
+  }
+
+  /// The inbox list itself: the whole screen on phones, the left pane on
+  /// tablets and unfolded foldables.
+  Widget _buildInbox(BuildContext context, {required bool twoPane}) {
     final p = widget.palette;
     final settings = FeatureSettingsScope.maybeOf(context)?.preferences;
     final compact = settings?.compact ?? false;
-    final expandedHome = settings?.expandedHome ?? false;
+    // The tall "Messages" home layout is for the full-screen phone inbox;
+    // the list pane keeps its compact header.
+    final expandedHome = !twoPane && (settings?.expandedHome ?? false);
     final hideInviteAvatars = settings?.hideInviteAvatars ?? false;
     final rowStyle = settings?.homeRowStyle ?? HomeRowStyle.cards;
     final homePreview = settings?.homePreview ?? HomePreview.long;
@@ -1399,9 +1638,14 @@ class _InboxScreenState extends State<InboxScreen> {
                     : 'Room created',
               ),
               subtitle: SelectableText(_createdRoomId!),
-              trailing: TextButton(
-                onPressed: _waitingForCreatedRoom ? null : _openCreatedRoom,
-                child: const Text('Open created room'),
+              // A bounded trailing keeps the title/subtitle from collapsing
+              // to zero width in a narrow (tablet list pane) box.
+              trailing: SizedBox(
+                width: 150,
+                child: TextButton(
+                  onPressed: _waitingForCreatedRoom ? null : _openCreatedRoom,
+                  child: const Text('Open created room'),
+                ),
               ),
             ),
         ];
@@ -1550,39 +1794,83 @@ class _InboxScreenState extends State<InboxScreen> {
           body: GlowBackdrop(
             palette: p,
             child: SafeArea(
+              // Narrow macOS window: keep the phone-style header below the
+              // traffic-light strip (the native title bar is hidden).
+              minimum:
+                  (!kIsWeb &&
+                      defaultTargetPlatform == TargetPlatform.macOS &&
+                      !twoPane)
+                  ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+                  : EdgeInsets.zero,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 22, 16, 0),
+                    padding: twoPane
+                        ? EdgeInsets.fromLTRB(
+                            // macOS: the brand starts right of the traffic
+                            // lights, flush with the hidden title bar.
+                            (!kIsWeb &&
+                                    defaultTargetPlatform ==
+                                        TargetPlatform.macOS)
+                                ? 84
+                                : 16,
+                            4,
+                            8,
+                            0,
+                          )
+                        : const EdgeInsets.fromLTRB(22, 22, 16, 0),
                     child: Row(
                       children: [
-                        BrandMark(palette: p, size: 46),
-                        const SizedBox(width: 13),
+                        if (!twoPane) ...[
+                          BrandMark(palette: p, size: 46),
+                          const SizedBox(width: 13),
+                        ],
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Parallax',
-                                style: TextStyle(
-                                  color: p.foreground,
-                                  fontSize: 23,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -1.1,
+                          child: twoPane
+                              ? Row(
+                                  children: [
+                                    BrandMark(palette: p, size: 44),
+                                    const SizedBox(width: 13),
+                                    Flexible(
+                                      child: Text(
+                                        'Parallax',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: p.foreground,
+                                          fontSize: 26,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.8,
+                                          decoration: TextDecoration.none,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Parallax',
+                                      style: TextStyle(
+                                        color: p.foreground,
+                                        fontSize: 23,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -1.1,
+                                      ),
+                                    ),
+                                    Text(
+                                      'YOUR SPACE TO CONNECT',
+                                      style: TextStyle(
+                                        color: p.secondary,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.7,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              Text(
-                                'YOUR SPACE TO CONNECT',
-                                style: TextStyle(
-                                  color: p.secondary,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.7,
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
                         IconButton(
                           key: const ValueKey('home.search_toggle'),

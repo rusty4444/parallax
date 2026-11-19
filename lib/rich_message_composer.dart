@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -21,7 +22,7 @@ import 'features/media/image_editor_screen.dart';
 
 typedef MediaPicker = Future<MediaSelection?> Function();
 
-enum _MediaSource { gallery, camera, video, file }
+enum _MediaSource { gallery, camera, video, file, any }
 
 enum _VoiceMode { idle, requesting, recording, stopping }
 
@@ -440,6 +441,15 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   }
 
   Future<MediaSelection?> _pickImage(ImageSource source) async {
+    if (_desktopKeyboard) {
+      // Desktop has no camera capture: pick an image file instead.
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a photo',
+        type: FileType.image,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final image = await ImagePicker().pickImage(source: source);
     if (image == null) return null;
     return _fromFile(image);
@@ -447,12 +457,29 @@ class _RichMessageComposerState extends State<RichMessageComposer>
 
   /// Gallery: photos and videos.
   Future<MediaSelection?> _pickGalleryMedia() async {
+    if (_desktopKeyboard) {
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a photo or video',
+        type: FileType.media,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final picked = await ImagePicker().pickMedia();
     if (picked == null) return null;
     return _fromFile(picked);
   }
 
   Future<MediaSelection?> _recordVideo() async {
+    if (_desktopKeyboard) {
+      // Desktop has no camera recording: pick an existing video file.
+      final file = await FilePicker.pickFile(
+        dialogTitle: 'Attach a video',
+        type: FileType.video,
+      );
+      if (file == null) return null;
+      return _fromFile(file.xFile);
+    }
     final video = await ImagePicker().pickVideo(
       source: ImageSource.camera,
       maxDuration: const Duration(minutes: 4),
@@ -497,6 +524,23 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     return _fromFile(file.xFile);
   }
 
+  /// Windows' single attachment option: photos, videos and files through one
+  /// picker, with the same size/compression rules as the separate options.
+  Future<MediaSelection?> _pickAnyMedia() async {
+    final file = await FilePicker.pickFile(
+      dialogTitle: 'Attach a photo, video or file',
+    );
+    if (file == null) return null;
+    final length = await file.length();
+    final video = isVideoMime(_mimeFor(file.name));
+    if (!video &&
+        length != null &&
+        length > RichMessageComposer.maxMediaBytes) {
+      throw const FormatException('Attachments must be 20 MB or smaller.');
+    }
+    return _fromFile(file.xFile);
+  }
+
   static String _mimeFor(String name) =>
       switch (name.split('.').last.toLowerCase()) {
         'jpg' || 'jpeg' => 'image/jpeg',
@@ -530,6 +574,12 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         _background) {
       return;
     }
+    // Windows: one attachment button for everything — straight to a single
+    // unified picker (no camera on desktop, so no separate photo/video rows).
+    if (_desktopKeyboard && widget.extraAttachments.isEmpty) {
+      _pick(_MediaSource.any);
+      return;
+    }
     // Acquire before awaiting the modal. Repeated callbacks cannot open two.
     setState(() => _sourceSheetOpen = true);
     final epoch = _pickEpoch;
@@ -551,18 +601,26 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                 ),
               ),
               for (final item in [
-                (
-                  _MediaSource.gallery,
-                  Icons.photo_library_outlined,
-                  'Photo or video',
-                ),
-                (
-                  _MediaSource.camera,
-                  Icons.photo_camera_outlined,
-                  'Take photo',
-                ),
-                (_MediaSource.video, Icons.videocam_outlined, 'Record video'),
-                (_MediaSource.file, Icons.insert_drive_file_outlined, 'File'),
+                if (_desktopKeyboard)
+                  (
+                    _MediaSource.any,
+                    Icons.attach_file_rounded,
+                    'Photo, video or file',
+                  )
+                else ...[
+                  (
+                    _MediaSource.gallery,
+                    Icons.photo_library_outlined,
+                    'Photo or video',
+                  ),
+                  (
+                    _MediaSource.camera,
+                    Icons.photo_camera_outlined,
+                    'Take photo',
+                  ),
+                  (_MediaSource.video, Icons.videocam_outlined, 'Record video'),
+                  (_MediaSource.file, Icons.insert_drive_file_outlined, 'File'),
+                ],
               ])
                 ListTile(
                   leading: Icon(item.$2),
@@ -614,6 +672,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         widget.pickCamera ?? () => _pickImage(ImageSource.camera),
       _MediaSource.video => widget.pickVideo ?? _recordVideo,
       _MediaSource.file => widget.pickFile ?? _pickFile,
+      _MediaSource.any => widget.pickFile ?? _pickAnyMedia,
     };
     unawaited(() async {
       try {
@@ -631,6 +690,90 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         if (_alive) setState(() {});
       }
     }());
+  }
+
+  /// Desktop keyboard handling: Enter sends (Shift+Enter is a newline,
+  /// Enter accepts the top mention/command suggestion while one is shown),
+  /// Ctrl+V (Cmd+V on macOS) pastes a clipboard image as an attachment or
+  /// falls back to text. Phones keep the IME behaviour untouched.
+  /// Desktop platforms, overridable in widget tests (dart:io Platform is not).
+  bool get _desktopKeyboard =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
+  KeyEventResult _onComposeKey(FocusNode node, KeyEvent event) {
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.windows &&
+            defaultTargetPlatform != TargetPlatform.macOS &&
+            defaultTargetPlatform != TargetPlatform.linux)) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        return KeyEventResult.ignored;
+      }
+      if (_suggestions.isNotEmpty) {
+        _pickSuggestion(_suggestions.first);
+        return KeyEventResult.handled;
+      }
+      _send();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyV &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            (defaultTargetPlatform == TargetPlatform.macOS &&
+                HardwareKeyboard.instance.isMetaPressed))) {
+      unawaited(_pasteClipboard());
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Pastes the clipboard: an image becomes an attachment (Windows reads the
+  /// native clipboard through the runner), anything else inserts plain text.
+  Future<void> _pasteClipboard() async {
+    if (!_alive || _background || !_voiceIdle) return;
+    if (_desktopKeyboard) {
+      try {
+        final bytes = await const MethodChannel(
+          'parallax/clipboard',
+        ).invokeMethod<Uint8List>('readImage');
+        if (!_alive) return;
+        if (bytes != null && bytes.isNotEmpty) {
+          _stage(
+            MediaSelection(
+              bytes: bytes,
+              name: 'pasted-image.png',
+              mimeType: 'image/png',
+            ),
+          );
+          return;
+        }
+      } on MissingPluginException {
+        // Fall through to text paste.
+      } catch (_) {
+        // Fall through to text paste.
+      }
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (!_alive || text == null || text.isEmpty) return;
+    final value = _input.value;
+    final start = value.selection.start < 0
+        ? value.text.length
+        : value.selection.start;
+    final end = value.selection.end < 0
+        ? value.text.length
+        : value.selection.end;
+    _input.value = TextEditingValue(
+      text: value.text.replaceRange(start, end, text),
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
   }
 
   void _insertContent(KeyboardInsertedContent content) {
@@ -1420,10 +1563,13 @@ class _RichMessageComposerState extends State<RichMessageComposer>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: _composeField(
-                  context,
-                  colors: colors,
-                  formatting: formatting,
+                child: Focus(
+                  onKeyEvent: _onComposeKey,
+                  child: _composeField(
+                    context,
+                    colors: colors,
+                    formatting: formatting,
+                  ),
                 ),
               ),
               const SizedBox(width: 6),

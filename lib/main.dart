@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:matrix/matrix.dart' as matrix;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
@@ -14,20 +19,84 @@ import 'login_screen.dart';
 import 'matrix_backend.dart';
 import 'message_draft_store.dart';
 import 'push_notifications.dart';
-import 'room_screen.dart';
 import 'security_overlay.dart';
+import 'two_pane.dart';
 import 'widgets.dart';
-import 'features/home/adaptive_layout.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/platform/apple_bootstrap.dart';
 import 'features/platform/background_connection.dart';
+import 'features/platform/desktop_title_bar.dart';
+import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeApplePlatform();
+  assert(() {
+    _installDebugLog();
+    return true;
+  }());
+  initializeWindowsPlatform();
+  if (Platform.isWindows || Platform.isMacOS) {
+    // Replace the native caption with the blended desktop header. On macOS
+    // TitleBarStyle.hidden keeps the traffic lights; on Windows the
+    // DesktopTitleBar draws the caption buttons.
+    await windowManager.ensureInitialized();
+    await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+  }
   runApp(const ParallaxApp());
+  _installFrameDump();
+}
+
+final GlobalKey _frameDumpKey = GlobalKey();
+
+/// Diagnostic: with PARALLAX_FRAME_DUMP=1, write a PNG of the rendered UI
+/// shortly after startup. Win32 screen/PrintWindow capture cannot read the
+/// Flutter GPU swap chain on some Windows builds, so this dumps the frame
+/// from inside the engine instead.
+void _installFrameDump() {
+  if (!Platform.isWindows) return;
+  if (Platform.environment['PARALLAX_FRAME_DUMP'] != '1') return;
+  Future<void>.delayed(const Duration(seconds: 6), () async {
+    try {
+      final obj = _frameDumpKey.currentContext?.findRenderObject();
+      if (obj is! RenderRepaintBoundary) return;
+      final image = await obj.toImage(pixelRatio: 1.0);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return;
+      File(
+        r'C:\Users\Public\Documents\parallax-framedump.png',
+      ).writeAsBytesSync(data.buffer.asUint8List());
+    } catch (_) {
+      // Best-effort diagnostic.
+    }
+  });
+}
+
+/// Debug-build-only diagnostic: timestamped SDK log to a file, for
+/// investigating live flows such as verification stalls. Compiled out of
+/// release builds by the assert, and skipped under `flutter test`.
+void _installDebugLog() {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+  final file = File(
+    Platform.isWindows
+        ? r'C:\Users\Public\Documents\parallax-debug.log'
+        : '${Directory.systemTemp.path}/parallax-debug.log',
+  );
+  matrix.Logs().level = matrix.Level.verbose;
+  matrix.Logs().onLog = (event) {
+    try {
+      file.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} [${event.level.name}] '
+        '${event.toFormattedString()}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } catch (_) {
+      // Diagnostics must never break the app.
+    }
+  };
 }
 
 typedef MatrixBackendFactory =
@@ -75,8 +144,10 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   VisualTheme _style = defaultVisualTheme;
   bool _followSystemTheme = false;
   GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  final AdaptiveLayoutController _adaptiveLayout = AdaptiveLayoutController();
-  final RoomRouteObserver _roomRoutes = RoomRouteObserver();
+
+  /// Chat routes above the inbox, so widening the window (tablet, unfold)
+  /// can absorb them into the detail pane.
+  final _roomRoutes = RoomRouteObserver();
   String? _accountKey;
   String? _userId;
   bool _authenticated = false;
@@ -153,7 +224,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       // Replacing the navigator removes *all* pushed decrypted routes, rather
       // than merely changing the home widget underneath a media/thread route.
       _navigatorKey = GlobalKey<NavigatorState>();
-      _adaptiveLayout.clear();
+      // The old navigator's routes died without pops; drop their records.
       _roomRoutes.reset();
       _authenticated = false;
       _scheduleRebuild();
@@ -419,27 +490,22 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       // A notification is a fresh entry into a room: retain the inbox root but
       // remove any previous room/media/settings routes above it. Back therefore
       // returns to the inbox, never to an inactive room whose timeline is empty.
+      // On a wide window the room is selected in the detail pane instead.
       unawaited(
-        navigator
-            .pushAndRemoveUntil<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => RoomScreen(
-                  backend: backend,
-                  palette: paletteFor(_style),
-                  roomId: request.roomId,
-                ),
-              ),
-              (route) => route.isFirst,
-            )
-            .then<void>(
-              (_) {},
-              onError: (Object _, StackTrace _) {
-                if (!current()) return;
-                _pushError =
-                    'Could not open the notification’s room. Try again.';
-                _scheduleRebuild();
-              },
-            ),
+        openRoomOnNavigator(
+          navigator,
+          backend: backend,
+          palette: paletteFor(_style),
+          roomId: request.roomId,
+          replaceStack: true,
+        ).then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {
+            if (!current()) return;
+            _pushError = 'Could not open the notification’s room. Try again.';
+            _scheduleRebuild();
+          },
+        ),
       );
     } catch (_) {
       if (!current()) return;
@@ -554,8 +620,6 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         : Future<void>.value();
     unawaited(_releaseOwnedResources(cleanup));
     if (_ownsPreferences) _preferences.dispose();
-    _adaptiveLayout.dispose();
-    _roomRoutes.dispose();
     super.dispose();
   }
 
@@ -589,11 +653,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style),
-        builder: (context, child) => FeatureSettingsScope(
-          preferences: _preferences,
-          draftStore: _draftStore,
-          notifications: _pushReady ? _notifications : null,
-          child: _AppTextScale(
+        builder: (context, child) {
+          final content = _AppTextScale(
             factor: _preferences.textScale,
             child: Column(
               children: [
@@ -636,8 +697,69 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                 ),
               ],
             ),
-          ),
-        ),
+          );
+          return RepaintBoundary(
+            key: _frameDumpKey,
+            child: FeatureSettingsScope(
+              preferences: _preferences,
+              draftStore: _draftStore,
+              notifications: _pushReady ? _notifications : null,
+              child: (Platform.isWindows || Platform.isMacOS)
+                  ? GlowBackdrop(
+                      palette: p,
+                      child: Stack(
+                        children: [
+                          // Drag strip behind the content: the inbox brand
+                          // sits flush at the top-left, and dragging the
+                          // header's empty space moves the window. Double
+                          // click maximizes.
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: kDesktopTitleBarHeight,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (_) => windowManager.startDragging(),
+                              onDoubleTap: () async {
+                                if (await windowManager.isMaximized()) {
+                                  await windowManager.unmaximize();
+                                } else {
+                                  await windowManager.maximize();
+                                }
+                              },
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
+                          Positioned.fill(child: content),
+                          // Windows draws its own caption buttons; macOS
+                          // keeps the native traffic lights.
+                          if (Platform.isWindows)
+                            Positioned(
+                              top: 0,
+                              right: 0,
+                              // The caption buttons live outside the Navigator,
+                              // so their tooltips need their own Overlay.
+                              child: SizedBox(
+                                width: 3 * kDesktopCaptionButtonWidth,
+                                height: kDesktopTitleBarHeight,
+                                child: Overlay(
+                                  initialEntries: [
+                                    OverlayEntry(
+                                      builder: (_) =>
+                                          DesktopTitleBar(palette: p),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    )
+                  : content,
+            ),
+          );
+        },
         // Only the session status picks the screen. Rebuilding on every
         // backend notification (each sync, each timeline update of an open
         // room) rebuilt the whole inbox underneath the room on screen.
@@ -674,20 +796,14 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               backend: _backend,
               palette: p,
             ),
-            SessionStatus.ready => AdaptiveShell(
-              controller: _adaptiveLayout,
-              observer: _roomRoutes,
+            SessionStatus.ready => InboxScreen(
+              backend: _backend,
               palette: p,
-              roomBuilder: (roomId) =>
-                  RoomScreen(backend: _backend, palette: p, roomId: roomId),
-              inbox: InboxScreen(
-                backend: _backend,
-                palette: p,
-                style: _style,
-                onThemeChanged: _changeTheme,
-                followSystemTheme: _followSystemTheme,
-                onFollowSystemTheme: _followSystem,
-              ),
+              style: _style,
+              onThemeChanged: _changeTheme,
+              followSystemTheme: _followSystemTheme,
+              onFollowSystemTheme: _followSystem,
+              roomRoutes: _roomRoutes,
             ),
             SessionStatus.offline => Scaffold(
               body: GlowBackdrop(

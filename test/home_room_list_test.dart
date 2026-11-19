@@ -246,7 +246,8 @@ void main() {
       WidgetTester tester, {
       AppearancePreferences? prefs,
     }) async {
-      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      // Phone window: the inbox tests assert single-pane behaviour.
+      await tester.binding.setSurfaceSize(const Size(400, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
@@ -516,9 +517,14 @@ void main() {
     ) async {
       await pump(tester);
       await openHomeOptions(tester);
+      // The chip row scrolls horizontally on a phone-width screen.
+      await tester.ensureVisible(find.text('Favourites'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Favourites'));
       await tester.pumpAndSettle();
       expect(find.text('You don’t have favourite chats yet'), findsOneWidget);
+      await tester.ensureVisible(find.byTooltip('Clear filters'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Clear filters'));
       await tester.pumpAndSettle();
       expect(find.text('Team'), findsOneWidget);

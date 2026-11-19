@@ -2,7 +2,7 @@
 
 ![Parallax](assets/parallax_icon.png)
 
-Parallax is a messaging app for [Matrix](https://matrix.org), written in Flutter for Android, iPhone, iPad and Mac, and separate from the Element X fork. It was previously called MatriXpress.
+Parallax is a messaging app for [Matrix](https://matrix.org), written in Flutter and separate from the Element X fork. It was previously called MatriXpress. It ships for Android, Windows, iPhone, iPad and Mac from one codebase; the [Windows port](docs/windows-port.md) documents the desktop feature mapping and build.
 
 The logo shows three message bubbles offset like layers, in crimson, vermilion and amber, to suggest the parallax effect. The default **Parallax** theme uses those colours on a dark ink background. **Parallax Day** is the light version, and the older Ultraviolet, Afterglow and Daybreak palettes are still available. Settings can switch between the two Parallax themes automatically to follow the system's light or dark mode.
 
@@ -29,7 +29,8 @@ Ideas from other messaging apps after parity are in [docs/feature-ideas.md](docs
 
 The same Dart codebase runs on iOS, iPadOS and macOS (`feat/apple-port`). The Android app is unchanged.
 
-- **Adaptive layout.** Windows wider than 600 pt on their shortest side — iPad in any orientation, the iPhone Fold unfolded, and normal Mac windows — show the room list beside the open chat (master-detail). Folding the iPhone Fold, resizing into iPad Split View, or narrowing a Mac window moves the open chat to a full-screen route and back, so no conversation is lost across the transition. iPhone portrait/landscape and the Fold's outer screen keep the phone flow.
+- **Adaptive layout.** The shared tablet/foldable two-pane layout (`lib/two_pane.dart`): windows at least 600 pt wide and 480 pt tall — iPad landscape, the iPhone Fold unfolded, and Mac windows — show the room list beside the open chat, with a drag-resizable divider (persisted width, double-click resets) and hinge-aware splitting on foldables. Folding/unfolding or resizing keeps the open chat on screen, moving it between the detail pane and a full-screen route. iPhone and the Fold's outer screen keep the phone flow.
+- **Desktop UX on Mac.** The native title bar is hidden and blended into the theme gradient (traffic lights kept), with a drag strip and double-click zoom; the inbox and room headers sit flush at the top. Right-click opens the message action menu, message text is drag-selectable (Cmd+C copies), Enter sends (Shift+Enter newline) and Cmd+V pastes clipboard images — the same desktop behaviour as the Windows port.
 - **Feature parity.** Sign-in (password/OIDC/SSO), verification and recovery, E2EE (vodozemac builds for iOS and macOS), the timeline, reactions, threads, polls, spaces, media, voice messages, Element Call (WKWebView on both platforms), file previews and the on-device search index all run from the shared code. PDF previews use PDFium through `pdfx` instead of Android's isolated PdfRenderer process, with the same timeouts and pixel caps. Video probing/compression uses AVFoundation behind the same `parallax/video` channel.
 - **Notifications.** The built-in delivery shows notifications fetched and decrypted on the device while Parallax is running, with Reply / Mark as read / copy actions. iOS and macOS do not allow Android's persistent foreground-service connection, and UnifiedPush/Firebase delivery are Android-only for now, so notifications do not arrive while the app is fully closed. This is stated in Settings → Notifications on the device.
 - **Secure window.** While a recovery secret is shown, iOS covers the app-switcher snapshot with an overlay (screenshots while active cannot be blocked on iOS); macOS excludes the window from screen capture and sharing.
@@ -95,7 +96,18 @@ flutter build macos --release
 
 The bundle ID is `net.samrussell.parallax` on both platforms. The OIDC redirect scheme `net.samrusselltech.parallax` and the `matrix:` link scheme are registered in the runners; native Swift handlers for video tools, permissions, the secure window and link intents live in `apple/ParallaxApple.swift`.
 
-Verified with Xcode 27.2 / Flutter 3.44: the macOS release build runs (login screen, Matrix client and local storage initialise); the iOS simulator build installs and launches. Two toolchain workarounds are committed: macOS builds are arm64-only (`ARCHS = arm64` in `macos/Runner/Configs/*.xcconfig`) because Xcode 27's `lipo` rejects Flutter 3.44's multi-arch `-verify_arch` call, and the Podfiles raise pod deployment targets to the runners' floors (iOS 15 / macOS 13). Flutter 3.44 integrates the plugins through Swift Package Manager; CocoaPods carries only the engine pod. macOS secure storage uses the login keychain for ad-hoc local builds (see the security doc).
+Verified with Xcode 27.2 / Flutter 3.44: the macOS release build runs (login screen, Matrix client and local storage initialise); the iOS simulator build installs and launches. Two toolchain workarounds are committed: iOS/macOS builds are arm64-only (`ARCHS = arm64` in the runners' xcconfigs) because Xcode 27's `lipo` rejects Flutter 3.44's multi-arch `-verify_arch` call, and the Podfiles raise pod deployment targets to the runners' floors (iOS 15 / macOS 13). Flutter 3.44 integrates the plugins through Swift Package Manager; CocoaPods carries only the engine pod. macOS secure storage uses the login keychain for ad-hoc local builds (see the security doc).
+
+### Windows
+
+On a Windows machine with Visual Studio 2022 (Desktop development with C++ workload), Flutter 3.44.0, Git and Rust (MSVC):
+
+```powershell
+flutter pub get
+flutter build windows --release
+```
+
+The portable app is `build\windows\x64\runner\Release\`. Video compression needs `ffmpeg.exe`/`ffprobe.exe` next to the executable. See [docs/windows-port.md](docs/windows-port.md) for the feature mapping, runtime layout and known gaps.
 
 ## Licences
 

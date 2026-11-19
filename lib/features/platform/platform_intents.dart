@@ -159,10 +159,7 @@ SharedFile? _parseFile(Object? raw) {
   final path = raw['path'];
   final size = raw['size'];
   if (path is! String ||
-      !path.startsWith('/') ||
-      !path.contains(sharedCacheSegment) ||
-      path.contains('/../') ||
-      path.endsWith('/..') ||
+      !_sharedCachePath(path) ||
       size is! int ||
       size <= 0 ||
       size > maxSharedFileBytes) {
@@ -174,6 +171,19 @@ SharedFile? _parseFile(Object? raw) {
     mimeType: sanitiseMimeType(raw['mimeType']),
     size: size,
   );
+}
+
+/// The native side copies shares under `<cache>/shared_intents/<id>/`.
+/// Windows paths carry a drive letter (or UNC root) and backslashes; both
+/// separators are accepted there. Traversal is refused on every platform.
+bool _sharedCachePath(String path) {
+  final normalised = path.replaceAll('\\', '/');
+  if (normalised.contains('/../') || normalised.endsWith('/..')) return false;
+  if (!normalised.contains(sharedCacheSegment)) return false;
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    return RegExp(r'^([A-Za-z]:/|//)').hasMatch(normalised);
+  }
+  return path.startsWith('/');
 }
 
 /// A display/file name without path separators or control characters.

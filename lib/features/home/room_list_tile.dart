@@ -47,15 +47,15 @@ class RoomListTile extends StatelessWidget {
   final bool hideInviteAvatar;
   final bool busy;
 
+  /// Open in the tablet/foldable detail pane: the row carries a tint.
+  final bool selected;
+
   /// Cards, flat list rows or compact rows (Settings → Appearance).
   final HomeRowStyle style;
 
   /// Lines of last-message preview: none, one or two. Invitations always
   /// say what they are.
   final HomePreview preview;
-
-  /// Open in the detail pane beside the list (wide adaptive layout).
-  final bool selected;
 
   static String timeLabel(
     BuildContext context,
@@ -294,19 +294,23 @@ class RoomListTile extends StatelessWidget {
       p.secondary.withValues(alpha: 0.08),
       p.surface,
     );
+    final selectedTint = Color.alphaBlend(
+      p.accent.withValues(alpha: 0.16),
+      p.surface,
+    );
     if (cards) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
           color: selected
-              ? Color.alphaBlend(p.accent.withValues(alpha: 0.12), p.surface)
+              ? selectedTint
               : room.invited
               ? inviteTint
               : p.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
             side: selected
-                ? BorderSide(color: p.accent.withValues(alpha: 0.55))
+                ? BorderSide(color: p.accent.withValues(alpha: 0.5))
                 : room.invited
                 ? BorderSide(color: p.secondary.withValues(alpha: 0.5))
                 : BorderSide.none,
@@ -329,7 +333,7 @@ class RoomListTile extends StatelessWidget {
       children: [
         Material(
           color: selected
-              ? p.accent.withValues(alpha: 0.10)
+              ? selectedTint
               : room.invited
               ? inviteTint
               : Colors.transparent,

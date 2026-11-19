@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Windows desktop port
+
+- Parallax now runs on Windows 10/11 x64 from the same codebase: sign-in (password, SSO, OIDC), encrypted chat, threads, reactions, polls, spaces, media, document and PDF previews, voice messages, Element Call (WebView2), search, settings and the Parallax extras.
+- The background connection is a tray keep-alive: closing the window hides it to the notification area and notifications keep arriving; the tray icon's Quit stops the app. Windows toasts include the Mark as read action.
+- Sharing in works by dragging files onto the window or opening files with Parallax; recent chats appear in the taskbar jump list under the same PIN/sign-out rules as Android's share suggestions. matrix: links open Parallax (per-user protocol registration).
+- Video compression, poster frames and animated previews use bundled FFmpeg helpers; PDF previews use PDFium. Recovery-secret windows are excluded from screen capture.
+- Desktop gaps: no camera QR scanning or camera capture (file pickers instead), no UnifiedPush/Firebase delivery (built-in connection only). See docs/windows-port.md.
+- Android behaviour is unchanged; the full test suite stays green and the Windows platform layer adds 28 tests.
+
 ### Copy a code from the chat list
 
 - When the latest message in an unread chat has a one-time code, the chat's row on the home screen shows a "Copy ‘123456’" button under the preview, as Google Messages does. Tapping it copies the code and says "Code copied". The chat isn't opened and stays unread.

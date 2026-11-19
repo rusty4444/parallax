@@ -75,13 +75,21 @@ dependencies:
   # Document previews: Markdown, and the XML inside .docx/.xlsx/.pptx files.
   markdown: ^7.3.1
   xml: ^7.0.1
-  # Apple (iOS/macOS) port. sqflite has no macOS implementation: the SDK
-  # database runs on sqlite3 via FFI there (sqlite3_flutter_libs bundles the
-  # dylib). iOS keeps sqflite's native implementation.
+  # Desktop ports (Windows/macOS). sqflite has no Windows or macOS
+  # implementation: the SDK database runs on sqlite3 via FFI there
+  # (sqlite3_flutter_libs bundles the DLL/dylib). iOS/Android keep sqflite's
+  # native implementation.
   sqflite_common_ffi: ^2.3.4
   sqlite3_flutter_libs: ^0.5.42
-  # PDFium renderer for PDF previews on iOS/macOS (Android uses PdfRenderer).
+  # Windows video playback (Media Foundation) behind the video_player API.
+  video_player_win: ^3.2.2
+  # WebView2 host for the Element Call widget on Windows.
+  webview_windows: ^0.4.0
+  # PDFium renderer for PDF previews on Windows/iOS/macOS (Android uses
+  # PdfRenderer).
   pdfx: ^2.9.2
+  # Custom blended title bar on desktop (hidden native caption, system drag).
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:
@@ -91,6 +99,8 @@ dev_dependencies:
     sdk: flutter
   # Stands in for the video plugin in tests (test/media_video_rotation_test.dart).
   video_player_platform_interface: ^6.9.0
+  # MSIX packaging for the Microsoft Store / sideloading (windows-port.md).
+  msix: ^3.16.8
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -108,6 +118,29 @@ flutter:
     - family: SpaceGrotesk
       fonts:
         - asset: assets/fonts/SpaceGrotesk.ttf
+
+# MSIX package for the Microsoft Store / sideloading. Build on Windows after
+# `flutter build windows --release`:
+#   dart run msix:create            (signed MSIX for sideloading)
+#   dart run msix:create --store    (unsigned .msixupload for Partner Center)
+# Before a real Store submission: reserve the app name in Partner Center and
+# set identity_name/publisher to the reserved values (publisher must be the
+# account's "CN=<PublisherID>" from Partner Center → App identity).
+msix_config:
+  display_name: Parallax
+  publisher_display_name: Sam Russell
+  identity_name: net.samrussell.Parallax
+  publisher: CN=Sam Russell
+  msix_version: 0.5.0.0
+  logo_path: assets/parallax_mark_cutout.png
+  capabilities: internetClient, microphone, webcam
+  protocol_activation: matrix
+  languages: en-us
+  store: false
+  sign_msix: false
+  install_certificate: false
+  output_path: build/windows/msix
+  output_name: Parallax-windows-x64
 
   # To add assets to your application, add an assets section, like this:
   # assets:

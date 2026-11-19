@@ -10,6 +10,7 @@
 // non-Matrix links so the caller can fall back to the browser.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
@@ -20,6 +21,7 @@ import '../../widgets.dart';
 import 'matrix_link_opener.dart';
 import 'platform_intents_host.dart';
 import 'share_shortcuts.dart';
+import 'windows_bootstrap.dart';
 
 /// Wraps the signed-in app to route share intents and matrix.to links, and
 /// to offer its recent chats in Android's share sheet.
@@ -118,10 +120,23 @@ class _LinksAndSharingSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Share photos, videos, files and text to Parallax from other '
-                  'apps. Android’s share menu suggests your most recent chats, '
-                  'unless a screen lock PIN is set. matrix.to and matrix: links '
-                  'open here too.',
+                  isWindowsDesktop
+                      ? 'Share photos, videos, files and text to Parallax by '
+                            'dragging them onto the window or opening them with '
+                            'Parallax. Your most recent chats appear in the '
+                            'taskbar jump list, unless a screen lock PIN is set. '
+                            'matrix.to and matrix: links open here too.'
+                      : (!kIsWeb &&
+                            (defaultTargetPlatform == TargetPlatform.iOS ||
+                                defaultTargetPlatform == TargetPlatform.macOS))
+                      ? 'On iPhone and iPad, share photos, videos, files and '
+                            'text to Parallax from the share sheet. On Mac, '
+                            'drag-and-drop sharing is not available yet. '
+                            'matrix.to and matrix: links open here on both.'
+                      : 'Share photos, videos, files and text to Parallax from other '
+                            'apps. Android’s share menu suggests your most recent chats, '
+                            'unless a screen lock PIN is set. matrix.to and matrix: links '
+                            'open here too.',
                   style: TextStyle(color: p.muted, fontSize: 12),
                 ),
                 ListTile(

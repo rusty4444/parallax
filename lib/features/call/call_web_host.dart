@@ -11,6 +11,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import 'windows_call_web_host.dart';
+
 /// JavaScript channel the injected listener posts to (same name as Element
 /// X's `LISTENER_NAME`).
 const widgetBridgeChannel = 'elementX';
@@ -83,6 +85,39 @@ CallWebHost createWebViewCallHost({
   onLoadError: onLoadError,
   onPageFinished: onPageFinished,
 );
+
+/// The platform's call host: WebView2 on Windows, the Android WebView on
+/// the phone. Tests inject their own host through the same factory type.
+CallWebHost createPlatformCallWebHost({
+  required Uri page,
+  required Color background,
+  required bool allowCamera,
+  required bool allowMicrophone,
+  required void Function(String message) onMessage,
+  required void Function(String description) onLoadError,
+  required void Function() onPageFinished,
+}) {
+  if (!kIsWeb && Platform.isWindows) {
+    return createWindowsWebViewCallHost(
+      page: page,
+      background: background,
+      allowCamera: allowCamera,
+      allowMicrophone: allowMicrophone,
+      onMessage: onMessage,
+      onLoadError: onLoadError,
+      onPageFinished: onPageFinished,
+    );
+  }
+  return WebViewCallHost(
+    page: page,
+    background: background,
+    allowCamera: allowCamera,
+    allowMicrophone: allowMicrophone,
+    onMessage: onMessage,
+    onLoadError: onLoadError,
+    onPageFinished: onPageFinished,
+  );
+}
 
 class WebViewCallHost implements CallWebHost {
   WebViewCallHost({

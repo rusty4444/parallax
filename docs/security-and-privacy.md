@@ -60,6 +60,38 @@ The Apple port runs the same Dart code and the same encryption, send-guard and r
 
 None of the Apple behaviour has been verified on a physical device or against a live homeserver yet.
 
+## Windows desktop
+
+The Windows port runs the same code with desktop counterparts for the
+Android platform pieces (see [windows-port.md](windows-port.md)):
+
+- The SDK database lives in `%APPDATA%\parallax` under the Windows user
+  profile, with the same no-SQLCipher caveat as Android: profile access
+  controls and disk encryption (BitLocker/device encryption) apply, not an
+  extra database encryption layer. Secure storage uses Windows DPAPI.
+- While recovery credentials are displayed, the window is excluded from
+  screen capture (`WDA_EXCLUDEFROMCAPTURE`). Other windows are not
+  represented as capture-proof, and this does not stop a camera pointed at
+  the screen.
+- **PDF previews render in-process with PDFium on Windows**, unlike
+  Android's isolated renderer process. PDFium is the hardened parser Chrome
+  uses, and the same timeouts, pixel caps and size limits apply, but a
+  renderer crash or exploit would affect the app process. Treat PDF
+  previews from untrusted senders accordingly.
+- The background connection is a tray keep-alive: closing the window hides
+  it and sync continues under the signed-in Windows session. Anyone with
+  access to that unlocked session can reopen the window; the app lock PIN
+  still applies. The tray icon's Quit stops the app completely.
+- Recent chats are published to the taskbar jump list under the same rules
+  as Android's sharing shortcuts: none while a screen lock PIN is set,
+  removed on sign-out/account change. Windows shows them to anyone using
+  the unlocked desktop.
+- Shared files are copied to `%TEMP%\parallax\shared_intents\` with the
+  same 10-file/20 MB caps and deleted after sending or cancelling; copies
+  older than 24 hours are pruned at startup.
+- Notifications are Windows toasts with the same content rules; Windows
+  notification settings control whether content shows on the lock screen.
+
 ## Required live acceptance checks
 
 Use disposable accounts before trusting this preview with important messages:

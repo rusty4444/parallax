@@ -124,7 +124,7 @@ The `feat/apple-port` branch runs the same Dart codebase on iOS, iPadOS and macO
 
 | Area | Status on Apple | Notes |
 |---|---|---|
-| Adaptive layout (iPad, unfolded iPhone Fold, Mac) | Built | Master-detail above 600 pt shortest side; fold/unfold and Split View transitions keep the open chat (`lib/features/home/adaptive_layout.dart`, `test/adaptive_layout_test.dart`). iPhone and the Fold's outer screen keep the phone flow. |
+| Adaptive layout (iPad, unfolded iPhone Fold, Mac) | Built | Shared two-pane system (`lib/two_pane.dart`, `test/two_pane_layout_test.dart`): ≥600x480 pt windows, drag-resizable divider with persisted width, hinge-aware split, fold/unfold absorption of open chats. Mac adds the blended hidden title bar (traffic lights kept), right-click message menu, selectable text, Enter-to-send and Cmd+V paste (`test/windows_desktop_ux_test.dart` covers the shared desktop behaviour). |
 | E2EE (vodozemac) | Built, unverified | `flutter_vodozemac` is an FFI plugin for iOS and macOS; Rust targets `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `aarch64-apple-darwin`. Needs a two-device live test. |
 | Database | Built | sqflite on iOS; sqlite3 via FFI on macOS (`apple_bootstrap.dart`). Same `SafeMatrixDatabase` guards. |
 | PDF previews | Built | PDFium through `pdfx` in-process (`pdfx_pdf_tools.dart`), same timeouts/pixel caps as Android; no isolated process (see security doc). |

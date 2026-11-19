@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../room_avatar.dart';
-import '../../room_screen.dart';
+import '../../two_pane.dart';
 import '../spaces_admin/space_options_sheet.dart';
 import '../spaces_admin/spaces_admin_features.dart';
 import 'home_features.dart';
@@ -38,11 +40,8 @@ class SpaceSwitcher extends StatelessWidget {
         palette: palette,
         spaceId: space.id,
         spaceName: space.name,
-        onOpenRoom: (roomId) => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) =>
-                RoomScreen(backend: backend, palette: palette, roomId: roomId),
-          ),
+        onOpenRoom: (roomId) => unawaited(
+          openRoom(context, backend: backend, palette: palette, roomId: roomId),
         ),
         onLeft: () {
           if (selected == space.id) onSelected(null);

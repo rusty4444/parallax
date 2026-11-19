@@ -295,6 +295,9 @@ class _Harness {
     ChatBackend? legacyBackend,
     bool settle = true,
   }) async {
+    // Phone window: these tests assert single-pane notification navigation.
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ParallaxApp(
         backend: ownedBackend ? null : legacyBackend ?? backend,

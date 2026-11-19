@@ -56,6 +56,8 @@ class GalleryBubble extends StatelessWidget {
         entry: entry,
         width: width,
         height: height,
+        // Mosaic cells keep their fixed grid shape.
+        autoAspect: false,
       ),
     ),
   );

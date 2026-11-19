@@ -44,9 +44,17 @@ class MethodChannelBackgroundConnection
 
   bool get _android =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get _windows =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
   Future<bool> _bool(String method) async {
-    if (!_android) return false;
+    if (_windows) {
+      // Desktop: the connection runs while the app runs (tray keep-alive),
+      // and there is no battery optimisation to exempt from.
+      if (method != 'start') return true;
+    } else if (!_android) {
+      return false;
+    }
     try {
       return await _channel.invokeMethod<bool>(method) ?? false;
     } on MissingPluginException {
@@ -59,7 +67,7 @@ class MethodChannelBackgroundConnection
 
   @override
   Future<void> stop() async {
-    if (!_android) return;
+    if (!_android && !_windows) return;
     try {
       await _channel.invokeMethod<void>('stop');
     } on MissingPluginException {
@@ -163,7 +171,12 @@ Future<bool> startDefaultNotifications(
   if (await InAppNotificationPreferences.turnedOff()) return false;
   final delivery = await InAppNotificationPreferences.delivery();
   var wantUnifiedPush = false;
-  if (delivery != NotificationDelivery.builtIn && !unifiedPushFailed) {
+  // UnifiedPush distributors are an Android concept; Windows always uses
+  // the built-in connection.
+  if (delivery != NotificationDelivery.builtIn &&
+      !unifiedPushFailed &&
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android) {
     final installed = await notifications.unifiedPushDistributors();
     wantUnifiedPush = installed.isNotEmpty;
   }
@@ -260,9 +273,13 @@ class InAppPushDriver implements PushDriver, PushActionSource {
     if (!configuration.isInApp) {
       throw StateError('Not the built-in delivery');
     }
-    if (kIsWeb) {
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.windows &&
+            defaultTargetPlatform != TargetPlatform.iOS &&
+            defaultTargetPlatform != TargetPlatform.macOS)) {
       throw UnsupportedError(
-        'Built-in notifications are not supported on web.',
+        'Built-in notifications support Android, Windows, iOS and macOS only.',
       );
     }
     // Android runs the foreground-service background connection; Apple
@@ -279,7 +296,13 @@ class InAppPushDriver implements PushDriver, PushActionSource {
 
   @override
   Future<PushPermission> requestPermission() async {
-    if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // Windows toasts need no runtime permission.
+      return PushPermission.authorized;
+    }
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
       final darwin = localNotifications
           ?.resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin

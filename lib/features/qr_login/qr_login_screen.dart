@@ -1,8 +1,9 @@
 // "Sign in with QR code" screens (Element X features/login qrcode: intro,
 // scan, confirmation and error screens, with Element X wording).
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -37,6 +38,45 @@ Future<bool> requestCameraPermission() async {
 Widget mobileQrScanner(BuildContext context, ValueChanged<Uint8List> onScan) =>
     _MobileQrScanner(onScanned: onScan);
 
+/// The platform's camera scanner. mobile_scanner has no Windows
+/// implementation, so the scan step explains the gap instead of showing a
+/// camera view that cannot start.
+Widget platformQrScanner(BuildContext context, ValueChanged<Uint8List> onScan) {
+  if (!kIsWeb && Platform.isWindows) {
+    return const _WindowsQrScannerUnavailable();
+  }
+  return _MobileQrScanner(onScanned: onScan);
+}
+
+class _WindowsQrScannerUnavailable extends StatelessWidget {
+  const _WindowsQrScannerUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.no_photography_outlined,
+            size: 48,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Camera QR scanning isn’t available on Windows yet. '
+            'Sign in with your password or recovery key instead, '
+            'or scan this code from your phone.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Opens the QR sign-in flow. Returns true once signed in.
 Future<bool> showQrLogin(
   BuildContext context, {
@@ -56,7 +96,7 @@ class QrLoginScreen extends StatefulWidget {
     super.key,
     required this.backend,
     required this.palette,
-    this.scannerBuilder = mobileQrScanner,
+    this.scannerBuilder = platformQrScanner,
     this.requestCamera = requestCameraPermission,
     this.delay = defaultQrDelay,
   });

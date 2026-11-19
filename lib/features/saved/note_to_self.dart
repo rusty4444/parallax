@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
-import '../../room_screen.dart';
+import '../../two_pane.dart';
 import '../home/room_list_tile.dart';
 import 'saved_features.dart';
 import 'saved_models.dart';
@@ -27,12 +27,7 @@ void _pushRoom(
   String roomId,
 ) {
   unawaited(
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            RoomScreen(backend: backend, palette: palette, roomId: roomId),
-      ),
-    ),
+    openRoom(context, backend: backend, palette: palette, roomId: roomId),
   );
 }
 
@@ -136,7 +131,7 @@ class NoteToSelfTile extends StatelessWidget {
   final bool compact;
   final bool busy;
 
-  /// Open in the detail pane beside the list (wide adaptive layout).
+  /// Open in the tablet/foldable detail pane: a stronger tint.
   final bool selected;
 
   /// Lines of last-note preview (0 hides it), as the home setting chooses.
@@ -153,13 +148,13 @@ class NoteToSelfTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: Color.alphaBlend(
-          p.accent.withValues(alpha: selected ? 0.16 : 0.07),
+          p.accent.withValues(alpha: selected ? 0.18 : 0.07),
           p.surface,
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(
-            color: p.accent.withValues(alpha: selected ? 0.7 : 0.35),
+            color: p.accent.withValues(alpha: selected ? 0.6 : 0.35),
           ),
         ),
         child: InkWell(

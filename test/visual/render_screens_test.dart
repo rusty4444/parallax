@@ -14,6 +14,7 @@ import 'package:parallax/chat_backend.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/login_screen.dart';
 import 'package:parallax/room_screen.dart';
+import 'package:parallax/two_pane.dart';
 
 import '../widget_test.dart' show FakeBackend;
 
@@ -47,6 +48,33 @@ Future<void> _shoot(WidgetTester tester, String name, Widget child) async {
   addTearDown(tester.view.reset);
   await tester.pumpWidget(RepaintBoundary(key: key, child: child));
   await tester.pump(const Duration(milliseconds: 400));
+  await tester.runAsync(() async {
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 1);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    await File('$_dir/$name.png').writeAsBytes(bytes!.buffer.asUint8List());
+  });
+}
+
+/// Desktop-sized capture (1440x900 @1x) with an optional interaction before
+/// the shot, for the tablet/foldable/Mac two-pane layout.
+Future<void> _shootWide(
+  WidgetTester tester,
+  String name,
+  Widget child, {
+  Future<void> Function(WidgetTester)? interact,
+}) async {
+  final key = GlobalKey();
+  tester.view.physicalSize = const Size(1440, 900);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(RepaintBoundary(key: key, child: child));
+  await tester.pump(const Duration(milliseconds: 400));
+  if (interact != null) {
+    await interact(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+  }
   await tester.runAsync(() async {
     final boundary =
         key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
@@ -169,6 +197,32 @@ void main() {
             roomId: '!a:example.org',
           ),
         ),
+      );
+    });
+
+    testWidgets('two-pane desktop ${style.name}', skip: skip != null, (
+      tester,
+    ) async {
+      final observer = RoomRouteObserver();
+      await _shootWide(
+        tester,
+        'two_pane_${style.name}',
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: themeFor(style),
+          navigatorObservers: [observer],
+          home: InboxScreen(
+            backend: _backend(),
+            palette: p,
+            style: style,
+            onThemeChanged: (_) {},
+            roomRoutes: observer,
+          ),
+        ),
+        interact: (t) async {
+          await t.tap(find.text('Weekend crew'));
+          await t.pump(const Duration(milliseconds: 300));
+        },
       );
     });
   }

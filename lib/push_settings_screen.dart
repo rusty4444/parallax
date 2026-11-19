@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'features/platform/background_connection.dart';
 import 'features/platform/unified_push.dart';
+import 'features/platform/windows_bootstrap.dart';
 import 'push_notifications.dart';
 
 /// Edits client configuration only, never gateway/server credentials. The app
@@ -603,16 +604,22 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
             ),
             const SizedBox(height: 8),
             if (!androidDelivery)
-              const Card(
+              Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
-                    'Built-in connection: Parallax keeps its own Matrix sync '
-                    'running and shows notifications fetched and decrypted '
-                    'on this device. On iPhone, iPad and Mac this works while '
-                    'Parallax is running; iOS does not allow the persistent '
-                    'background connection Android uses. UnifiedPush and '
-                    'Firebase delivery are Android-only for now.',
+                    isWindowsDesktop
+                        ? 'Built-in connection: Parallax keeps its own Matrix '
+                              'sync running and shows notifications fetched and '
+                              'decrypted on this device. It keeps running in the '
+                              'notification area when you close the window. '
+                              'UnifiedPush and Firebase delivery are Android-only.'
+                        : 'Built-in connection: Parallax keeps its own Matrix sync '
+                              'running and shows notifications fetched and decrypted '
+                              'on this device. On iPhone, iPad and Mac this works while '
+                              'Parallax is running; iOS does not allow the persistent '
+                              'background connection Android uses. UnifiedPush and '
+                              'Firebase delivery are Android-only for now.',
                   ),
                 ),
               )
@@ -661,10 +668,18 @@ class _PushSettingsScreenState extends State<PushSettingsScreen>
             const SizedBox(height: 20),
             Text(
               !androidDelivery
-                  ? 'Notifications show content fetched and decrypted on this '
-                        'device; you can hide it under Settings → Notifications. '
-                        'While Parallax is closed, new messages appear when you '
-                        'next open it.'
+                  ? (isWindowsDesktop
+                        ? 'Parallax keeps its Matrix connection running while the '
+                              'app is open, and keeps running in the notification '
+                              'area when you close the window, so notifications '
+                              'still arrive. Use the tray icon’s Quit to stop it '
+                              'completely. Notifications show content fetched and '
+                              'decrypted on this device; you can hide it under '
+                              'Settings → Notifications.'
+                        : 'Notifications show content fetched and decrypted on this '
+                              'device; you can hide it under Settings → Notifications. '
+                              'While Parallax is closed, new messages appear when you '
+                              'next open it.')
                   : inApp
                   ? 'Android shows a small “Parallax is connected” notification '
                         'while the connection runs; you can hide it in Android’s '
