@@ -1369,7 +1369,18 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                         ),
                         border: Border(bottom: BorderSide(color: p.stroke)),
                       ),
-                      padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+                      padding: EdgeInsets.fromLTRB(
+                        8,
+                        8,
+                        // Embedded on Windows: keep the room actions to the
+                        // left of the shell's top-right caption buttons.
+                        (widget.embedded &&
+                                !kIsWeb &&
+                                defaultTargetPlatform == TargetPlatform.windows)
+                            ? 16 + 3 * kDesktopCaptionButtonWidth
+                            : 16,
+                        8,
+                      ),
                       child: Row(
                         children: [
                           if (!widget.embedded)

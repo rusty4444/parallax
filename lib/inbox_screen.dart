@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1372,16 +1371,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               child: MediaQuery.removePadding(
                 context: context,
                 removeLeft: true,
-                // Clear the top-right caption buttons overlaid by the shell.
-                child:
-                    (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-                    ? Padding(
-                        padding: const EdgeInsets.only(
-                          top: kDesktopTitleBarHeight,
-                        ),
-                        child: _detailPane(context),
-                      )
-                    : _detailPane(context),
+                child: _detailPane(context),
               ),
             ),
           ],
