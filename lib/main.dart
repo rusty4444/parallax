@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:matrix/matrix.dart' as matrix;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
@@ -25,8 +27,37 @@ import 'haptics.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  assert(() {
+    _installDebugLog();
+    return true;
+  }());
   initializeWindowsPlatform();
   runApp(const ParallaxApp());
+}
+
+/// Debug-build-only diagnostic: timestamped SDK log to a file, for
+/// investigating live flows such as verification stalls. Compiled out of
+/// release builds by the assert, and skipped under `flutter test`.
+void _installDebugLog() {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+  final file = File(
+    Platform.isWindows
+        ? r'C:\Users\Public\Documents\parallax-debug.log'
+        : '${Directory.systemTemp.path}/parallax-debug.log',
+  );
+  matrix.Logs().level = matrix.Level.verbose;
+  matrix.Logs().onLog = (event) {
+    try {
+      file.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} [${event.level.name}] '
+        '${event.toFormattedString()}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } catch (_) {
+      // Diagnostics must never break the app.
+    }
+  };
 }
 
 typedef MatrixBackendFactory =
