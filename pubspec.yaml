@@ -125,7 +125,7 @@ msix_config:
   identity_name: net.samrussell.Parallax
   publisher: CN=Sam Russell
   msix_version: 0.5.0.0
-  logo_path: assets/parallax_icon.png
+  logo_path: assets/parallax_mark_cutout.png
   capabilities: internetClient, microphone, webcam
   protocol_activation: matrix
   languages: en-us
