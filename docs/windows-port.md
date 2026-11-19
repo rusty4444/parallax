@@ -70,6 +70,52 @@ The output is `build\windows\x64\runner\Release\` — a portable folder
 installer is required. The app registers the `matrix:` protocol per-user at
 first run and enforces a single instance per user.
 
+### Installer (direct distribution)
+
+With [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed:
+
+```powershell
+ISCC.exe windows\installer\parallax.iss
+```
+
+Produces `build\windows\installer\Parallax-0.5.0-windows-x64-setup.exe` — a
+per-user installer (no admin), Start-menu shortcut, optional desktop icon,
+`matrix:` protocol registration, and an uninstaller that keeps the Matrix
+session and keys in `%APPDATA%\parallax`. The installer is unsigned test
+ware: Windows SmartScreen will warn until it is code-signed.
+
+### Microsoft Store (MSIX)
+
+Store distribution — and **selling** the app, which requires Store commerce
+— uses an MSIX package with identity, not the Inno installer. The `msix`
+dev dependency is configured in `pubspec.yaml` (`msix_config`), including
+the `matrix:` protocol activation and internet/microphone/webcam
+capabilities. On Windows, after the release build:
+
+```powershell
+dart run msix:create            # MSIX (sign_msix: false → unsigned)
+dart run msix:create --store    # .msixupload for Partner Center
+```
+
+Before a real submission:
+
+- Reserve "Parallax" in [Partner Center](https://partner.microsoft.com)
+  (one-time developer account fee) and set `identity_name` and `publisher`
+  to the reserved values — the publisher must be the account's
+  `CN=<PublisherID>`, not a plain name.
+- The runner detects package identity (`GetCurrentPackageFullName`) and
+  skips its per-user protocol/AUMID registration when packaged; the
+  manifest supplies both.
+- Provide a privacy policy URL and support contact (required for chat
+  apps), complete the age rating, and pass the Store's certification
+  checks.
+- **Licensing:** the matrix Dart SDK is AGPL-3.0-or-later and the bundled
+  FFmpeg build is GPL-3.0. Selling/distributing combined builds carries
+  source-offer obligations for those components — review them (and the
+  Store agreement) before charging money.
+- Live acceptance tests (see the parity ledger) must pass before selling;
+  this is still a test preview.
+
 The Android CI workflow (`.gitea/workflows/android-apk.yml`) is unchanged;
 there is no Windows CI runner yet.
 

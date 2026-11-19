@@ -1,5 +1,6 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <appmodel.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <windows.h>
@@ -8,6 +9,19 @@
 #include "parallax_platform.h"
 #include "utils.h"
 #include "win32_window.h"
+
+namespace {
+
+// True when running with MSIX package identity (Microsoft Store / sideload).
+// Packaged apps declare the matrix: protocol and their AppUserModelId in the
+// package manifest; writing them per-user here would be ignored or conflict.
+bool HasPackageIdentity() {
+  UINT32 length = 0;
+  return ::GetCurrentPackageFullName(&length, nullptr) !=
+         APPMODEL_ERROR_NO_PACKAGE;
+}
+
+}  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -49,9 +63,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   // Group the taskbar button (and its jump list) under one app identity,
-  // matching the notification AppUserModelId.
-  ::SetCurrentProcessExplicitAppUserModelID(L"net.samrussell.parallax");
-  RegisterMatrixProtocol();
+  // matching the notification AppUserModelId. Packaged (Store/MSIX) builds
+  // get their identity from the package manifest instead.
+  if (!HasPackageIdentity()) {
+    ::SetCurrentProcessExplicitAppUserModelID(L"net.samrussell.parallax");
+    RegisterMatrixProtocol();
+  }
 
   flutter::DartProject project(L"data");
 
