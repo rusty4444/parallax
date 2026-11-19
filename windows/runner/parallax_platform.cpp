@@ -3,6 +3,7 @@
 #include <flutter/flutter_engine.h>
 #include <gdiplus.h>
 #include <propsys.h>
+#include <propvarutil.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
@@ -648,14 +649,14 @@ bool ParallaxPlatform::WriteShortcutIcon(const EM& shortcut,
     source = new Gdiplus::Bitmap(256, 256, PixelFormat32bppARGB);
     Gdiplus::Graphics graphics(source);
     Gdiplus::SolidBrush background(
-        Gdiplus::Color(static_cast<ARGB>(MapInt(shortcut, "background", 0xFF202020))));
+        Gdiplus::Color(static_cast<Gdiplus::ARGB>(MapInt(shortcut, "background", 0xFF202020))));
     graphics.FillRectangle(&background, 0, 0, 256, 256);
     std::string initial = MapString(shortcut, "initial");
     std::wstring text = Utf16(initial.empty() ? "?" : initial);
     Gdiplus::Font font(L"Segoe UI", 120, Gdiplus::FontStyleRegular,
                        Gdiplus::UnitPixel);
     Gdiplus::SolidBrush foreground(
-        Gdiplus::Color(static_cast<ARGB>(MapInt(shortcut, "foreground", 0xFFFFFFFF))));
+        Gdiplus::Color(static_cast<Gdiplus::ARGB>(MapInt(shortcut, "foreground", 0xFFFFFFFF))));
     Gdiplus::StringFormat format;
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
