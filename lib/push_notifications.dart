@@ -442,6 +442,9 @@ class SecurePushStateStore implements PushStateStore {
       accessibility: KeychainAccessibility.unlocked_this_device,
       synchronizable: false,
     ),
+    // See secure_store.dart: ad-hoc local builds cannot use the macOS
+    // data-protection keychain (-34018); use the login keychain instead.
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
   @override
   Future<String?> read() => _storage.read(key: _key);

@@ -1,2 +1,8 @@
 #include "../../Flutter/Flutter-Debug.xcconfig"
 #include "Warnings.xcconfig"
+
+// Xcode 27's lipo rejects Flutter 3.44's multi-arch `-verify_arch` invocation
+// ("-verify_arch requires exactly one input file"), failing release_unpack_macos
+// on universal binaries. Build arm64-only (this Mac is Apple silicon) until the
+// Flutter tool is fixed for Xcode 27.
+ARCHS = arm64

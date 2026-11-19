@@ -95,6 +95,8 @@ flutter build macos --release
 
 The bundle ID is `net.samrussell.parallax` on both platforms. The OIDC redirect scheme `net.samrusselltech.parallax` and the `matrix:` link scheme are registered in the runners; native Swift handlers for video tools, permissions, the secure window and link intents live in `apple/ParallaxApple.swift`.
 
+Verified with Xcode 27.2 / Flutter 3.44: the macOS release build runs (login screen, Matrix client and local storage initialise); the iOS simulator build installs and launches. Two toolchain workarounds are committed: macOS builds are arm64-only (`ARCHS = arm64` in `macos/Runner/Configs/*.xcconfig`) because Xcode 27's `lipo` rejects Flutter 3.44's multi-arch `-verify_arch` call, and the Podfiles raise pod deployment targets to the runners' floors (iOS 15 / macOS 13). Flutter 3.44 integrates the plugins through Swift Package Manager; CocoaPods carries only the engine pod. macOS secure storage uses the login keychain for ad-hoc local builds (see the security doc).
+
 ## Licences
 
 The bundled Space Grotesk font is licensed under the SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The `matrix` Dart SDK is AGPL-3.0-or-later; check its distribution obligations before shipping any build. Map tiles are © OpenStreetMap contributors.

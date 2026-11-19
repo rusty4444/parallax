@@ -16,6 +16,12 @@ class PlatformSecureValueStore implements SecureValueStore {
       accessibility: KeychainAccessibility.unlocked_this_device,
       synchronizable: false,
     ),
+    // The data-protection keychain (the plugin default) needs a real Apple
+    // signing identity; ad-hoc local builds get errSecMissingEntitlement
+    // (-34018). The file-based login keychain works for personal builds and
+    // is protected by the user's login password. Switch back to true when
+    // distributing with a Developer ID / App Store signature.
+    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
 
   @override
