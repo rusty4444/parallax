@@ -2,7 +2,7 @@
 
 ![Parallax](assets/parallax_icon.png)
 
-Parallax is an Android messaging app for [Matrix](https://matrix.org), written in Flutter and separate from the Element X fork. It was previously called MatriXpress.
+Parallax is a messaging app for [Matrix](https://matrix.org), written in Flutter and separate from the Element X fork. It was previously called MatriXpress. It ships for Android and Windows from one codebase; the [Windows port](docs/windows-port.md) documents the desktop feature mapping and build.
 
 The logo shows three message bubbles offset like layers, in crimson, vermilion and amber, to suggest the parallax effect. The default **Parallax** theme uses those colours on a dark ink background. **Parallax Day** is the light version, and the older Ultraviolet, Afterglow and Daybreak palettes are still available. Settings can switch between the two Parallax themes automatically to follow the system's light or dark mode.
 
@@ -67,6 +67,17 @@ flutter build apk --release --target-platform android-arm64 --split-per-abi --bu
 For a visual check without a device, run `PARALLAX_SCREENSHOT_DIR=/tmp/shots flutter test test/visual`. It renders the login, inbox and room screens in both Parallax themes.
 
 To regenerate the launcher and notification icons, run `python3 tools/generate_icon.py` (requires Pillow).
+
+### Windows
+
+On a Windows machine with Visual Studio 2022 (Desktop development with C++ workload), Flutter 3.44.0, Git and Rust (MSVC):
+
+```powershell
+flutter pub get
+flutter build windows --release
+```
+
+The portable app is `build\windows\x64\runner\Release\`. Video compression needs `ffmpeg.exe`/`ffprobe.exe` next to the executable. See [docs/windows-port.md](docs/windows-port.md) for the feature mapping, runtime layout and known gaps.
 
 ## Licences
 
