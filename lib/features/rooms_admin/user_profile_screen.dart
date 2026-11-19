@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
@@ -5,7 +7,7 @@ import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
 import '../../room_details.dart';
-import '../../room_screen.dart';
+import '../../two_pane.dart';
 import 'admin_ui.dart';
 import 'member_moderation.dart';
 import 'role_change.dart';
@@ -119,15 +121,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         }
       }
       if (!mounted || !_owner.isCurrent || roomId == null) return;
-      final navigator = Navigator.of(context);
-      navigator.popUntil((route) => route.isFirst);
-      navigator.push(
-        MaterialPageRoute<void>(
-          builder: (_) => RoomScreen(
-            backend: widget.backend,
-            palette: widget.palette,
-            roomId: roomId!,
-          ),
+      unawaited(
+        openRoom(
+          context,
+          backend: widget.backend,
+          palette: widget.palette,
+          roomId: roomId,
+          replaceStack: true,
         ),
       );
     } catch (_) {

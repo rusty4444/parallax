@@ -9,7 +9,7 @@ import '../../app_theme.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../room_join_dialog.dart';
-import '../../room_screen.dart';
+import '../../two_pane.dart';
 import '../../widgets.dart';
 import '../threads/timeline_navigation.dart';
 import 'matrix_links.dart';
@@ -59,12 +59,7 @@ void _pushRoom(
   String roomId,
 ) {
   unawaited(
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            RoomScreen(backend: backend, palette: palette, roomId: roomId),
-      ),
-    ),
+    openRoom(context, backend: backend, palette: palette, roomId: roomId),
   );
 }
 

@@ -43,6 +43,7 @@ class RoomScreen extends StatelessWidget {
     this.backgroundStore,
     this.draftStore,
     this.bubbleColourStore,
+    this.embedded = false,
   });
   final ChatBackend backend;
   final AppPalette palette;
@@ -52,6 +53,10 @@ class RoomScreen extends StatelessWidget {
 
   /// Per-room bubble colours (defaults to the shared store).
   final RoomBubbleColourStore? bubbleColourStore;
+
+  /// True when shown in the tablet/foldable detail pane rather than as a
+  /// pushed route: there is no route to pop, so the back arrow is hidden.
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) => _OwnedRoomScreen(
@@ -67,6 +72,7 @@ class RoomScreen extends StatelessWidget {
     backgroundStore: backgroundStore,
     draftStore: draftStore,
     bubbleColourStore: bubbleColourStore,
+    embedded: embedded,
   );
 }
 
@@ -81,6 +87,7 @@ class _OwnedRoomScreen extends StatefulWidget {
     this.backgroundStore,
     this.draftStore,
     this.bubbleColourStore,
+    this.embedded = false,
   });
   final ChatBackend backend;
   final AppPalette palette;
@@ -90,6 +97,9 @@ class _OwnedRoomScreen extends StatefulWidget {
 
   /// Per-room bubble colours (defaults to the shared store).
   final RoomBubbleColourStore? bubbleColourStore;
+
+  /// Shown in the detail pane, not as a route (see [RoomScreen.embedded]).
+  final bool embedded;
 
   @override
   State<_OwnedRoomScreen> createState() => _RoomScreenState();
@@ -1352,11 +1362,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                       padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                       child: Row(
                         children: [
-                          IconButton(
-                            tooltip: 'Back to rooms',
-                            onPressed: () => Navigator.pop(context),
-                            icon: const Icon(Icons.arrow_back_rounded),
-                          ),
+                          if (!widget.embedded)
+                            IconButton(
+                              tooltip: 'Back to rooms',
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(Icons.arrow_back_rounded),
+                            ),
                           if (room == null)
                             InitialAvatar(
                               name: widget.roomId,

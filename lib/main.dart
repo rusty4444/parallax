@@ -16,8 +16,8 @@ import 'login_screen.dart';
 import 'matrix_backend.dart';
 import 'message_draft_store.dart';
 import 'push_notifications.dart';
-import 'room_screen.dart';
 import 'security_overlay.dart';
+import 'two_pane.dart';
 import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
@@ -105,6 +105,10 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   VisualTheme _style = defaultVisualTheme;
   bool _followSystemTheme = false;
   GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// Chat routes above the inbox, so widening the window (tablet, unfold)
+  /// can absorb them into the detail pane.
+  final _roomRoutes = RoomRouteObserver();
   String? _accountKey;
   String? _userId;
   bool _authenticated = false;
@@ -181,6 +185,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       // Replacing the navigator removes *all* pushed decrypted routes, rather
       // than merely changing the home widget underneath a media/thread route.
       _navigatorKey = GlobalKey<NavigatorState>();
+      // The old navigator's routes died without pops; drop their records.
+      _roomRoutes.reset();
       _authenticated = false;
       _scheduleRebuild();
     }
@@ -445,27 +451,22 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       // A notification is a fresh entry into a room: retain the inbox root but
       // remove any previous room/media/settings routes above it. Back therefore
       // returns to the inbox, never to an inactive room whose timeline is empty.
+      // On a wide window the room is selected in the detail pane instead.
       unawaited(
-        navigator
-            .pushAndRemoveUntil<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => RoomScreen(
-                  backend: backend,
-                  palette: paletteFor(_style),
-                  roomId: request.roomId,
-                ),
-              ),
-              (route) => route.isFirst,
-            )
-            .then<void>(
-              (_) {},
-              onError: (Object _, StackTrace _) {
-                if (!current()) return;
-                _pushError =
-                    'Could not open the notification’s room. Try again.';
-                _scheduleRebuild();
-              },
-            ),
+        openRoomOnNavigator(
+          navigator,
+          backend: backend,
+          palette: paletteFor(_style),
+          roomId: request.roomId,
+          replaceStack: true,
+        ).then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {
+            if (!current()) return;
+            _pushError = 'Could not open the notification’s room. Try again.';
+            _scheduleRebuild();
+          },
+        ),
       );
     } catch (_) {
       if (!current()) return;
@@ -609,6 +610,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       animation: _preferences,
       builder: (context, _) => MaterialApp(
         navigatorKey: _navigatorKey,
+        navigatorObservers: [_roomRoutes],
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style),
@@ -704,6 +706,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               onThemeChanged: _changeTheme,
               followSystemTheme: _followSystemTheme,
               onFollowSystemTheme: _followSystem,
+              roomRoutes: _roomRoutes,
             ),
             SessionStatus.offline => Scaffold(
               body: GlowBackdrop(
