@@ -19,6 +19,7 @@ import '../message_image.dart';
 import '../room_avatar.dart';
 import 'bubble_column.dart';
 import 'double_tap_react.dart';
+import 'message_hover_menu.dart';
 import 'reaction_pills.dart';
 import '../features/appearance/bubble_colours.dart';
 
@@ -63,6 +64,7 @@ class MessageBubble extends StatelessWidget {
     this.receipts = const [],
     this.sent = false,
     this.onReceipts,
+    this.hoverActionsBuilder,
   });
   final ChatEntry entry;
   final ChatBackend backend;
@@ -91,6 +93,11 @@ class MessageBubble extends StatelessWidget {
   /// Show the "Sent" tick (own latest message without receipts).
   final bool sent;
   final VoidCallback? onReceipts;
+
+  /// Desktop hover quick actions (react, reply, thread, edit, pin, more).
+  /// Resolved on hover, so idle timeline builds stay cheap. Null keeps the
+  /// message free of the floating bar (touch platforms ignore it anyway).
+  final List<MessageActionItem> Function()? hoverActionsBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -351,6 +358,15 @@ class MessageBubble extends StatelessWidget {
                 : CrossAxisAlignment.start,
             children: [selectableBubble, reactions],
           );
+    // Desktop: the quick-action bar floats over the hovered message without
+    // touching the timeline's layout (it lives in the route's overlay).
+    final hoverable = hoverActionsBuilder == null
+        ? reacted
+        : MessageHoverMenu(
+            actionsBuilder: hoverActionsBuilder!,
+            palette: outer,
+            child: reacted,
+          );
     final row = avatars
         ? Row(
             mainAxisSize: MainAxisSize.min,
@@ -381,10 +397,10 @@ class MessageBubble extends StatelessWidget {
                     : null,
               ),
               const SizedBox(width: _avatarGap),
-              Flexible(child: reacted),
+              Flexible(child: hoverable),
             ],
           )
-        : reacted;
+        : hoverable;
     return Padding(
       padding: EdgeInsets.only(top: group ? 3 : (compact ? 7 : 14)),
       child: Column(

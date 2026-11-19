@@ -8,6 +8,7 @@ import '../features/rich_timeline/rich_timeline_features.dart';
 import '../features/rich_timeline/timeline_rows.dart';
 import '../features/rich_timeline/timeline_widgets.dart';
 import '../gallery_bubble.dart';
+import '../hooks/hook_types.dart';
 import '../message_receipts_sheet.dart';
 import 'message_bubble.dart';
 import 'swipe_reply.dart';
@@ -36,6 +37,7 @@ class TimelineView extends StatefulWidget {
     required this.onLoadOlder,
     this.room,
     this.onReply,
+    this.hoverActionsBuilder,
   });
 
   final ChatBackend backend;
@@ -51,6 +53,11 @@ class TimelineView extends StatefulWidget {
   final VoidCallback onLoadOlder;
   final ChatRoom? room;
   final ValueChanged<ChatEntry>? onReply;
+
+  /// Desktop hover quick actions for one entry (react, reply, thread, edit,
+  /// pin, more). Resolved on hover by the timeline owner; null disables the
+  /// floating bar.
+  final List<MessageActionItem> Function(ChatEntry entry)? hoverActionsBuilder;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -364,6 +371,9 @@ class _TimelineViewState extends State<TimelineView> {
         onHeart: () => widget.onHeart(entry),
         onAction: () => widget.onAction(entry),
         onReaction: (emoji) => widget.onReaction(entry, emoji),
+        hoverActionsBuilder: widget.hoverActionsBuilder == null
+            ? null
+            : () => widget.hoverActionsBuilder!(entry),
         replyPreview: entry.replyToId == null ? null : byId[entry.replyToId],
       ),
     );
@@ -408,6 +418,7 @@ class _TimelineViewState extends State<TimelineView> {
               onAction: widget.onAction,
               onReaction: widget.onReaction,
               onReply: widget.onReply,
+              hoverActionsBuilder: widget.hoverActionsBuilder,
               showSender: showSender,
             ),
             receiptRow(entries),
