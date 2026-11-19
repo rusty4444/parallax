@@ -8,7 +8,9 @@
 #include <shobjidl.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <map>

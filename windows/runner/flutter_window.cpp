@@ -1,5 +1,7 @@
 #include "flutter_window.h"
 
+#include <shellapi.h>
+
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
