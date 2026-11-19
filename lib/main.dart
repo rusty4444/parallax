@@ -25,7 +25,7 @@ import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/platform/background_connection.dart';
-import 'features/platform/desktop_title_bar.dart';
+import 'features/platform/desktop_shell.dart';
 import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
 
@@ -701,53 +701,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               draftStore: _draftStore,
               notifications: _pushReady ? _notifications : null,
               child: Platform.isWindows
-                  ? GlowBackdrop(
-                      palette: p,
-                      child: Stack(
-                        children: [
-                          // Drag strip behind the content: the inbox brand
-                          // sits flush at the top-left, and dragging the
-                          // header's empty space moves the window. Double
-                          // click maximizes.
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            height: kDesktopTitleBarHeight,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onPanStart: (_) => windowManager.startDragging(),
-                              onDoubleTap: () async {
-                                if (await windowManager.isMaximized()) {
-                                  await windowManager.unmaximize();
-                                } else {
-                                  await windowManager.maximize();
-                                }
-                              },
-                              child: const SizedBox.expand(),
-                            ),
-                          ),
-                          Positioned.fill(child: content),
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            // The caption buttons live outside the Navigator,
-                            // so their tooltips need their own Overlay.
-                            child: SizedBox(
-                              width: 3 * kDesktopCaptionButtonWidth,
-                              height: kDesktopTitleBarHeight,
-                              child: Overlay(
-                                initialEntries: [
-                                  OverlayEntry(
-                                    builder: (_) => DesktopTitleBar(palette: p),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
+                  ? DesktopShell(palette: p, child: content)
                   : content,
             ),
           );
