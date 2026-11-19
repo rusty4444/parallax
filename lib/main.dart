@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:matrix/matrix.dart' as matrix;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,6 +42,32 @@ Future<void> main() async {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
   }
   runApp(const ParallaxApp());
+  _installFrameDump();
+}
+
+final GlobalKey _frameDumpKey = GlobalKey();
+
+/// Diagnostic: with PARALLAX_FRAME_DUMP=1, write a PNG of the rendered UI
+/// shortly after startup. Win32 screen/PrintWindow capture cannot read the
+/// Flutter GPU swap chain on some Windows builds, so this dumps the frame
+/// from inside the engine instead.
+void _installFrameDump() {
+  if (!Platform.isWindows) return;
+  if (Platform.environment['PARALLAX_FRAME_DUMP'] != '1') return;
+  Future<void>.delayed(const Duration(seconds: 6), () async {
+    try {
+      final obj = _frameDumpKey.currentContext?.findRenderObject();
+      if (obj is! RenderRepaintBoundary) return;
+      final image = await obj.toImage(pixelRatio: 1.0);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return;
+      File(
+        r'C:\Users\Public\Documents\parallax-framedump.png',
+      ).writeAsBytesSync(data.buffer.asUint8List());
+    } catch (_) {
+      // Best-effort diagnostic.
+    }
+  });
 }
 
 /// Debug-build-only diagnostic: timestamped SDK log to a file, for
@@ -666,18 +694,21 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               ],
             ),
           );
-          return FeatureSettingsScope(
-            preferences: _preferences,
-            draftStore: _draftStore,
-            notifications: _pushReady ? _notifications : null,
-            child: Platform.isWindows
-                ? Column(
-                    children: [
-                      DesktopTitleBar(palette: p),
-                      Expanded(child: content),
-                    ],
-                  )
-                : content,
+          return RepaintBoundary(
+            key: _frameDumpKey,
+            child: FeatureSettingsScope(
+              preferences: _preferences,
+              draftStore: _draftStore,
+              notifications: _pushReady ? _notifications : null,
+              child: Platform.isWindows
+                  ? Column(
+                      children: [
+                        DesktopTitleBar(palette: p),
+                        Expanded(child: content),
+                      ],
+                    )
+                  : content,
+            ),
           );
         },
         // Only the session status picks the screen. Rebuilding on every
