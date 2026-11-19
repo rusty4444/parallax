@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -330,14 +331,25 @@ class MessageBubble extends StatelessWidget {
       onLongPress: onAction,
       child: bubble,
     );
+    // Desktop: drag to select message text and Ctrl+C to copy. The inner
+    // DoubleTapReact keeps long-press / right-click for the full action menu
+    // (reply, edit, react, copy, forward, …), so the selection toolbar is
+    // suppressed to avoid a competing right-click menu.
+    final Widget selectableBubble =
+        (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+        ? SelectionArea(
+            contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+            child: gestureBubble,
+          )
+        : gestureBubble;
     final reacted = reactions == null
-        ? gestureBubble
+        ? selectableBubble
         : Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: mine
                 ? CrossAxisAlignment.end
                 : CrossAxisAlignment.start,
-            children: [gestureBubble, reactions],
+            children: [selectableBubble, reactions],
           );
     final row = avatars
         ? Row(

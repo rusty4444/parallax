@@ -52,6 +52,8 @@ class _DoubleTapReactState extends State<DoubleTapReact>
     onDoubleTap: _doubleTap,
     // The action sheet owner plays the long-press haptic.
     onLongPress: widget.onLongPress,
+    // Desktop: right-click opens the same action menu as a long press.
+    onSecondaryTapUp: (_) => widget.onLongPress?.call(),
     behavior: HitTestBehavior.opaque,
     child: Stack(
       clipBehavior: Clip.none,

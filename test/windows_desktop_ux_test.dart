@@ -10,6 +10,7 @@ import 'package:parallax/feature_settings_scope.dart';
 import 'package:parallax/features/platform/desktop_title_bar.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
+import 'package:parallax/timeline/double_tap_react.dart';
 import 'package:parallax/two_pane.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -345,6 +346,32 @@ void main() {
       await tester.tap(find.byTooltip('Close'));
       await tester.pump();
       expect(calls, containsAll(['minimize', 'maximize', 'close']));
+    });
+  });
+
+  group('message right-click', () {
+    testWidgets('secondary tap opens the action menu, not a reaction', (
+      tester,
+    ) async {
+      var actions = 0;
+      var hearts = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: DoubleTapReact(
+                onDoubleTap: () => hearts++,
+                onLongPress: () => actions++,
+                child: const Text('hello message'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('hello message'), buttons: kSecondaryButton);
+      await tester.pump();
+      expect(actions, 1);
+      expect(hearts, 0);
     });
   });
 }
