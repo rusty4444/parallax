@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +72,71 @@ void main() {
   });
 
   group('GIF previews fit their own shape', () {
+    testWidgets('the real probe returns intrinsic dimensions', (tester) async {
+      final size = await tester.runAsync(() => probeImageSize(pngBytes));
+      expect(size, const Size(1, 1));
+    });
+
+    testWidgets('the real probe preserves extreme portrait and wide sizes', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        for (final size in [const Size(8, 1600), const Size(1600, 8)]) {
+          final image = await makeImage(
+            size.width.toInt(),
+            size.height.toInt(),
+          );
+          try {
+            final encoded = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            expect(encoded, isNotNull);
+            // The probe frame is fitted to 64×64, but callers need the
+            // original dimensions, not the tiny frame's rounded aspect.
+            expect(await probeImageSize(encoded!.buffer.asUint8List()), size);
+          } finally {
+            image.dispose();
+          }
+        }
+      });
+    });
+
+    testWidgets(
+      'a late probe cannot size a replacement entry with the same ID',
+      (tester) async {
+        final decoded = Completer<Size>();
+        var probes = 0;
+        debugDecodeImageSize = (_) {
+          probes++;
+          return decoded.future;
+        };
+        final backend = gifBackend();
+        Widget preview(ChatEntry entry) => host(
+          MessageImage(
+            key: const ValueKey('preview'),
+            backend: backend,
+            palette: palette,
+            roomId: roomId,
+            eventId: entry.id,
+            entry: entry,
+          ),
+        );
+        final original = gifEntry('g');
+        await tester.pumpWidget(preview(original));
+        await settle(tester);
+        expect(probes, 1);
+        expect(tester.getSize(find.byType(MessageImage)), const Size(228, 170));
+
+        final replacement = gifEntry('g');
+        expect(identical(original, replacement), isFalse);
+        await tester.pumpWidget(preview(replacement));
+        decoded.complete(const Size(300, 600));
+        await settle(tester);
+        expect(tester.getSize(find.byType(MessageImage)), const Size(228, 170));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('declared dimensions size the preview without cropping', (
       tester,
     ) async {

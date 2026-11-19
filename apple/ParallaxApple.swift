@@ -7,6 +7,7 @@
 //   parallax/permissions      check / request (camera + microphone)
 //   parallax/secure_window    setSecure (app-switcher cover / screen capture)
 //   parallax/platform_intents takePending / discard, native -> Dart "pending"
+//   parallax/clipboard        readImage (macOS only, PNG Uint8List or null)
 //
 // Registered from each Runner's AppDelegate via ParallaxAppleChannels.
 // Channel results are always delivered on the main thread; video and file
@@ -22,6 +23,8 @@ import Flutter
 #elseif os(macOS)
 import Cocoa
 import FlutterMacOS
+import ImageIO
+import UniformTypeIdentifiers
 #endif
 
 // MARK: - Small shared helpers
@@ -912,6 +915,119 @@ final class ParallaxIntentStore {
     #endif
 }
 
+// MARK: - Clipboard images (parallax/clipboard)
+
+#if os(macOS)
+/// Reads only inline raster data: no URL, file promise, NSImage(pasteboard:),
+/// or readObjects conversion that could open a local or remote file.
+final class ParallaxClipboardImage {
+    static let maxEncodedBytes = 20 * 1024 * 1024
+    static let maxDimension = 8192
+    static let maxPixels = 16 * 1024 * 1024
+    static let maxDecodedBytes = 64 * 1024 * 1024
+
+    private static let imageTypes: [NSPasteboard.PasteboardType] = [
+        .png, .tiff,
+        NSPasteboard.PasteboardType(UTType.jpeg.identifier),
+        NSPasteboard.PasteboardType(UTType.gif.identifier),
+        NSPasteboard.PasteboardType(UTType.bmp.identifier),
+        NSPasteboard.PasteboardType(UTType.heic.identifier),
+    ]
+    private let pasteboard: () -> NSPasteboard
+    private let decodeQueue = DispatchQueue(label: "net.samrussell.parallax.clipboard", qos: .utility)
+    /// Main-thread only. Repeated key presses must not queue unbounded snapshots.
+    private var decoding = false
+
+    /// Lazy so registration (and an unknown call) never accesses the clipboard.
+    /// Tests supply an isolated named pasteboard instead of the user's general one.
+    init(pasteboard: @escaping () -> NSPasteboard = { .general }) {
+        self.pasteboard = pasteboard
+    }
+
+    func register(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
+        let channel = FlutterMethodChannel(name: "parallax/clipboard", binaryMessenger: messenger)
+        channel.setMethodCallHandler { [self] call, result in
+            handle(call, result: result)
+        }
+        return channel
+    }
+
+    private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard call.method == "readImage" else {
+            result(FlutterMethodNotImplemented)
+            return
+        }
+        guard !decoding else {
+            result(nil)
+            return
+        }
+        // Snapshot just one preferred inline representation on the main thread.
+        // Neither reading nor decoding changes or clears the pasteboard.
+        let board = pasteboard()
+        guard let type = board.availableType(from: Self.imageTypes),
+            let data = board.data(forType: type),
+            !data.isEmpty, data.count <= Self.maxEncodedBytes
+        else {
+            result(nil) // Dart's ordinary plain-text paste remains the fallback.
+            return
+        }
+        decoding = true
+        decodeQueue.async {
+            let png = autoreleasepool { Self.pngData(from: data) }
+            DispatchQueue.main.async { [self] in
+                decoding = false
+                // The composer and Windows channel expect Uint8List, not a map.
+                // Dart supplies the filename and image/png MIME type.
+                result(png.map { FlutterStandardTypedData(bytes: $0) })
+            }
+        }
+    }
+
+    private static func pngData(from data: Data) -> Data? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
+            let sourceType = CGImageSourceGetType(source) as String?,
+            imageTypes.contains(where: { $0.rawValue == sourceType }),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, sourceOptions) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int,
+            let depth = properties[kCGImagePropertyDepth] as? Int,
+            depth > 0, depth <= 8,
+            dimensionsAllowed(width: width, height: height)
+        else { return nil }
+
+        // Probe dimensions BEFORE decoding; first frame only, no animation or
+        // embedded full-size thumbnail. Reject rather than silently downscale.
+        let decodeOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceShouldAllowFloat: false,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, decodeOptions as CFDictionary),
+            dimensionsAllowed(width: image.width, height: image.height),
+            image.bitsPerPixel <= 32,
+            image.bytesPerRow <= maxDecodedBytes / image.height
+        else { return nil }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination),
+            output.length > 0, output.length <= maxEncodedBytes
+        else { return nil }
+        return output as Data
+    }
+
+    private static func dimensionsAllowed(width: Int, height: Int) -> Bool {
+        return width > 0 && height > 0 && width <= maxDimension && height <= maxDimension
+            && width <= maxPixels / height
+    }
+}
+#endif
+
 // MARK: - Channel registration
 
 /// Creates and owns all Parallax MethodChannels for one Flutter engine.
@@ -1008,6 +1124,9 @@ final class ParallaxAppleChannels {
         }
 
         channels = [video, permissionsChannel, secure, intents]
+        #if os(macOS)
+        channels.append(ParallaxClipboardImage().register(messenger: messenger))
+        #endif
         store.attach(intents)
     }
 

@@ -5,7 +5,9 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:parallax/features/platform/desktop_content_insets.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,10 +65,11 @@ Future<void> _shootWide(
   WidgetTester tester,
   String name,
   Widget child, {
+  Size size = const Size(1440, 900),
   Future<void> Function(WidgetTester)? interact,
 }) async {
   final key = GlobalKey();
-  tester.view.physicalSize = const Size(1440, 900);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(RepaintBoundary(key: key, child: child));
@@ -200,30 +203,41 @@ void main() {
       );
     });
 
-    testWidgets('two-pane desktop ${style.name}', skip: skip != null, (
-      tester,
-    ) async {
-      final observer = RoomRouteObserver();
-      await _shootWide(
-        tester,
-        'two_pane_${style.name}',
-        MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: themeFor(style),
-          navigatorObservers: [observer],
-          home: InboxScreen(
-            backend: _backend(),
-            palette: p,
-            style: style,
-            onThemeChanged: (_) {},
-            roomRoutes: observer,
-          ),
-        ),
-        interact: (t) async {
-          await t.tap(find.text('Weekend crew'));
-          await t.pump(const Duration(milliseconds: 300));
+    for (final width in [700.0, 1440.0]) {
+      testWidgets(
+        'two-pane desktop ${style.name} ${width.toInt()}',
+        skip: skip != null,
+        (tester) async {
+          final observer = RoomRouteObserver();
+          await _shootWide(
+            tester,
+            'two_pane_${defaultTargetPlatform.name}_${style.name}_${width.toInt()}',
+            MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: themeFor(style),
+              builder: (_, child) => DesktopContentInsets(child: child!),
+              navigatorObservers: [observer],
+              home: InboxScreen(
+                backend: _backend(),
+                palette: p,
+                style: style,
+                onThemeChanged: (_) {},
+                roomRoutes: observer,
+              ),
+            ),
+            size: Size(width, 900),
+            interact: (t) async {
+              await t.tap(find.text('Weekend crew'));
+              await t.pump(const Duration(milliseconds: 300));
+            },
+          );
+          expect(tester.takeException(), isNull);
         },
+        variant: TargetPlatformVariant({
+          TargetPlatform.macOS,
+          TargetPlatform.android,
+        }),
       );
-    });
+    }
   }
 }

@@ -212,7 +212,7 @@ class RoomListTile extends StatelessWidget {
         if (previewLines == 0) ...badges,
       ],
     );
-    final content = Row(
+    final details = Row(
       crossAxisAlignment: previewLines == 0
           ? CrossAxisAlignment.center
           : CrossAxisAlignment.start,
@@ -261,35 +261,43 @@ class RoomListTile extends StatelessWidget {
                   onPressed: () => onCopyCode!(code),
                 ),
               ],
-              if (room.invited && (onAccept != null || onDecline != null)) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: busy ? null : onDecline,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: p.foreground,
-                          side: BorderSide(color: p.stroke),
-                        ),
-                        child: const Text('Decline'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: busy ? null : onAccept,
-                        child: const Text('Accept'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
             ],
           ),
         ),
       ],
     );
+    // Invite actions use the whole card, not the narrow text column beside
+    // the avatar. Stack intact buttons if a small pane or larger text needs
+    // more room; never squeeze labels into one character per line.
+    final content = room.invited && (onAccept != null || onDecline != null)
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              details,
+              const SizedBox(height: 10),
+              OverflowBar(
+                alignment: MainAxisAlignment.end,
+                overflowAlignment: OverflowBarAlignment.end,
+                spacing: 10,
+                overflowSpacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: busy ? null : onDecline,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: p.foreground,
+                      side: BorderSide(color: p.stroke),
+                    ),
+                    child: const Text('Decline'),
+                  ),
+                  FilledButton(
+                    onPressed: busy ? null : onAccept,
+                    child: const Text('Accept'),
+                  ),
+                ],
+              ),
+            ],
+          )
+        : details;
     final inviteTint = Color.alphaBlend(
       p.secondary.withValues(alpha: 0.08),
       p.surface,

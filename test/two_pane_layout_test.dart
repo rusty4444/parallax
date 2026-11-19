@@ -10,6 +10,7 @@ import 'package:parallax/feature_settings_scope.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/room_screen.dart';
+import 'package:parallax/settings_screen.dart';
 import 'package:parallax/two_pane.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -37,12 +38,27 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Widget app({AppearancePreferences? prefs}) => FeatureSettingsScope(
+  Widget app({
+    AppearancePreferences? prefs,
+    double textScale = 1,
+    double topInset = 0,
+  }) => FeatureSettingsScope(
     preferences: prefs ?? AppearancePreferences(),
     draftStore: MessageDraftStore(),
     child: MaterialApp(
       theme: themeFor(VisualTheme.parallax),
       navigatorObservers: [observer],
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: TextScaler.linear(textScale),
+            padding: media.padding.copyWith(top: topInset),
+            viewPadding: media.viewPadding.copyWith(top: topInset),
+          ),
+          child: child!,
+        );
+      },
       home: InboxScreen(
         backend: backend,
         palette: paletteFor(VisualTheme.parallax),
@@ -245,6 +261,157 @@ void main() {
     );
   });
 
+  testWidgets(
+    'Windows and Android retain the flush single-row header and full-height split',
+    (tester) async {
+      window(tester, const Size(700, 900));
+      await tester.pumpWidget(app(textScale: 1.3));
+      await tester.pumpAndSettle();
+      final brand = tester.getRect(
+        find.byKey(const ValueKey('home.header_brand')),
+      );
+      final search = tester.getRect(
+        find.byKey(const ValueKey('home.search_toggle')),
+      );
+      expect(brand.left, 16);
+      expect(brand.top, inInclusiveRange(4, 8));
+      expect(search.top, inInclusiveRange(4, 8));
+      expect(brand.center.dy, closeTo(search.center.dy, 0.01));
+      expect(find.byKey(const ValueKey('home.header_actions')), findsNothing);
+      final divider = tester.getRect(
+        find.byKey(const ValueKey('two-pane-divider')),
+      );
+      expect(divider.top, 0);
+      expect(divider.bottom, 900);
+      expect(tester.takeException(), isNull);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  group('macOS list-pane header', () {
+    for (final paneWidth in [kTwoPaneMinListWidth, 300.0]) {
+      testWidgets(
+        'all actions work at ${paneWidth}dp and 1.3 text scale with titlebar inset',
+        (tester) async {
+          SharedPreferences.setMockInitialValues({
+            if (paneWidth == kTwoPaneMinListWidth) kTwoPaneWidthPref: paneWidth,
+          });
+          window(tester, const Size(700, 900));
+          await tester.pumpWidget(app(textScale: 1.3, topInset: 36));
+          await tester.pumpAndSettle();
+          final divider = find.byKey(const ValueKey('two-pane-divider'));
+          expect(tester.getRect(divider).left, paneWidth);
+          final brand = tester.getRect(
+            find.byKey(const ValueKey('home.header_brand')),
+          );
+          // Wide content opts out of the inherited route inset. Only the
+          // brand row reserves horizontal space beside the traffic lights.
+          expect(brand.left, 84);
+          expect(brand.top, 4);
+          for (final tooltip in [
+            'Search conversations',
+            'Create room',
+            'Show options',
+            'Settings',
+          ]) {
+            final action = find.byWidgetPredicate(
+              (widget) => widget is IconButton && widget.tooltip == tooltip,
+            );
+            expect(action.hitTestable(), findsOneWidget);
+            final rect = tester.getRect(action);
+            expect(rect.left, greaterThanOrEqualTo(0));
+            expect(rect.right, lessThanOrEqualTo(paneWidth));
+            expect(rect.top, greaterThanOrEqualTo(brand.bottom));
+            expect(rect.height, greaterThanOrEqualTo(40));
+            expect(tester.widget<IconButton>(action).onPressed, isNotNull);
+          }
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.byTooltip('Search conversations'));
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('home.conversation_search')),
+            findsOneWidget,
+          );
+          await tester.tap(find.byTooltip('Hide conversation search'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.byTooltip('Show options'));
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('home.options_panel')),
+            findsOneWidget,
+          );
+          await tester.tap(find.byTooltip('Hide options'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.byTooltip('Create room'));
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsOneWidget);
+          await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+          expect(find.byType(SettingsScreen), findsOneWidget);
+          tester.state<NavigatorState>(find.byType(Navigator)).pop();
+          await tester.pumpAndSettle();
+          expect(find.byType(SettingsScreen), findsNothing);
+          expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      );
+    }
+
+    testWidgets(
+      'narrow header reserves the inherited traffic-light inset only once',
+      (tester) async {
+        window(tester, const Size(400, 900));
+        await tester.pumpWidget(app(topInset: 36));
+        await tester.pumpAndSettle();
+        final search = tester.getRect(
+          find.byKey(const ValueKey('home.search_toggle')),
+        );
+        expect(search.top, greaterThanOrEqualTo(36));
+        // The header centres actions beside its taller logo/text. Compare
+        // against the existing minimum inset rather than guessing that
+        // centred button's absolute y-position.
+        await tester.pumpWidget(app(topInset: 0));
+        await tester.pumpAndSettle();
+        final minimumOnly = tester.getRect(
+          find.byKey(const ValueKey('home.search_toggle')),
+        );
+        expect(search.top, minimumOnly.top);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
+
+    testWidgets(
+      'wide embedded rooms opt out of the inherited traffic-light inset',
+      (tester) async {
+        window(tester, const Size(1100, 900));
+        await tester.pumpWidget(app(topInset: 36));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Team'));
+        await tester.pumpAndSettle();
+        final roomContext = tester.element(find.byType(RoomScreen));
+        expect(MediaQuery.paddingOf(roomContext).top, 0);
+        expect(MediaQuery.viewPaddingOf(roomContext).top, 0);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
+  });
+
   group('fold / resize transitions', () {
     testWidgets('unfolding absorbs the open chat route into the pane', (
       tester,
@@ -307,6 +474,82 @@ void main() {
       await tester.pumpAndSettle();
       expect(observer.rooms, isEmpty);
       expect(backend.activeRoomId, '!alex:x.org');
+    });
+
+    testWidgets('folding does not push a room that was left', (tester) async {
+      await pumpApp(tester, const Size(1100, 900));
+      await tester.tap(find.text('Team'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(backend.activeRoomId, '!team:x.org');
+      backend.roomList = [
+        for (final room in backend.roomList)
+          if (room.id != '!team:x.org') room,
+      ];
+      backend.notifyListeners();
+      await tester.pump();
+      expect(find.text('Select a conversation'), findsOneWidget);
+      expect(find.byType(RoomScreen), findsNothing);
+      tester.view.physicalSize = const Size(400, 900);
+      await tester.pumpAndSettle();
+      expect(observer.rooms, isEmpty);
+      expect(find.byType(RoomScreen), findsNothing);
+      expect(find.text('Alex'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a re-invitation is not a joined detail or phone route', (
+      tester,
+    ) async {
+      await pumpApp(tester, const Size(1100, 900));
+      await tester.tap(find.text('Team'));
+      await tester.pumpAndSettle();
+      backend.roomList = [
+        for (final room in backend.roomList)
+          room.id == '!team:x.org' ? room.copyWith(invited: true) : room,
+      ];
+      backend.notifyListeners();
+      await tester.pump();
+      expect(find.text('Select a conversation'), findsOneWidget);
+      expect(find.byType(RoomScreen), findsNothing);
+      tester.view.physicalSize = const Size(400, 900);
+      await tester.pumpAndSettle();
+      expect(observer.rooms, isEmpty);
+      expect(find.byType(RoomScreen), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('two window-class flips before a frame settle on the last', (
+      tester,
+    ) async {
+      await pumpApp(tester, const Size(1100, 900));
+      await tester.tap(find.text('Team'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.physicalSize = const Size(1100, 900);
+      await tester.pumpAndSettle();
+      expect(observer.rooms, isEmpty);
+      expect(find.byType(RoomScreen), findsOneWidget);
+      expect(find.text('Alex'), findsOneWidget);
+      expect(find.byTooltip('Back to rooms'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a rapid unfold and fold keeps the original phone route', (
+      tester,
+    ) async {
+      await pumpApp(tester, const Size(400, 900));
+      await tester.tap(find.text('Team'));
+      await tester.pumpAndSettle();
+      final originalRoute = observer.rooms.single;
+      tester.view.physicalSize = const Size(1100, 900);
+      tester.view.physicalSize = const Size(400, 900);
+      await tester.pumpAndSettle();
+      expect(observer.rooms, [same(originalRoute)]);
+      expect(find.byType(RoomScreen), findsOneWidget);
+      expect(find.byTooltip('Back to rooms'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 }

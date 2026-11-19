@@ -27,10 +27,11 @@ Ideas from other messaging apps after parity are in [docs/feature-ideas.md](docs
 
 ## Apple platforms (iPhone, iPad, iPhone Fold, Mac)
 
-The same Dart codebase runs on iOS, iPadOS and macOS (`feat/apple-port`). The Android app is unchanged.
+The same Dart codebase runs on iOS, iPadOS and macOS (`feat/apple-port`), including the shared Windows desktop and Android tablet layout improvements. Android retains its existing platform integrations.
 
 - **Adaptive layout.** The shared tablet/foldable two-pane layout (`lib/two_pane.dart`): windows at least 600 pt wide and 480 pt tall — iPad landscape, the iPhone Fold unfolded, and Mac windows — show the room list beside the open chat, with a drag-resizable divider (persisted width, double-click resets) and hinge-aware splitting on foldables. Folding/unfolding or resizing keeps the open chat on screen, moving it between the detail pane and a full-screen route. iPhone and the Fold's outer screen keep the phone flow.
-- **Desktop UX on Mac.** The native title bar is hidden and blended into the theme gradient (traffic lights kept), with a drag strip and double-click zoom; the inbox and room headers sit flush at the top. Right-click opens the message action menu, message text is drag-selectable (Cmd+C copies), Enter sends (Shift+Enter newline) and Cmd+V pastes clipboard images — the same desktop behaviour as the Windows port.
+- **Desktop UX on Mac.** The native title bar is hidden and blended into the theme gradient (traffic lights kept). The wide inbox and embedded chat headers sit flush at the top; narrow windows and secondary screens reserve space below the native controls. The inbox header reflows at narrow pane widths. Right-click opens the message action menu, message text is drag-selectable (Cmd+C copies), Enter sends (Shift+Enter newline) and Cmd+V pastes clipboard images — the same desktop behaviour as the Windows port.
+- **Fonts and styling.** Apple uses the same bundled Space Grotesk font, theme typography, larger desktop inbox branding, cutout login logo and continuous background gradient as Windows and Android. No downloaded system font is required.
 - **Feature parity.** Sign-in (password/OIDC/SSO), verification and recovery, E2EE (vodozemac builds for iOS and macOS), the timeline, reactions, threads, polls, spaces, media, voice messages, Element Call (WKWebView on both platforms), file previews and the on-device search index all run from the shared code. PDF previews use PDFium through `pdfx` instead of Android's isolated PdfRenderer process, with the same timeouts and pixel caps. Video probing/compression uses AVFoundation behind the same `parallax/video` channel.
 - **Notifications.** The built-in delivery shows notifications fetched and decrypted on the device while Parallax is running, with Reply / Mark as read / copy actions. iOS and macOS do not allow Android's persistent foreground-service connection, and UnifiedPush/Firebase delivery are Android-only for now, so notifications do not arrive while the app is fully closed. This is stated in Settings → Notifications on the device.
 - **Secure window.** While a recovery secret is shown, iOS covers the app-switcher snapshot with an overlay (screenshots while active cannot be blocked on iOS); macOS excludes the window from screen capture and sharing.
@@ -40,7 +41,7 @@ The same Dart codebase runs on iOS, iPadOS and macOS (`feat/apple-port`). The An
 
 ## What hasn't been verified
 
-Every feature above has automated tests (1,098 passing). **None has been tested against a live homeserver, a second Matrix client or a physical phone yet.** That includes sign-in providers, encrypted reactions as Element X sees them, Element Call (which needs a homeserver with MatrixRTC/LiveKit) and push delivery.
+The shared code has automated coverage; a passing suite or build does not prove live interoperability. **The Apple port has not been tested against a live homeserver, a second Matrix client or a physical phone yet.** That includes sign-in providers, encrypted reactions as Element X sees them, Element Call (which needs a homeserver with MatrixRTC/LiveKit) and push delivery.
 
 Known gaps:
 
@@ -94,7 +95,7 @@ flutter build ios --simulator               # simulator build
 flutter build macos --release
 ```
 
-The bundle ID is `net.samrussell.parallax` on both platforms. The OIDC redirect scheme `net.samrusselltech.parallax` and the `matrix:` link scheme are registered in the runners; native Swift handlers for video tools, permissions, the secure window and link intents live in `apple/ParallaxApple.swift`.
+The bundle ID is `net.samrussell.parallax` on both platforms. The OIDC redirect scheme `net.samrusselltech.parallax` and the `matrix:` link scheme are registered in the runners; native Swift handlers for video tools, permissions, the secure window, link intents and macOS clipboard images live in `apple/ParallaxApple.swift`. Run `bash apple/tests/run_clipboard_tests.sh` for the native clipboard channel regressions; see [the native test guide](apple/tests/README.md).
 
 Verified with Xcode 27.2 / Flutter 3.44: the macOS release build runs (login screen, Matrix client and local storage initialise); the iOS simulator build installs and launches. Two toolchain workarounds are committed: iOS/macOS builds are arm64-only (`ARCHS = arm64` in the runners' xcconfigs) because Xcode 27's `lipo` rejects Flutter 3.44's multi-arch `-verify_arch` call, and the Podfiles raise pod deployment targets to the runners' floors (iOS 15 / macOS 13). Flutter 3.44 integrates the plugins through Swift Package Manager; CocoaPods carries only the engine pod. macOS secure storage uses the login keychain for ad-hoc local builds (see the security doc).
 

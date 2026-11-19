@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' show instantiateImageCodec;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -17,25 +18,33 @@ import 'media_preview_policy.dart';
 const maxTimelineAnimationBytes = 4 * 1024 * 1024;
 
 /// Test override for reading an image's first-frame dimensions (real
-/// decoding needs `runAsync` under fake async). Null uses the real codec.
+/// decoding needs `runAsync` under fake async). Null uses [probeImageSize].
 @visibleForTesting
 Future<Size> Function(Uint8List bytes)? debugDecodeImageSize;
 
-Future<Size> _decodeImageSize(Uint8List bytes) async {
-  // Only the aspect is needed, not a full-resolution frame: bound the probe
-  // decode like boundedMemoryImage so a hostile 4 MB GIF cannot expand into
-  // a huge bitmap just to measure it. One target dimension preserves aspect.
-  final codec = await instantiateImageCodec(
-    bytes,
-    targetWidth: 256,
-    allowUpscaling: false,
+/// Intrinsic dimensions of encoded bytes, with a bounded probe decode.
+/// The target-size callback receives the intrinsic size BEFORE decoding, so
+/// the ratio stays exact while both decoded axes fit within 64×64. Targeting
+/// just one axis can still allocate a huge bitmap for an extreme aspect.
+Future<Size> probeImageSize(Uint8List bytes) async {
+  final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+  Size? intrinsic;
+  final codec = await ui.instantiateImageCodecWithSize(
+    buffer,
+    getTargetSize: (w, h) {
+      intrinsic = Size(w.toDouble(), h.toDouble());
+      final scale = math.min(1.0, 64 / math.max(w, h));
+      return ui.TargetImageSize(
+        width: math.max(1, (w * scale).round()),
+        height: math.max(1, (h * scale).round()),
+      );
+    },
   );
   try {
     final frame = await codec.getNextFrame();
-    final size = Size(
-      frame.image.width.toDouble(),
-      frame.image.height.toDouble(),
-    );
+    final size =
+        intrinsic ??
+        Size(frame.image.width.toDouble(), frame.image.height.toDouble());
     frame.image.dispose();
     return size;
   } finally {
@@ -134,6 +143,7 @@ class _MessageImageState extends State<MessageImage> {
     final owner = _owner;
     final roomId = widget.roomId;
     final eventId = widget.eventId;
+    final entry = widget.entry;
     final features = mediaFeaturesOf(widget.backend);
     Uint8List? bytes;
     try {
@@ -164,10 +174,11 @@ class _MessageImageState extends State<MessageImage> {
     // GIF is shown at its own aspect instead of cropped.
     if (bytes != null && _autoFit && _info?.aspectRatio == null) {
       try {
-        final size = await (debugDecodeImageSize ?? _decodeImageSize)(bytes);
+        final size = await (debugDecodeImageSize ?? probeImageSize)(bytes);
         if (mounted &&
             owner.isCurrent &&
             identical(owner, _owner) &&
+            identical(entry, widget.entry) &&
             roomId == widget.roomId &&
             eventId == widget.eventId) {
           setState(() => _decoded = size);

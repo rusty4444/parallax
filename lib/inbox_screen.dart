@@ -207,7 +207,11 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _windowSyncScheduled = false;
       if (!mounted || !_owner.isCurrent) return;
-      _applyWindowMode(wide);
+      // Multiple window-class flips can arrive before this frame. Apply the
+      // current metrics, not the first queued fold/unfold snapshot.
+      final view = View.of(context);
+      final size = view.physicalSize / view.devicePixelRatio;
+      _applyWindowMode(isTwoPaneWindow(size));
     });
   }
 
@@ -232,7 +236,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _twoPane.wide = false;
       final selected = _twoPane.selectedRoomId;
       final chatAlreadyOpen = widget.roomRoutes?.rooms.isNotEmpty ?? false;
-      if (selected != null && !chatAlreadyOpen && (_route?.isCurrent ?? true)) {
+      // A departed room (including a later re-invitation) is not a joined
+      // detail selection and must not become a phone error route on fold.
+      final stillJoined =
+          selected != null &&
+          widget.backend.rooms.any((r) => r.id == selected && !r.invited);
+      if (selected != null &&
+          stillJoined &&
+          !chatAlreadyOpen &&
+          (_route?.isCurrent ?? true)) {
         Navigator.of(context).push(
           RoomRoute(
             backend: widget.backend,
@@ -1340,15 +1352,19 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 _paneWidthOverride ?? split.listWidth,
                 constraints.maxWidth,
               );
-        return Row(
+        // Resolve the per-pane MediaQueries below the macOS top-inset
+        // opt-out; copying the outer context here would restore that inset.
+        final panes = Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
               width: listWidth,
-              child: MediaQuery.removePadding(
-                context: context,
-                removeRight: true,
-                child: inbox,
+              child: Builder(
+                builder: (context) => MediaQuery.removePadding(
+                  context: context,
+                  removeRight: true,
+                  child: inbox,
+                ),
               ),
             ),
             if (hinge)
@@ -1369,14 +1385,32 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 onReset: _resetPaneWidth,
               ),
             Expanded(
-              child: MediaQuery.removePadding(
-                context: context,
-                removeLeft: true,
-                child: _detailPane(context),
+              child: Builder(
+                builder: (context) => MediaQuery.removePadding(
+                  context: context,
+                  removeLeft: true,
+                  // Room membership changes must also rebuild the detail:
+                  // leaving a selected room restores the placeholder.
+                  child: AnimatedBuilder(
+                    animation: _changes,
+                    builder: (context, _) => _detailPane(context),
+                  ),
+                ),
               ),
             ),
           ],
         );
+        // The wide macOS header shares the native traffic-light strip.
+        // Opt out of the root route inset for BOTH panes, including the
+        // embedded room, without changing Windows/Android layout.
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+          return MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            child: panes,
+          );
+        }
+        return panes;
       },
     );
   }
@@ -1388,7 +1422,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final p = widget.palette;
     final id = _twoPane.selectedRoomId;
     final known =
-        id != null && widget.backend.rooms.any((room) => room.id == id);
+        id != null &&
+        widget.backend.rooms.any((room) => room.id == id && !room.invited);
     if (!known) {
       // The detail pane has no Scaffold of its own; without a Material the
       // placeholder text inherits the framework fallback style (48px, yellow
@@ -1441,6 +1476,140 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       roomId: id,
       embedded: true,
       backgroundStore: widget.backgroundStore,
+    );
+  }
+
+  Widget _inboxHeader({required bool twoPane, required bool expandedHome}) {
+    final p = widget.palette;
+    final macWide =
+        twoPane && !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+    final brand = twoPane
+        ? Row(
+            key: const ValueKey('home.header_brand'),
+            children: [
+              BrandMark(palette: p, size: 44),
+              const SizedBox(width: 13),
+              Flexible(
+                child: Text(
+                  'Parallax',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: p.foreground,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.8,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Parallax',
+                style: TextStyle(
+                  color: p.foreground,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.1,
+                ),
+              ),
+              Text(
+                'YOUR SPACE TO CONNECT',
+                style: TextStyle(
+                  color: p.secondary,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.7,
+                ),
+              ),
+            ],
+          );
+    final actions = <Widget>[
+      IconButton(
+        key: const ValueKey('home.search_toggle'),
+        tooltip: _searchOpen
+            ? 'Hide conversation search'
+            : 'Search conversations',
+        onPressed: _toggleConversationSearch,
+        icon: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: Icon(
+            _searchOpen ? Icons.close_rounded : Icons.search_rounded,
+            key: ValueKey(_searchOpen),
+          ),
+        ),
+      ),
+      IconButton(
+        tooltip: 'Create room',
+        onPressed: _creatingRoom || _creation.active ? null : _createRoom,
+        icon: const Icon(Icons.add_home_work_outlined),
+      ),
+      if (!expandedHome)
+        IconButton(
+          key: const ValueKey('home.options'),
+          tooltip: _optionsOpen ? 'Hide options' : 'Show options',
+          onPressed: () {
+            Haptics.selection();
+            setState(() => _optionsOpen = !_optionsOpen);
+          },
+          icon: AnimatedRotation(
+            turns: _optionsOpen ? 0.5 : 0,
+            duration: const Duration(milliseconds: 220),
+            child: const Icon(Icons.expand_more_rounded),
+          ),
+        ),
+      IconButton(
+        tooltip: 'Settings',
+        iconSize: 25,
+        onPressed: _openSettings,
+        icon: const Icon(Icons.tune_rounded),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The native traffic lights consume 84dp on the brand row. In a
+        // narrow list pane the four actions cannot share that row, even if
+        // the title ellipsizes completely. Reflow only macOS; keep the
+        // flush Windows/tablet header and all touch targets unchanged.
+        if (macWide && constraints.maxWidth < 480) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(84, 4, 8, 0),
+                child: brand,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                child: Row(
+                  key: const ValueKey('home.header_actions'),
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: actions,
+                ),
+              ),
+            ],
+          );
+        }
+        return Padding(
+          padding: twoPane
+              ? EdgeInsets.fromLTRB(macWide ? 84 : 16, 4, 8, 0)
+              : const EdgeInsets.fromLTRB(22, 22, 16, 0),
+          child: Row(
+            children: [
+              if (!twoPane) ...[
+                BrandMark(palette: p, size: 46),
+                const SizedBox(width: 13),
+              ],
+              Expanded(child: brand),
+              ...actions,
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1805,121 +1974,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Padding(
-                    padding: twoPane
-                        ? EdgeInsets.fromLTRB(
-                            // macOS: the brand starts right of the traffic
-                            // lights, flush with the hidden title bar.
-                            (!kIsWeb &&
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.macOS)
-                                ? 84
-                                : 16,
-                            4,
-                            8,
-                            0,
-                          )
-                        : const EdgeInsets.fromLTRB(22, 22, 16, 0),
-                    child: Row(
-                      children: [
-                        if (!twoPane) ...[
-                          BrandMark(palette: p, size: 46),
-                          const SizedBox(width: 13),
-                        ],
-                        Expanded(
-                          child: twoPane
-                              ? Row(
-                                  children: [
-                                    BrandMark(palette: p, size: 44),
-                                    const SizedBox(width: 13),
-                                    Flexible(
-                                      child: Text(
-                                        'Parallax',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: p.foreground,
-                                          fontSize: 26,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -0.8,
-                                          decoration: TextDecoration.none,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Parallax',
-                                      style: TextStyle(
-                                        color: p.foreground,
-                                        fontSize: 23,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -1.1,
-                                      ),
-                                    ),
-                                    Text(
-                                      'YOUR SPACE TO CONNECT',
-                                      style: TextStyle(
-                                        color: p.secondary,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.7,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                        IconButton(
-                          key: const ValueKey('home.search_toggle'),
-                          tooltip: _searchOpen
-                              ? 'Hide conversation search'
-                              : 'Search conversations',
-                          onPressed: _toggleConversationSearch,
-                          icon: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
-                            child: Icon(
-                              _searchOpen
-                                  ? Icons.close_rounded
-                                  : Icons.search_rounded,
-                              key: ValueKey(_searchOpen),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Create room',
-                          onPressed: _creatingRoom || _creation.active
-                              ? null
-                              : _createRoom,
-                          icon: const Icon(Icons.add_home_work_outlined),
-                        ),
-                        if (!expandedHome)
-                          IconButton(
-                            key: const ValueKey('home.options'),
-                            tooltip: _optionsOpen
-                                ? 'Hide options'
-                                : 'Show options',
-                            onPressed: () {
-                              Haptics.selection();
-                              setState(() => _optionsOpen = !_optionsOpen);
-                            },
-                            icon: AnimatedRotation(
-                              turns: _optionsOpen ? 0.5 : 0,
-                              duration: const Duration(milliseconds: 220),
-                              child: const Icon(Icons.expand_more_rounded),
-                            ),
-                          ),
-                        IconButton(
-                          tooltip: 'Settings',
-                          iconSize: 25,
-                          onPressed: _openSettings,
-                          icon: const Icon(Icons.tune_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _inboxHeader(twoPane: twoPane, expandedHome: expandedHome),
                   AnimatedSize(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
