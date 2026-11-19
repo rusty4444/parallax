@@ -36,6 +36,14 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
+; Update-in-place: reuse the previous install directory and skip the dir
+; prompt when an existing installation is detected (stable AppId above).
+UsePreviousAppDir=yes
+DisableDirPage=auto
+; The [Code] PrepareToInstall closes the running app itself; don't let
+; Restart Manager pop a separate close-apps dialog or relaunch afterwards.
+CloseApplications=no
+RestartApplications=no
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} for Windows
 VersionInfoProductName={#MyAppName}
@@ -70,3 +78,42 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 ; Uninstall keeps %APPDATA%\parallax (Matrix session, keys, caches) and the
 ; secure-storage entries: removing the app must not destroy encryption keys.
+
+[Code]
+const
+  UninstallKey =
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
+    '{38AAD5BF-47F7-42D3-A140-F6510301698E}_is1';
+
+function IsUpgrade(): Boolean;
+var
+  Uninstall: String;
+begin
+  Result :=
+    RegQueryStringValue(HKCU, UninstallKey, 'UninstallString', Uninstall);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if IsUpgrade() and (CurPageID = wpReady) then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Ready to Update';
+    WizardForm.PageDescriptionLabel.Caption :=
+      'Setup is now ready to begin updating Parallax on your computer.';
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  NeedsRestart := False;
+  // Close the running app so its files can be replaced in place. User data
+  // (Matrix session, keys, caches) lives in %APPDATA%\parallax and is not
+  // touched. The tray keep-alive intercepts a graceful WM_CLOSE (it only
+  // hides the window), so a forced close is required to release the files.
+  if Exec('taskkill.exe', '/IM {#MyAppExeName} /T /F', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) then
+    Sleep(500);
+end;

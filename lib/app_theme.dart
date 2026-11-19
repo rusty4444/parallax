@@ -309,41 +309,60 @@ class GlowBackdrop extends StatelessWidget {
   final Widget? imageLayer;
 
   @override
-  Widget build(BuildContext context) => Stack(
-    fit: StackFit.expand,
-    children: [
-      ColoredBox(color: palette.background),
-      IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: const Alignment(1.15, -0.95),
-              radius: 1.1,
-              colors: [
-                palette.accent.withValues(alpha: 0.22),
-                palette.background.withValues(alpha: 0),
-              ],
-              stops: const [0, 1],
+  Widget build(BuildContext context) {
+    // When a GlowBackdrop already wraps an ancestor (the Windows desktop
+    // shell paints one gradient behind the title bar AND the content), skip
+    // the base colour and glows so the gradient runs continuously instead of
+    // restarting — and seam-ing — at every nested backdrop.
+    final nested =
+        context.dependOnInheritedWidgetOfExactType<_GlowScope>() != null;
+    return _GlowScope(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (!nested) ...[
+            ColoredBox(color: palette.background),
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: const Alignment(1.15, -0.95),
+                    radius: 1.1,
+                    colors: [
+                      palette.accent.withValues(alpha: 0.22),
+                      palette.background.withValues(alpha: 0),
+                    ],
+                    stops: const [0, 1],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
-      IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: const Alignment(-1.1, 1.2),
-              radius: 1,
-              colors: [
-                palette.secondary.withValues(alpha: 0.11),
-                palette.background.withValues(alpha: 0),
-              ],
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: const Alignment(-1.1, 1.2),
+                    radius: 1,
+                    colors: [
+                      palette.secondary.withValues(alpha: 0.11),
+                      palette.background.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
+          ],
+          ?imageLayer,
+          ?child,
+        ],
       ),
-      ?imageLayer,
-      ?child,
-    ],
-  );
+    );
+  }
+}
+
+class _GlowScope extends InheritedWidget {
+  const _GlowScope({required super.child});
+
+  @override
+  bool updateShouldNotify(_GlowScope oldWidget) => false;
 }

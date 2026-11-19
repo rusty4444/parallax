@@ -1799,15 +1799,18 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Parallax',
-                                style: TextStyle(
-                                  color: p.foreground,
-                                  fontSize: twoPane ? 20 : 23,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -1.1,
+                              // Desktop blends the brand into the title bar;
+                              // don't repeat the name above the inbox.
+                              if (!twoPane)
+                                Text(
+                                  'Parallax',
+                                  style: TextStyle(
+                                    color: p.foreground,
+                                    fontSize: 23,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -1.1,
+                                  ),
                                 ),
-                              ),
                               if (!twoPane)
                                 Text(
                                   'YOUR SPACE TO CONNECT',

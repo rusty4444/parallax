@@ -62,13 +62,14 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
-    return Container(
+    return SizedBox(
       key: const ValueKey('desktop-title-bar'),
       height: 36,
-      color: p.background,
+      // Transparent: the shell GlowBackdrop gradient runs continuously
+      // behind the bar, so it blends with whatever theme is active.
       child: Row(
         children: [
-          // Brand + empty space form the drag region.
+          // Brand mark + empty space form the drag region.
           Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -76,21 +77,12 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
               onDoubleTap: _toggleMaximize,
               child: Row(
                 children: [
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   SizedBox(
-                    width: 18,
-                    height: 18,
+                    width: 20,
+                    height: 20,
                     child: CustomPaint(
                       painter: const ParallaxMarkPainter(scale: 0.92),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Parallax',
-                    style: TextStyle(
-                      color: p.foreground,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],

@@ -701,11 +701,14 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
               draftStore: _draftStore,
               notifications: _pushReady ? _notifications : null,
               child: Platform.isWindows
-                  ? Column(
-                      children: [
-                        DesktopTitleBar(palette: p),
-                        Expanded(child: content),
-                      ],
+                  ? GlowBackdrop(
+                      palette: p,
+                      child: Column(
+                        children: [
+                          DesktopTitleBar(palette: p),
+                          Expanded(child: content),
+                        ],
+                      ),
                     )
                   : content,
             ),

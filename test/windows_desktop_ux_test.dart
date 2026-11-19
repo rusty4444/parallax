@@ -336,7 +336,8 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('Parallax'), findsOneWidget);
+      expect(find.byKey(const ValueKey('desktop-title-bar')), findsOneWidget);
+      expect(find.text('Parallax'), findsNothing);
       await tester.tap(find.byTooltip('Minimize'));
       await tester.pump();
       await tester.tap(find.byTooltip('Maximize'));
