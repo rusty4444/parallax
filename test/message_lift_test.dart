@@ -482,7 +482,26 @@ void main() {
       return (backend, routes);
     }
 
-    testWidgets('long press lifts the bubble and Reply settles it', (
+    final replyLift = find.byKey(messageReplyLiftKey);
+
+    double sourceOpacity(WidgetTester tester) => tester
+        .widget<Opacity>(
+          find
+              .ancestor(
+                of: find.text('Hello from the room'),
+                matching: find.byType(Opacity),
+              )
+              .first,
+        )
+        .opacity;
+
+    Future<void> cancelReply(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('Cancel reply or edit').first);
+      await tester.pump();
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Reply keeps the message popped out until the reply ends', (
       tester,
     ) async {
       final (_, routes) = await openRoom(tester);
@@ -490,13 +509,147 @@ void main() {
       expect(find.text('Reply'), findsOneWidget);
       expect(_lifted, findsOneWidget);
       expect(_sheetRoute(tester).barrierColor, Colors.transparent);
+      final sheetCopy = tester.getRect(_lifted);
 
       await tester.tap(find.text('Reply'));
+      // The handover frame: the reply lift draws the copy where the sheet's
+      // lift left it, so nothing jumps.
+      await tester.pump();
+      expect(replyLift, findsOneWidget);
+      final handed = tester.getRect(
+        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
+      );
+      expect(handed.center.dy, closeTo(sheetCopy.center.dy, 1));
       await tester.pumpAndSettle();
+
+      // Sheet and its route are gone; the message stays lifted over a dim
+      // while the reply is written, and the original stays hidden.
       expect(find.text('Reply'), findsNothing);
-      expect(_lifted, findsNothing);
       expect(routes.lifts.single.isActive, isFalse);
+      // The only copy left is the reply lift's.
+      expect(_lifted, findsOneWidget);
+      expect(find.descendant(of: replyLift, matching: _lifted), findsOneWidget);
+      expect(_dim, findsNothing);
       expect(find.textContaining('Replying to'), findsOneWidget);
+      expect(replyLift, findsOneWidget);
+      expect(find.byKey(messageReplyLiftDimKey), findsOneWidget);
+      expect(sourceOpacity(tester), 0);
+      // Settled back beside its own place once the sheet has gone.
+      final message = tester.getRect(
+        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
+      );
+      expect(message.width, greaterThan(0));
+
+      // The composer stays usable under the lift.
+      await tester.enterText(find.byType(TextField).last, 'Sounds good');
+      await tester.pump();
+      expect(replyLift, findsOneWidget);
+
+      await cancelReply(tester);
+      expect(replyLift, findsNothing);
+      expect(sourceOpacity(tester), 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    testWidgets('other sheet actions still settle the message back', (
+      tester,
+    ) async {
+      final (_, routes) = await openRoom(tester);
+      await _longPress(tester, find.text('Hello from the room'));
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(routes.lifts.single.isActive, isFalse);
+      expect(_lifted, findsNothing);
+      expect(replyLift, findsNothing);
+      expect(sourceOpacity(tester), 1);
+      expect(find.textContaining('Replying to'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    testWidgets('swipe to reply springs back into the popped-out message', (
+      tester,
+    ) async {
+      await openRoom(tester);
+      expect(replyLift, findsNothing);
+      final rest = tester.getRect(find.text('Hello from the room'));
+      // Others' messages reply with a right swipe past 30% of the width.
+      // The message slides away, then the reply starts as it springs back.
+      // A timed drag pumps frames as it goes, as a real finger would.
+      await tester.timedDrag(
+        find.text('Hello from the room'),
+        const Offset(300, 0),
+        const Duration(milliseconds: 300),
+      );
+      for (var i = 0; i < 20 && replyLift.evaluate().isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.textContaining('Replying to'), findsOneWidget);
+      expect(replyLift, findsOneWidget);
+      expect(sourceOpacity(tester), 0);
+      // While the swipe springs back the copy rides along with the message,
+      // growing and gaining its shadow, so the two motions are one.
+      Rect copy() => tester.getRect(
+        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
+      );
+      final early = copy();
+      expect(early.left, greaterThan(rest.left + 50));
+      await tester.pump(const Duration(milliseconds: 60));
+      final later = copy();
+      expect(later.left, lessThan(early.left));
+      await tester.pumpAndSettle();
+      // Back home, popped out.
+      expect(copy().center.dx, closeTo(rest.center.dx, 8));
+      expect(replyLift, findsOneWidget);
+      expect(find.byKey(messageReplyLiftDimKey), findsOneWidget);
+
+      await cancelReply(tester);
+      expect(replyLift, findsNothing);
+      expect(sourceOpacity(tester), 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    testWidgets('reduced motion keeps the reply lift without animating', (
+      tester,
+    ) async {
+      final backend = FakeBackend()
+        ..entries = [
+          ChatEntry(
+            id: r'$hello',
+            sender: '@friend:example.org',
+            body: 'Hello from the room',
+            time: DateTime(2026),
+            mine: false,
+          ),
+        ];
+      await _pump(
+        tester,
+        RoomScreen(
+          backend: backend,
+          palette: paletteFor(VisualTheme.parallax),
+          roomId: '!r:example.org',
+          backgroundStore: FakeBackgroundStore(),
+        ),
+        disableAnimations: true,
+      );
+      await _longPress(tester, find.text('Hello from the room'));
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      expect(replyLift, findsOneWidget);
+      final copy = find
+          .descendant(of: replyLift, matching: find.byType(RawImage))
+          .last;
+      final scale = tester
+          .widget<Transform>(
+            find.ancestor(of: copy, matching: find.byType(Transform)).first,
+          )
+          .transform
+          .getMaxScaleOnAxis();
+      expect(scale, closeTo(1, 0.001));
+      await cancelReply(tester);
+      expect(replyLift, findsNothing);
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     });
@@ -569,6 +722,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      Future<void> shoot(String name) => tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage(pixelRatio: 2.75);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        File('$dir/$name')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(bytes!.buffer.asUint8List());
+      });
+      await shoot('room-preview.png');
       await _longPress(tester, find.textContaining('grab snacks'));
       expect(_lifted, findsOneWidget);
       await tester.runAsync(() async {
@@ -580,9 +743,19 @@ void main() {
           ..createSync(recursive: true)
           ..writeAsBytesSync(bytes!.buffer.asUint8List());
       });
-      await tester.tapAt(const Offset(10, 10));
+      // Reply keeps it popped out while the reply is written.
+      await tester.tap(find.text('Reply'));
       await tester.pumpAndSettle();
-      expect(_lifted, findsNothing);
+      expect(find.byKey(messageReplyLiftKey), findsOneWidget);
+      await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage(pixelRatio: 2.75);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        File('$dir/reply-lift-preview.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(bytes!.buffer.asUint8List());
+      });
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     }, skip: dir == null);

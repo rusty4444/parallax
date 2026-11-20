@@ -9,6 +9,8 @@
 ### Messages pop out when you press them
 
 - Long-pressing a message (or right-clicking it on a computer) now lifts it off the screen like Messenger: the chat dims and blurs, and the message grows slightly with a soft shadow while its actions are open. If the action sheet would cover it, it moves up to stay in view, and it settles back when the sheet closes. Photos in a gallery, stickers and thread replies lift the same way; thread replies also open their actions on right-click.
+- Choosing Reply keeps the message popped out over the dimmed chat while you write, so you can see what you're answering; the compose box stays bright and usable. It settles back when you send, cancel the reply or start an edit, or when it scrolls off screen.
+- Swipe to reply flows into the same pop-out: the message slides away, then springs back lifted with its shadow and stays up while you reply.
 
 ### Message fonts
 

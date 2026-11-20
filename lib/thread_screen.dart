@@ -293,6 +293,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
     // A long press or right-click lifts the message above the sheet.
     final choice = await showMessageActionSheet<String>(
       context: context,
+      // Quote in reply keeps the message popped out while replying.
+      keepLiftedWhen: (choice) => choice == 'reply',
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -676,7 +678,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           style: TextStyle(color: p.muted),
                         ),
                       )
-                    : _thread(p),
+                    // The reply's message stays popped out over the thread.
+                    : MessageReplyLift(
+                        replyingTo: _replyingTo?.id,
+                        child: _thread(p),
+                      ),
               ),
               if (!_expired && _features != null) _composer(p),
             ],

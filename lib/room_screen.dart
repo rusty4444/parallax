@@ -902,6 +902,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     final choice = await showMessageActionSheet<String>(
       isScrollControlled: true,
       context: context,
+      // Reply keeps the message popped out while the reply is written.
+      keepLiftedWhen: (choice) => choice == 'reply',
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheetState) {
           ListTile hookTile(MessageActionItem item) => ListTile(
@@ -1593,126 +1595,136 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                     ),
                     ...roomBannersFor(context, roomCtx),
                     Expanded(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _opening
-                              ? Center(
-                                  child: CircularProgressIndicator(
-                                    color: p.accent,
-                                  ),
-                                )
-                              : _error != null
-                              ? Center(
-                                  child: Text(
-                                    _error!,
-                                    style: TextStyle(color: p.foreground),
-                                  ),
-                                )
-                              : entries.isEmpty
-                              ? GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onVerticalDragStart:
-                                      widget.backend.canLoadOlder
-                                      ? (_) {
-                                          _emptyPullDistance = 0;
-                                          _emptyPullTriggered = false;
-                                          _emptyPullArmed =
-                                              widget.backend.canLoadOlder &&
-                                              !widget.backend.loadingHistory &&
-                                              !_loadingOlder;
-                                        }
-                                      : null,
-                                  onVerticalDragUpdate:
-                                      widget.backend.canLoadOlder
-                                      ? (details) {
-                                          final dy = details.delta.dy;
-                                          if (dy < 0 ||
-                                              !_emptyPullArmed ||
-                                              !widget.backend.canLoadOlder ||
-                                              widget.backend.loadingHistory) {
-                                            if (dy < 0) _emptyPullDistance = 0;
-                                            return;
-                                          }
-                                          if (_emptyPullTriggered) return;
-                                          _emptyPullDistance += dy;
-                                          if (_emptyPullDistance >=
-                                              pullToLoadOlderThreshold) {
-                                            _emptyPullTriggered = true;
+                      // The message being replied to stays popped out over
+                      // the timeline (not the composer).
+                      child: MessageReplyLift(
+                        replyingTo: _replyingTo?.id,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            _opening
+                                ? Center(
+                                    child: CircularProgressIndicator(
+                                      color: p.accent,
+                                    ),
+                                  )
+                                : _error != null
+                                ? Center(
+                                    child: Text(
+                                      _error!,
+                                      style: TextStyle(color: p.foreground),
+                                    ),
+                                  )
+                                : entries.isEmpty
+                                ? GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onVerticalDragStart:
+                                        widget.backend.canLoadOlder
+                                        ? (_) {
                                             _emptyPullDistance = 0;
-                                            unawaited(_loadOlder());
+                                            _emptyPullTriggered = false;
+                                            _emptyPullArmed =
+                                                widget.backend.canLoadOlder &&
+                                                !widget
+                                                    .backend
+                                                    .loadingHistory &&
+                                                !_loadingOlder;
                                           }
-                                        }
-                                      : null,
-                                  onVerticalDragEnd: widget.backend.canLoadOlder
-                                      ? (_) {
-                                          _emptyPullDistance = 0;
-                                          _emptyPullTriggered = false;
-                                          _emptyPullArmed = false;
-                                        }
-                                      : null,
-                                  onVerticalDragCancel:
-                                      widget.backend.canLoadOlder
-                                      ? () {
-                                          _emptyPullDistance = 0;
-                                          _emptyPullTriggered = false;
-                                          _emptyPullArmed = false;
-                                        }
-                                      : null,
-                                  child: Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        BrandMark(palette: p, size: 53),
-                                        const SizedBox(height: 18),
-                                        Text(
-                                          'Start something good.',
-                                          style: TextStyle(
-                                            color: p.foreground,
-                                            fontSize: 21,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          'Messages in this room will appear here.',
-                                          style: TextStyle(color: p.muted),
-                                        ),
-                                        if (widget.backend.canLoadOlder) ...[
-                                          const SizedBox(height: 14),
-                                          TextButton(
-                                            onPressed:
-                                                widget.backend.loadingHistory
-                                                ? null
-                                                : _loadOlder,
-                                            child: Text(
-                                              widget.backend.loadingHistory
-                                                  ? 'Loading…'
-                                                  : 'Load earlier messages',
+                                        : null,
+                                    onVerticalDragUpdate:
+                                        widget.backend.canLoadOlder
+                                        ? (details) {
+                                            final dy = details.delta.dy;
+                                            if (dy < 0 ||
+                                                !_emptyPullArmed ||
+                                                !widget.backend.canLoadOlder ||
+                                                widget.backend.loadingHistory) {
+                                              if (dy < 0) {
+                                                _emptyPullDistance = 0;
+                                              }
+                                              return;
+                                            }
+                                            if (_emptyPullTriggered) return;
+                                            _emptyPullDistance += dy;
+                                            if (_emptyPullDistance >=
+                                                pullToLoadOlderThreshold) {
+                                              _emptyPullTriggered = true;
+                                              _emptyPullDistance = 0;
+                                              unawaited(_loadOlder());
+                                            }
+                                          }
+                                        : null,
+                                    onVerticalDragEnd:
+                                        widget.backend.canLoadOlder
+                                        ? (_) {
+                                            _emptyPullDistance = 0;
+                                            _emptyPullTriggered = false;
+                                            _emptyPullArmed = false;
+                                          }
+                                        : null,
+                                    onVerticalDragCancel:
+                                        widget.backend.canLoadOlder
+                                        ? () {
+                                            _emptyPullDistance = 0;
+                                            _emptyPullTriggered = false;
+                                            _emptyPullArmed = false;
+                                          }
+                                        : null,
+                                    child: Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          BrandMark(palette: p, size: 53),
+                                          const SizedBox(height: 18),
+                                          Text(
+                                            'Start something good.',
+                                            style: TextStyle(
+                                              color: p.foreground,
+                                              fontSize: 21,
+                                              fontWeight: FontWeight.w700,
                                             ),
                                           ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'Messages in this room will appear here.',
+                                            style: TextStyle(color: p.muted),
+                                          ),
+                                          if (widget.backend.canLoadOlder) ...[
+                                            const SizedBox(height: 14),
+                                            TextButton(
+                                              onPressed:
+                                                  widget.backend.loadingHistory
+                                                  ? null
+                                                  : _loadOlder,
+                                              child: Text(
+                                                widget.backend.loadingHistory
+                                                    ? 'Loading…'
+                                                    : 'Load earlier messages',
+                                              ),
+                                            ),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
+                                  )
+                                : TimelineView(
+                                    backend: widget.backend,
+                                    roomId: widget.roomId,
+                                    palette: p,
+                                    entries: entries,
+                                    compact: compact,
+                                    room: room,
+                                    onHeart: _heart,
+                                    onAction: _showActions,
+                                    onReaction: _react,
+                                    onReply: _replyToEntry,
+                                    hoverActionsBuilder: _hoverActions,
+                                    onLoadOlder: _loadOlder,
                                   ),
-                                )
-                              : TimelineView(
-                                  backend: widget.backend,
-                                  roomId: widget.roomId,
-                                  palette: p,
-                                  entries: entries,
-                                  compact: compact,
-                                  room: room,
-                                  onHeart: _heart,
-                                  onAction: _showActions,
-                                  onReaction: _react,
-                                  onReply: _replyToEntry,
-                                  hoverActionsBuilder: _hoverActions,
-                                  onLoadOlder: _loadOlder,
-                                ),
-                          // Chat effects and other full-screen overlays.
-                          ...roomOverlaysFor(context, roomCtx),
-                        ],
+                            // Chat effects and other full-screen overlays.
+                            ...roomOverlaysFor(context, roomCtx),
+                          ],
+                        ),
                       ),
                     ),
                     if (_features != null) _pendingPanel(p),
