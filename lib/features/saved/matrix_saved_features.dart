@@ -181,6 +181,16 @@ class MatrixSavedFeatures extends ChangeNotifier implements SavedFeatures {
   );
 
   @override
+  bool get noteToSelfPinned => _session() == null || !_noteRecord.unpinned;
+
+  @override
+  Future<void> setNoteToSelfPinned(bool pinned) => _modify(
+    SavedAccountData.noteToSelf,
+    (current) =>
+        NoteToSelfRecord.fromJson(current).copyWith(unpinned: !pinned).toJson(),
+  );
+
+  @override
   Future<String> openNoteToSelf() {
     final client = _client();
     final existing = _noteRequest;

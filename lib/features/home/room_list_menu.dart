@@ -12,6 +12,11 @@ enum RoomMenuAction {
   mute,
   unmute,
 
+  /// Keeps Note to self first in the chat list, or lets it sort with the
+  /// other chats.
+  pin,
+  unpin,
+
   /// Opens the saved module's "Add to folder…" sheet.
   addToFolder,
 
@@ -46,6 +51,10 @@ Future<RoomMenuAction?> showRoomListMenu(
   required ChatRoom room,
   required bool favourite,
   required RoomMenuCapabilities capabilities,
+
+  /// Offers Pin/Unpin for a chat that can be pinned to the top (Note to
+  /// self); null hides it.
+  bool? pinned,
 }) {
   final unread = isRoomUnread(room, const RoomListContext());
   return showModalBottomSheet<RoomMenuAction>(
@@ -95,6 +104,18 @@ Future<RoomMenuAction?> showRoomListMenu(
                   Icons.mark_email_unread_outlined,
                   'Mark as unread',
                 ),
+              if (pinned != null)
+                pinned
+                    ? item(
+                        RoomMenuAction.unpin,
+                        Icons.push_pin_outlined,
+                        'Unpin from top',
+                      )
+                    : item(
+                        RoomMenuAction.pin,
+                        Icons.push_pin_rounded,
+                        'Pin to top',
+                      ),
               if (capabilities.favourites)
                 item(
                   RoomMenuAction.favourite,

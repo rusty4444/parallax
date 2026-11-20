@@ -392,15 +392,18 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     if (room.invited || _pendingRoomAction != null) return;
     final roomList = _roomList;
     final favourite = _favourite(room);
+    final saved = _saved;
+    final isNote = saved != null && room.id == saved.noteToSelfRoomId;
     final choice = await showRoomListMenu(
       context,
       room: room,
       favourite: favourite,
+      pinned: isNote ? saved.noteToSelfPinned : null,
       capabilities: RoomMenuCapabilities(
         favourites: roomList != null || _features != null,
         tags: roomList != null,
         notifications: roomList != null,
-        folders: _saved != null,
+        folders: saved != null,
       ),
     );
     if (!mounted ||
@@ -410,7 +413,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       return;
     }
     if (choice == RoomMenuAction.addToFolder) {
-      final saved = _saved;
       if (saved == null) return;
       await showAddToFolderSheet(
         context,
@@ -455,6 +457,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           } else {
             await _features!.setFavourite(room.id, !favourite);
           }
+        case RoomMenuAction.pin || RoomMenuAction.unpin:
+          await saved!.setNoteToSelfPinned(choice == RoomMenuAction.pin);
         case RoomMenuAction.lowPriority:
           await roomList!.setLowPriority(room.id, !room.lowPriority);
         case RoomMenuAction.mute || RoomMenuAction.unmute:
@@ -485,6 +489,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           RoomMenuAction.leave => 'Couldn’t leave this room.',
           RoomMenuAction.favourite => 'Couldn’t update favourites.',
           RoomMenuAction.lowPriority => 'Couldn’t update low priority.',
+          RoomMenuAction.pin || RoomMenuAction.unpin =>
+            'Couldn’t change whether Note to self is pinned.',
           RoomMenuAction.mute || RoomMenuAction.unmute =>
             'Couldn’t change notifications for this room.',
           _ => 'Couldn’t update this room’s unread status.',
@@ -1143,6 +1149,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         key: ValueKey('room-${room.id}'),
         room: room,
         palette: p,
+        pinned: _saved?.noteToSelfPinned ?? true,
         compact: compact || rowStyle == HomeRowStyle.compact,
         previewLines: homePreview.maxLines,
         busy: _pendingRoomAction == room.id,
@@ -1663,6 +1670,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         // a selected chat folder narrows the list before the filters.
         final saved = _saved;
         final noteId = saved?.noteToSelfRoomId;
+        // Unpinned, Note to self sorts with the other chats.
+        final notePinned = saved?.noteToSelfPinned ?? true;
         final folderList = saved?.folders.folders ?? const <ChatFolder>[];
         final folder = folderList.where((f) => f.id == _folderId).firstOrNull;
         final spaceRooms = _spaceSet = _memo(#spaceRooms, (
@@ -1680,6 +1689,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             favourites,
             failedRooms,
             noteId,
+            notePinned,
             folderList,
             folder,
             _filters,
@@ -1715,10 +1725,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 for (final f in folderList)
                   f.id: folderUnreadCount(f, allRooms, facts),
               },
-              rooms: [
-                ...filtered.where((room) => room.id == noteId),
-                ...filtered.where((room) => room.id != noteId),
-              ],
+              rooms: notePinned
+                  ? [
+                      ...filtered.where((room) => room.id == noteId),
+                      ...filtered.where((room) => room.id != noteId),
+                    ]
+                  : filtered,
             );
           },
         );

@@ -68,6 +68,13 @@ abstract interface class SavedFeatures implements Listenable {
 
   Future<void> dismissNoteToSelfPrompt();
 
+  /// Note to self stays first in the chat list unless the user unpinned it.
+  bool get noteToSelfPinned;
+
+  /// Pins Note to self to the top of the chat list, or lets it sort with the
+  /// other chats. Synced to every device.
+  Future<void> setNoteToSelfPinned(bool pinned);
+
   // --- Saved messages ------------------------------------------------------
 
   /// Saved message identifiers, newest first.

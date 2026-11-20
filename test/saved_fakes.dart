@@ -35,6 +35,7 @@ class SavedFakeBackend extends HomeFakeBackend
 
   String? noteRoom;
   bool promptDismissed = false;
+  bool notePinned = true;
   int noteOpens = 0;
   Completer<String>? noteGate;
   BookmarkList saved = BookmarkList.empty;
@@ -77,6 +78,16 @@ class SavedFakeBackend extends HomeFakeBackend
   Future<void> dismissNoteToSelfPrompt() async {
     if (failWrites) throw StateError('write failed');
     promptDismissed = true;
+    notifyListeners();
+  }
+
+  @override
+  bool get noteToSelfPinned => notePinned;
+
+  @override
+  Future<void> setNoteToSelfPinned(bool pinned) async {
+    if (failWrites) throw StateError('write failed');
+    notePinned = pinned;
     notifyListeners();
   }
 

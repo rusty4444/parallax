@@ -110,7 +110,7 @@ class NoteToSelfAvatar extends StatelessWidget {
   );
 }
 
-/// Pinned Note to self row at the top of the chat list.
+/// Note to self row: pinned at the top of the chat list unless unpinned.
 class NoteToSelfTile extends StatelessWidget {
   const NoteToSelfTile({
     super.key,
@@ -122,6 +122,7 @@ class NoteToSelfTile extends StatelessWidget {
     this.busy = false,
     this.previewLines = 2,
     this.selected = false,
+    this.pinned = true,
   });
 
   final ChatRoom room;
@@ -136,6 +137,9 @@ class NoteToSelfTile extends StatelessWidget {
 
   /// Lines of last-note preview (0 hides it), as the home setting chooses.
   final int previewLines;
+
+  /// Shows the pin icon; an unpinned Note to self sorts with other chats.
+  final bool pinned;
 
   @override
   Widget build(BuildContext context) {
@@ -187,15 +191,17 @@ class NoteToSelfTile extends StatelessWidget {
                               ),
                             ),
                           ),
-                          Tooltip(
-                            message: 'Pinned',
-                            child: Icon(
-                              Icons.push_pin_rounded,
-                              size: 15,
-                              color: p.secondary,
+                          if (pinned) ...[
+                            Tooltip(
+                              message: 'Pinned',
+                              child: Icon(
+                                Icons.push_pin_rounded,
+                                size: 15,
+                                color: p.secondary,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
+                            const SizedBox(width: 6),
+                          ],
                           Text(
                             RoomListTile.timeLabel(context, room.lastActivity),
                             style: TextStyle(color: p.muted, fontSize: 11),

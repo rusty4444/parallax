@@ -103,6 +103,54 @@ void main() {
       expect(backend.activeRoomId, _note);
     });
 
+    testWidgets('can be unpinned from the top and pinned again', (
+      tester,
+    ) async {
+      final backend = _backend()
+        ..noteRoom = _note
+        ..roomList = [
+          ..._backend().roomList,
+          savedRoom(_note, name: 'Empty room', encrypted: true),
+        ];
+      await _pumpInbox(tester, backend);
+      double top(String text) => tester.getTopLeft(find.text(text)).dy;
+      expect(top('Note to self'), lessThan(top('Team')));
+      expect(find.byTooltip('Pinned'), findsOneWidget);
+
+      await tester.longPress(find.text('Note to self'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pin to top'), findsNothing);
+      await tester.tap(find.text('Unpin from top'));
+      await tester.pumpAndSettle();
+      expect(backend.notePinned, isFalse);
+      // It now sorts with the other chats and loses its pin.
+      expect(top('Note to self'), greaterThan(top('Alex')));
+      expect(find.byTooltip('Pinned'), findsNothing);
+
+      await tester.longPress(find.text('Note to self'));
+      await tester.pumpAndSettle();
+      expect(find.text('Unpin from top'), findsNothing);
+      await tester.tap(find.text('Pin to top'));
+      await tester.pumpAndSettle();
+      expect(backend.notePinned, isTrue);
+      expect(top('Note to self'), lessThan(top('Team')));
+      expect(find.byTooltip('Pinned'), findsOneWidget);
+    });
+
+    testWidgets('other chats offer no pin action', (tester) async {
+      final backend = _backend()..noteRoom = _note;
+      backend.roomList = [
+        ...backend.roomList,
+        savedRoom(_note, encrypted: true),
+      ];
+      await _pumpInbox(tester, backend);
+      await tester.longPress(find.text('Team'));
+      await tester.pumpAndSettle();
+      expect(find.text('Room actions'), findsOneWidget);
+      expect(find.text('Unpin from top'), findsNothing);
+      expect(find.text('Pin to top'), findsNothing);
+    });
+
     testWidgets('start row creates the note, or can be dismissed', (
       tester,
     ) async {

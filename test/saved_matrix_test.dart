@@ -326,6 +326,32 @@ void main() {
       expect(setup.server.created, 1);
     });
 
+    test('unpinning is synced and keeps the record\'s other fields', () async {
+      final setup = _setup();
+      setup.server.accountData[noteType] = {
+        'room_id': '!note:example.org',
+        'future': true,
+      };
+      final features = savedFeaturesOf(setup.backend)!;
+      expect(features.noteToSelfPinned, isTrue);
+
+      await features.setNoteToSelfPinned(false);
+      expect(setup.server.accountData[noteType], {
+        'room_id': '!note:example.org',
+        'future': true,
+        'unpinned': true,
+      });
+      expect(features.noteToSelfPinned, isFalse);
+
+      // Pinned is the default, so pinning again drops the key.
+      await features.setNoteToSelfPinned(true);
+      expect(setup.server.accountData[noteType], {
+        'room_id': '!note:example.org',
+        'future': true,
+      });
+      expect(features.noteToSelfPinned, isTrue);
+    });
+
     test('dismissing the prompt keeps the record\'s other fields', () async {
       final setup = _setup();
       setup.server.accountData[noteType] = {'future': true};

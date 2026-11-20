@@ -65,12 +65,14 @@ class SavedDataTooLarge implements Exception {
 // --- Note to self ----------------------------------------------------------
 
 /// `net.samrusselltech.parallax.note_to_self`: `{room_id}` plus whether the
-/// inbox prompt was dismissed (synced so it stays dismissed on every device).
+/// inbox prompt was dismissed and whether the chat is unpinned (synced so
+/// both stay the same on every device).
 @immutable
 class NoteToSelfRecord {
   const NoteToSelfRecord({
     this.roomId,
     this.promptDismissed = false,
+    this.unpinned = false,
     this.extra = const {},
   });
 
@@ -80,29 +82,39 @@ class NoteToSelfRecord {
     return NoteToSelfRecord(
       roomId: isRoomIdLike(roomId) ? roomId as String : null,
       promptDismissed: json['prompt_dismissed'] == true,
+      unpinned: json['unpinned'] == true,
       extra: Map.unmodifiable(_extra(json, _known)),
     );
   }
 
-  static const _known = {'room_id', 'prompt_dismissed'};
+  static const _known = {'room_id', 'prompt_dismissed', 'unpinned'};
 
   final String? roomId;
   final bool promptDismissed;
 
+  /// The user unpinned Note to self, so it sorts with the other chats
+  /// instead of staying first. Pinned is the default (no key written).
+  final bool unpinned;
+
   /// Fields this version does not understand, kept verbatim.
   final Map<String, Object?> extra;
 
-  NoteToSelfRecord copyWith({String? roomId, bool? promptDismissed}) =>
-      NoteToSelfRecord(
-        roomId: roomId ?? this.roomId,
-        promptDismissed: promptDismissed ?? this.promptDismissed,
-        extra: extra,
-      );
+  NoteToSelfRecord copyWith({
+    String? roomId,
+    bool? promptDismissed,
+    bool? unpinned,
+  }) => NoteToSelfRecord(
+    roomId: roomId ?? this.roomId,
+    promptDismissed: promptDismissed ?? this.promptDismissed,
+    unpinned: unpinned ?? this.unpinned,
+    extra: extra,
+  );
 
   Map<String, Object?> toJson() => {
     ...extra,
     'room_id': ?roomId,
     if (promptDismissed) 'prompt_dismissed': true,
+    if (unpinned) 'unpinned': true,
   };
 }
 
