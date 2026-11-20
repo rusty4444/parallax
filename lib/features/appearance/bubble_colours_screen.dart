@@ -202,7 +202,9 @@ class _Preview extends StatelessWidget {
                 fontSize: 10,
                 color: mine
                     ? palette.bubbleText.withValues(alpha: 0.77)
-                    : palette.muted,
+                    : palette
+                          .inkOn(palette.surface, text: palette.foreground)
+                          .muted,
               ),
             ),
           ],

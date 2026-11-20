@@ -55,6 +55,24 @@ class EntryHookContext {
   /// Foreground colour for text drawn inside this entry's bubble.
   Color get onBubble => mine ? palette.bubbleText : palette.foreground;
 
+  /// Others' messages that mention you get a tinted bubble.
+  bool get highlighted => entry.highlight && !mine && !entry.redacted;
+
+  /// The colour behind everything drawn inside this entry's bubble.
+  Color get bubbleFill => mine
+      ? palette.bubble
+      : highlighted
+      ? Color.alphaBlend(
+          palette.accent.withValues(alpha: 0.12),
+          palette.surface,
+        )
+      : palette.surface;
+
+  /// [palette] for drawing inside this entry's bubble: accent, secondary and
+  /// muted colours stay legible on [bubbleFill] whatever the room's bubble
+  /// colours. Screens and sheets opened from the bubble keep [palette].
+  AppPalette get ink => palette.inkOn(bubbleFill, text: onBubble);
+
   RoomHookContext get roomContext => RoomHookContext(
     backend: backend,
     roomId: roomId,

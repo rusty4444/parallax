@@ -113,24 +113,25 @@ class MessageBubble extends StatelessWidget {
         roomId: roomId,
       );
     }
-    final palette = bubblePaletteOf(context, outer);
     final mine = entry.mine;
     final compact =
         FeatureSettingsScope.maybeOf(context)?.preferences.compact ?? false;
     final hook = EntryHookContext(
       backend: backend,
       roomId: roomId,
-      palette: palette,
+      palette: bubblePaletteOf(context, outer),
       entry: entry,
       room: room,
       entries: entries,
     );
+    // Everything inside the bubble draws with colours kept legible on it.
+    final palette = hook.ink;
     final special = entryBodyFor(context, hook);
     final footers = entryFootersFor(context, hook);
     final textColor = mine ? palette.bubbleText : palette.foreground;
     final avatars = !mine && (showAvatars ?? true);
     final sender = showSender ?? (!mine && !group);
-    final highlighted = entry.highlight && !mine && !entry.redacted;
+    final highlighted = hook.highlighted;
     final maxWidth = bubbleMaxWidth(
       MediaQuery.sizeOf(context).width,
       mine: mine,
@@ -151,14 +152,7 @@ class MessageBubble extends StatelessWidget {
             constraints: BoxConstraints(maxWidth: maxWidth),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: mine
-                    ? palette.bubble
-                    : highlighted
-                    ? Color.alphaBlend(
-                        palette.accent.withValues(alpha: 0.12),
-                        palette.surface,
-                      )
-                    : palette.surface,
+                color: hook.bubbleFill,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(19),
                   topRight: const Radius.circular(19),
@@ -169,7 +163,7 @@ class MessageBubble extends StatelessWidget {
                     ? null
                     : Border.all(
                         color: highlighted
-                            ? palette.accent.withValues(alpha: 0.75)
+                            ? hook.palette.accent.withValues(alpha: 0.75)
                             : palette.stroke,
                         width: highlighted ? 1.5 : 1,
                       ),
@@ -288,7 +282,14 @@ class MessageBubble extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 10,
                               color: mine
-                                  ? palette.bubbleText.withValues(alpha: 0.77)
+                                  ? legibleOn(
+                                      hook.bubbleFill,
+                                      palette.bubbleText.withValues(
+                                        alpha: 0.77,
+                                      ),
+                                      minRatio: 3,
+                                      toward: palette.bubbleText,
+                                    )
                                   : palette.muted,
                             ),
                           ),

@@ -163,7 +163,7 @@ class _InlineDocumentPreviewState extends State<InlineDocumentPreview> {
         : _previews.inlineOrNull(ctx.roomId, ctx.entry.id);
     final empty = page == null && preview == null;
     if (empty && !_loading) return const SizedBox.shrink();
-    final colours = DocumentColours.onBubble(ctx.onBubble, ctx.palette.accent);
+    final colours = DocumentColours.onBubble(ctx.onBubble, ctx.ink.accent);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(

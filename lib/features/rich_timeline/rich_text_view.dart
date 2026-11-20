@@ -152,7 +152,12 @@ class _MessageContentViewState extends State<MessageContentView> {
     final entry = widget.entry;
     final palette = widget.palette;
     final muted = entry.mine
-        ? palette.bubbleText.withValues(alpha: 0.78)
+        ? legibleOn(
+            palette.bubble,
+            palette.bubbleText.withValues(alpha: 0.78),
+            minRatio: 3,
+            toward: palette.bubbleText,
+          )
         : palette.muted;
     if (entry.redacted) {
       return _StatusLine(

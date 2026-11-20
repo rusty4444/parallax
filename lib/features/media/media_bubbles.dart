@@ -691,8 +691,9 @@ class _PlayButton extends StatelessWidget {
     final status = controller?.status ?? InlineAudioStatus.idle;
     final playing = controller?.playing ?? false;
     final mine = ctx.mine;
-    final background = mine ? ctx.palette.bubbleText : ctx.palette.accent;
-    final foreground = mine ? ctx.palette.bubble : ctx.palette.accentOn;
+    final ink = ctx.ink;
+    final background = mine ? ink.bubbleText : ink.accent;
+    final foreground = mine ? ink.bubble : ink.accentOn;
     return SizedBox(
       width: 40,
       height: 40,

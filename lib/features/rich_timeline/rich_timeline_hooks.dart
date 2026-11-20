@@ -28,7 +28,7 @@ Widget buildMessageText(
     entry: ctx.entry,
     style: style,
     largeEmoji: largeEmoji,
-    palette: ctx.palette,
+    palette: ctx.ink,
     ownUserId: ctx.backend.userId,
     resolveName: features == null
         ? null
