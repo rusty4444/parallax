@@ -1680,6 +1680,7 @@ class FakeBackend extends ChatBackend {
     String text, {
     String? replyToId,
     String? editEventId,
+    String? font,
   }) async {
     if (failSend) throw StateError('SDK returned no event ID');
     lastMessage = text;

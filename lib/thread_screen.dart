@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
 import 'chat_backend.dart';
+import 'feature_settings_scope.dart';
+import 'features/message_fonts/message_fonts.dart' show messageFontById;
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/threads/event_projection.dart';
 import 'features/threads/thread_features.dart';
@@ -248,6 +250,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (text.trim().isEmpty) return;
     final revision = _draftRevision;
     final reply = _replyingTo;
+    // Chosen with the room composer's font button; shown in this field too.
+    final font = context
+        .getInheritedWidgetOfExactType<FeatureSettingsScope>()
+        ?.preferences
+        .messageFont;
     final generation = ++_sendGeneration;
     setState(() {
       _sending = true;
@@ -259,6 +266,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
         text,
         replyToId: reply?.id,
         threadRootId: widget.root.id,
+        font: font,
       );
       if (!mounted || !_ownerCurrent || generation != _sendGeneration) return;
       if (_draftRevision == revision) _draft.clear();
@@ -733,6 +741,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
     ),
   );
 
+  /// The chosen message font, live in the reply field.
+  TextStyle? _composeStyle() {
+    final font = messageFontById(
+      FeatureSettingsScope.maybeOf(context)?.preferences.messageFont,
+    );
+    return font == null ? null : TextStyle(fontFamily: font.family);
+  }
+
   Widget _composer(AppPalette p) => Container(
     decoration: BoxDecoration(
       color: p.surface.withValues(alpha: 0.92),
@@ -785,6 +801,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                   minLines: 1,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
+                  style: _composeStyle(),
                   decoration: const InputDecoration(
                     labelText: 'Reply in thread',
                   ),

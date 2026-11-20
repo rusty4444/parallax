@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart' show StringCharacters;
 
+import 'features/message_fonts/message_fonts.dart' show messageFontById;
+
 /// Element X "Show media in timeline" (TimelineProtection) choices.
 enum MediaPreviewMode {
   /// Always load image/video previews.
@@ -73,6 +75,7 @@ class AppearancePreferences extends ChangeNotifier {
   static const _linkPreviewsKey = 'parallax.appearance.v1.link_previews';
   static const _linkPreviewsEncryptedKey =
       'parallax.appearance.v1.link_previews_encrypted';
+  static const _messageFontKey = 'parallax.appearance.v1.message_font';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -94,6 +97,7 @@ class AppearancePreferences extends ChangeNotifier {
   bool _networkLogos = false;
   bool _linkPreviews = true;
   bool _linkPreviewsEncrypted = false;
+  String? _messageFont;
 
   double get textScale => _textScale;
 
@@ -135,6 +139,10 @@ class AppearancePreferences extends ChangeNotifier {
   /// Also preview links in encrypted rooms. Off by default: the homeserver
   /// fetches the preview, so it would learn links from encrypted messages.
   bool get linkPreviewsInEncryptedRooms => _linkPreviewsEncrypted;
+
+  /// Font ID new text messages are sent in (see `message_fonts.dart`), or
+  /// null for the default font. Sticky until the user picks another.
+  String? get messageFont => _messageFont;
 
   /// One emoji (a single grapheme of at most 32 UTF-16 units, no spaces).
   static bool isQuickReaction(String value) =>
@@ -190,7 +198,10 @@ class AppearancePreferences extends ChangeNotifier {
       prefs.get(_linkPreviewsEncryptedKey),
       false,
     );
+    final rawFont = prefs.get(_messageFontKey);
+    final messageFont = rawFont is String ? messageFontById(rawFont)?.id : null;
     final changed =
+        messageFont != _messageFont ||
         linkPreviews != _linkPreviews ||
         linkPreviewsEncrypted != _linkPreviewsEncrypted ||
         networkLogos != _networkLogos ||
@@ -219,6 +230,7 @@ class AppearancePreferences extends ChangeNotifier {
     _networkLogos = networkLogos;
     _linkPreviews = linkPreviews;
     _linkPreviewsEncrypted = linkPreviewsEncrypted;
+    _messageFont = messageFont;
     if (changed) _notifyIfActive();
   });
 
@@ -349,6 +361,22 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setString(_quickReactionKey, value));
     if (_quickReaction == value) return;
     _quickReaction = value;
+    _notifyIfActive();
+  });
+
+  /// Chooses the message font: a catalogue ID, or null for the default.
+  Future<void> setMessageFont(String? id) => _ordered(() async {
+    if (id != null && messageFontById(id) == null) {
+      throw ArgumentError.value(id, 'id', 'Unknown message font');
+    }
+    final prefs = await _preferences();
+    _requireSaved(
+      id == null
+          ? await prefs.remove(_messageFontKey)
+          : await prefs.setString(_messageFontKey, id),
+    );
+    if (_messageFont == id) return;
+    _messageFont = id;
     _notifyIfActive();
   });
 

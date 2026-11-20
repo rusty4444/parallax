@@ -527,11 +527,15 @@ abstract class ChatBackend extends ChangeNotifier {
   /// Marks what the open room shows as read (Parallax came back on screen
   /// with the room open). Backends without read state ignore it.
   void markActiveRoomRead() {}
+
+  /// [font] is a message font ID (`message_fonts.dart`) for a non-default
+  /// font, or null. Backends without message fonts ignore it.
   Future<void> sendText(
     String roomId,
     String text, {
     String? replyToId,
     String? editEventId,
+    String? font,
   });
   Future<void> sendImages(String roomId, List<XFile> images);
   Future<void> sendAttachment(String roomId, XFile file);

@@ -99,6 +99,7 @@ class FeaturesBackend extends FakeBackend
   String? queuedText;
   String? queuedReply;
   String? queuedEdit;
+  String? queuedFont;
   MediaSelection? queuedMedia;
   String? retried;
   String? discarded;
@@ -121,10 +122,12 @@ class FeaturesBackend extends FakeBackend
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async {
     queuedText = text;
     queuedReply = replyToId;
     queuedEdit = editEventId;
+    queuedFont = font;
     onQueue?.call(text);
     await queueGate?.future;
   }
@@ -1686,6 +1689,68 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(backend.queuedText, 'Not blocked');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('the composer’s font goes out with messages and edits', (
+    tester,
+  ) async {
+    final preferences = AppearancePreferences();
+    final backend = FeaturesBackend()
+      ..entries = [
+        ChatEntry(
+          id: 'edit-id',
+          sender: '@me:s',
+          body: 'Edit original',
+          time: DateTime(2026),
+          mine: true,
+        ),
+      ];
+    await tester.pumpWidget(room(backend, Drafts(), preferences: preferences));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Message font'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('message-font-pacifico')));
+    await tester.pumpAndSettle();
+    expect(preferences.messageFont, 'pacifico');
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).style?.fontFamily,
+      'Pacifico',
+    );
+
+    await tester.enterText(find.byType(TextField).last, 'In Pacifico');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(backend.queuedText, 'In Pacifico');
+    expect(backend.queuedFont, 'pacifico');
+
+    // Edits take the font chosen now.
+    await tester.longPress(find.text('Edit original'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit message'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Edited');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(backend.queuedEdit, 'edit-id');
+    expect(backend.queuedFont, 'pacifico');
+
+    // Back to the default font: no font is sent.
+    await tester.tap(find.byTooltip('Message font'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('message-font-default')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Plain again');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(backend.queuedText, 'Plain again');
+    expect(backend.queuedFont, isNull);
+
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });

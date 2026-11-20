@@ -21,7 +21,7 @@ Parallax covers the features Element X Android v26.11.0 turns on by default, plu
 - **Notifications and links:** notifications on by default with no opt-in, through UnifiedPush when a distributor such as ntfy is installed or Parallax's own background connection otherwise (no Google needed), optional Firebase delivery, and global notification settings. Share into Parallax from other apps, with your recent chats suggested in Android's share menu, and open matrix.to or `matrix:` links in Parallax.
 - **Search:** an on-device search index of your encrypted history alongside server search.
 - **Account and settings:** profile, sessions, blocked users, account management, sign out (warns if key backup isn't on) and account deactivation.
-- **Parallax extras:** room backgrounds, per-room bubble colours (yours and theirs, with automatic or custom text colour), Messenger-style reactions on the bubble's bottom edge, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.
+- **Parallax extras:** room backgrounds, per-room bubble colours (yours and theirs, with automatic or custom text colour), message fonts chosen in the compose box (other Parallax users see them; other apps show the default font), Messenger-style reactions on the bubble's bottom edge, photo-grid bubbles, avatar collages, double-tap heart, a durable outbox with retry, a choice of palettes, and encrypted drafts.
 
 Ideas from other messaging apps after parity are in [docs/feature-ideas.md](docs/feature-ideas.md).
 
@@ -112,6 +112,6 @@ The portable app is `build\windows\x64\runner\Release\`. Video compression needs
 
 ## Licences
 
-The bundled Space Grotesk font is licensed under the SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The `matrix` Dart SDK is AGPL-3.0-or-later; check its distribution obligations before shipping any build. Map tiles are © OpenStreetMap contributors.
+The bundled Space Grotesk font is licensed under the SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The message fonts — DM Serif Display, Indie Flower, Pacifico, Lobster, Comic Neue, Space Mono, Press Start 2P and Bangers, taken from the [google/fonts](https://github.com/google/fonts) repository — are also under the SIL Open Font License 1.1; each family's licence and copyright notice is in `assets/fonts/licenses/` and on the app's licences page. The `matrix` Dart SDK is AGPL-3.0-or-later; check its distribution obligations before shipping any build. Map tiles are © OpenStreetMap contributors.
 
 Parallax was built with AI-assisted implementation and review. Automated tests and an installable APK are engineering checks, not a security certification or proof that it works with other Matrix clients.

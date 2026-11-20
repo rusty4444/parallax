@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart'
     show FlutterError, FlutterErrorDetails, VoidCallback, visibleForTesting;
 
+import 'features/message_fonts/message_fonts.dart' show isMessageFontId;
 import 'messaging_features.dart';
 import 'secure_store.dart';
 import 'send_cancellation.dart';
@@ -29,6 +30,7 @@ class OutboxRecord {
     this.replyToId,
     this.editEventId,
     this.threadRootId,
+    this.font,
     this.error,
     this.progress,
   });
@@ -42,6 +44,10 @@ class OutboxRecord {
   final String? replyToId;
   final String? editEventId;
   final String? threadRootId;
+
+  /// Message font ID for a text message (`message_fonts.dart`); null for
+  /// the default font and for media.
+  final String? font;
   final String? error;
   final double? progress;
   final DateTime createdAt;
@@ -63,6 +69,7 @@ class OutboxRecord {
     replyToId: replyToId,
     editEventId: editEventId,
     threadRootId: threadRootId,
+    font: font,
     error: error,
     progress: progress,
   );
@@ -202,6 +209,7 @@ class MessageOutbox {
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
     Duration hold = Duration.zero,
   }) async {
     if (text.trim().isEmpty) throw ArgumentError('Message must not be empty');
@@ -217,6 +225,7 @@ class MessageOutbox {
         replyToId: replyToId,
         editEventId: editEventId,
         threadRootId: threadRootId,
+        font: font,
       ),
     );
   }
@@ -874,6 +883,7 @@ class MessageOutbox {
           replyToId: item['replyToId'] as String?,
           editEventId: item['editEventId'] as String?,
           threadRootId: item['threadRootId'] as String?,
+          font: item['font'] as String?,
           error: item['error'] as String?,
           progress: (item['progress'] as num?)?.toDouble(),
         );
@@ -905,6 +915,7 @@ class MessageOutbox {
       record.replyToId,
       record.editEventId,
       record.threadRootId,
+      record.font,
       record.error,
       record.media?.name,
       record.media?.mimeType,
@@ -914,6 +925,10 @@ class MessageOutbox {
               utf8.encode(metadata).length > _maxMetadataBytes)) {
         throw const FormatException('Oversized outbox metadata');
       }
+    }
+    final font = record.font;
+    if (font != null && (record.media != null || !isMessageFontId(font))) {
+      throw const FormatException('Invalid outbox font');
     }
     if (record.body.length > maxPayloadBytes ||
         utf8.encode(record.body).length > maxPayloadBytes) {
@@ -1015,6 +1030,7 @@ final class _RecordJson {
       if (record.replyToId != null) 'replyToId': record.replyToId,
       if (record.editEventId != null) 'editEventId': record.editEventId,
       if (record.threadRootId != null) 'threadRootId': record.threadRootId,
+      if (record.font != null) 'font': record.font,
       if (diagnostics && record.error != null) 'error': record.error,
       if (diagnostics && record.progress != null) 'progress': record.progress,
     });

@@ -61,6 +61,7 @@ class _Backend extends ChatBackend implements MessagingFeatures {
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async {
     sends.add((room: roomId, text: text, thread: threadRootId));
     if (sendGate != null) await sendGate!.future;

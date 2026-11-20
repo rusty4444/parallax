@@ -11,8 +11,12 @@ import 'features/composer/formatting_toolbar.dart';
 import 'features/composer/markdown_format.dart';
 import 'features/composer/markdown_styling.dart';
 import 'features/composer/slash_commands.dart';
+import 'features/message_fonts/message_font_picker.dart';
+import 'features/message_fonts/message_fonts.dart';
 import 'features/reactions/reaction_hooks.dart';
 import 'features/rich_timeline/mention_suggestions.dart';
+import 'appearance_preferences.dart';
+import 'feature_settings_scope.dart';
 import 'hooks/registry.dart';
 import 'messaging_features.dart';
 import 'voice_recorder.dart';
@@ -142,6 +146,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
   bool _preparingVideo = false;
   bool _sourceSheetOpen = false;
   bool _emojiSheetOpen = false;
+  bool _fontSheetOpen = false;
   bool _playing = false;
   bool _previewOwned = false;
   bool _discardOwned = false;
@@ -976,6 +981,38 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     }
   }
 
+  /// The app's preferences, which keep the message font. Without them (a
+  /// bare composer) there is nowhere to keep a font, so none is offered.
+  AppearancePreferences? get _preferences =>
+      FeatureSettingsScope.maybeOf(context)?.preferences;
+
+  /// Picks the font text messages are sent in. The choice is saved in the
+  /// app's preferences, where the room reads it when a message is sent, so
+  /// it sticks until another font is picked.
+  Future<void> _showFontPicker() async {
+    final preferences = _preferences;
+    if (preferences == null || _fontSheetOpen || !_alive || _background) {
+      return;
+    }
+    setState(() => _fontSheetOpen = true);
+    try {
+      final choice = await showMessageFontPicker(
+        context,
+        current: preferences.messageFont,
+      );
+      if (choice == null || !_alive) return;
+      Haptics.selection();
+      try {
+        await preferences.setMessageFont(choice.id);
+      } catch (_) {
+        if (_alive) _showError('Couldn’t save the message font.');
+      }
+    } finally {
+      _fontSheetOpen = false;
+      if (_alive) setState(() {});
+    }
+  }
+
   /// A reason the draft cannot be sent as typed (unknown `/command` …).
   String? _draftError(String text, MediaSelection? media) =>
       media != null || widget.editing ? null : slashCommandError(text);
@@ -1644,6 +1681,12 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     final formattingAvailable = _media == null && !voiceActive;
     final formatting = _formatting && formattingAvailable;
     _input.styling = _media == null;
+    final preferences = _preferences;
+    // Fonts apply to text messages: not to captions or voice clips.
+    final fontAvailable = preferences != null && _media == null && !voiceActive;
+    final font = fontAvailable
+        ? messageFontById(preferences.messageFont)
+        : null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
@@ -1737,6 +1780,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                     context,
                     colors: colors,
                     formatting: formatting,
+                    font: font,
                   ),
                 ),
               ),
@@ -1791,6 +1835,21 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                   onPressed: _emojiSheetOpen || _background ? null : _showEmoji,
                   icon: const Icon(Icons.emoji_emotions_outlined),
                 ),
+                if (fontAvailable)
+                  IconButton(
+                    key: const ValueKey('composer-message-font'),
+                    tooltip: 'Message font',
+                    visualDensity: VisualDensity.compact,
+                    isSelected: font != null,
+                    onPressed: _fontSheetOpen || _background
+                        ? null
+                        : _showFontPicker,
+                    icon: const Icon(Icons.font_download_outlined),
+                    selectedIcon: Icon(
+                      Icons.font_download_rounded,
+                      color: colors.primary,
+                    ),
+                  ),
                 if (_media == null && !voiceActive)
                   IconButton(
                     tooltip: 'Record voice message',
@@ -1830,6 +1889,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     BuildContext context, {
     required ColorScheme colors,
     required bool formatting,
+    MessageFont? font,
   }) {
     final contextLabel = widget.contextLabel;
     final hasContext = contextLabel != null;
@@ -1841,6 +1901,8 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       maxLines: formatting ? 8 : 5,
       textCapitalization: TextCapitalization.sentences,
       keyboardType: TextInputType.multiline,
+      // The chosen message font, live, so the draft looks as it will be seen.
+      style: font == null ? null : TextStyle(fontFamily: font.family),
       inputFormatters: formatting ? const [_ListContinuationFormatter()] : null,
       contentInsertionConfiguration: ContentInsertionConfiguration(
         allowedMimeTypes: const ['image/*'],

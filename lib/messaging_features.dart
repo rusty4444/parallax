@@ -104,12 +104,16 @@ class ProviderDiscovery {
 abstract interface class MessagingFeatures {
   String get accountKey;
   List<PendingSend> get pendingSends;
+
+  /// [font] is a message font ID (`message_fonts.dart`) for a non-default
+  /// font, or null.
   Future<void> queueMessage(
     String roomId,
     String text, {
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   });
   Future<void> queueMedia(
     String roomId,

@@ -24,6 +24,8 @@ import 'two_pane.dart';
 import 'widgets.dart';
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
+import 'features/message_fonts/message_fonts.dart'
+    show registerMessageFontLicences;
 import 'features/platform/apple_bootstrap.dart';
 import 'features/platform/background_connection.dart';
 import 'features/platform/desktop_content_insets.dart';
@@ -39,6 +41,9 @@ Future<void> main() async {
     return true;
   }());
   initializeWindowsPlatform();
+  // Only registers a callback: the licence files load when the licence page
+  // opens.
+  registerMessageFontLicences();
   if (Platform.isWindows || Platform.isMacOS) {
     // Replace the native caption with the blended desktop header. On macOS
     // TitleBarStyle.hidden keeps the traffic lights; on Windows the

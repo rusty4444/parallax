@@ -8,6 +8,7 @@ import '../../chat_backend.dart';
 import '../packs/pack_image.dart';
 import '../packs/pack_model.dart';
 import '../../message_copy_targets.dart';
+import '../message_fonts/message_fonts.dart';
 import 'linkify.dart';
 import 'permalinks.dart';
 
@@ -133,6 +134,7 @@ class _MessageContentViewState extends State<MessageContentView> {
       entry.kind,
       entry.senderLabel,
       entry.mine,
+      messageFontOf(entry.content),
       widget.style,
       widget.palette,
       widget.ownUserId,
@@ -181,9 +183,16 @@ class _MessageContentViewState extends State<MessageContentView> {
       default:
         break;
     }
+    // A Parallax sender's chosen font (edits included: [ChatEntry.content]
+    // is the display content). Code keeps its monospace face, since code
+    // spans and blocks set their own family.
+    final font = messageFontOf(entry.content);
+    final styled = font == null
+        ? widget.style
+        : widget.style.copyWith(fontFamily: font.family);
     final base = entry.kind == EntryKind.notice
-        ? widget.style.copyWith(color: muted)
-        : widget.style;
+        ? styled.copyWith(color: muted)
+        : styled;
     final leading = entry.kind == EntryKind.emote
         ? <InlineSpan>[
             TextSpan(

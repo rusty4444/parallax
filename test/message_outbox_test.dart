@@ -136,6 +136,7 @@ String _referenceSnapshot(String accountKey, Iterable<OutboxRecord> records) =>
             if (record.editEventId != null) 'editEventId': record.editEventId,
             if (record.threadRootId != null)
               'threadRootId': record.threadRootId,
+            if (record.font != null) 'font': record.font,
             if (record.error != null) 'error': record.error,
             if (record.progress != null) 'progress': record.progress,
             if (record.media case final media?)
@@ -1266,6 +1267,7 @@ void main() {
         replyToId: relations ? r'$reply' : null,
         editEventId: relations ? r'$edit' : null,
         threadRootId: relations ? r'$root' : null,
+        font: relations && media == null ? 'pacifico' : null,
         error: error,
         progress: progress,
       );
@@ -1667,6 +1669,121 @@ void main() {
         throwsArgumentError,
       );
       expect(store.values, isEmpty);
+    });
+  });
+
+  group('message fonts', () {
+    test('a font survives a restart and goes out again on retry', () async {
+      final first = makeBox();
+      final id = await first.enqueueText(
+        'alice',
+        '!r',
+        'fancy',
+        replyToId: r'$reply',
+        font: 'pacifico',
+      );
+      final attempt = await transport.at(0);
+      expect(attempt.record.font, 'pacifico');
+      expect(store.values.values.single, contains('"font":"pacifico"'));
+      attempt.fail(StateError('offline'));
+      await stateIs(first, id, DeliveryState.failed);
+      await first.closeAccount();
+
+      final second = makeBox();
+      await second.restore('alice');
+      expect(second.records.single.font, 'pacifico');
+      await second.retry(id);
+      final retried = await transport.at(1);
+      expect(retried.record.id, id);
+      expect(retried.record.font, 'pacifico');
+      expect(retried.record.replyToId, r'$reply');
+    });
+
+    test('the default font stores no font key', () async {
+      final box = makeBox();
+      final id = await box.enqueueText('alice', '!r', 'plain');
+      expect((await transport.at(0)).record.font, isNull);
+      expect(store.values.values.single, contains(id));
+      expect(store.values.values.single, isNot(contains('"font"')));
+    });
+
+    test('a well-formed font this version does not know is kept', () async {
+      final first = makeBox();
+      final id = await first.enqueueText(
+        'alice',
+        '!r',
+        'future',
+        font: 'future-font_2',
+      );
+      (await transport.at(0)).fail();
+      await stateIs(first, id, DeliveryState.failed);
+      await first.closeAccount();
+      final second = makeBox();
+      await second.restore('alice');
+      expect(second.records.single.font, 'future-font_2');
+    });
+
+    test('a malformed font is refused on enqueue', () async {
+      final box = makeBox();
+      for (final font in ['', 'Pacifico', 'comic sans', 'x' * 33, 'ü']) {
+        await expectLater(
+          box.enqueueText('alice', '!r', 'x', font: font),
+          throwsArgumentError,
+          reason: font,
+        );
+      }
+      expect(store.values, isEmpty);
+      expect(transport.attempts, isEmpty);
+    });
+
+    test('a malformed stored font fails closed on restore', () async {
+      final first = makeBox();
+      final id = await first.enqueueText('alice', '!r', 'x', font: 'lobster');
+      (await transport.at(0)).fail();
+      await stateIs(first, id, DeliveryState.failed);
+      await first.closeAccount();
+      final key = store.values.keys.single;
+      final original = store.values[key]!;
+      for (final font in <Object>['NOT A FONT', 'a' * 33, 42, 'x' * 70000]) {
+        final corrupt = jsonDecode(original) as Map<String, dynamic>;
+        corrupt['records'][0]['font'] = font;
+        final value = jsonEncode(corrupt);
+        store.values[key] = value;
+        final box = makeBox();
+        await expectLater(
+          box.restore('alice'),
+          throwsFormatException,
+          reason: font is String ? '${font.length} characters' : '$font',
+        );
+        expect(store.values[key], value);
+        await box.closeAccount();
+      }
+      store.values[key] = original;
+      final restored = makeBox();
+      await restored.restore('alice');
+      expect(restored.records.single.font, 'lobster');
+    });
+
+    test('media never carries a font', () async {
+      final first = makeBox();
+      final id = await first.enqueueMedia(
+        'alice',
+        '!r',
+        MediaSelection(
+          bytes: Uint8List.fromList([1]),
+          name: 'x.png',
+          mimeType: 'image/png',
+        ),
+      );
+      (await transport.at(0)).fail();
+      await stateIs(first, id, DeliveryState.failed);
+      await first.closeAccount();
+      final key = store.values.keys.single;
+      final corrupt = jsonDecode(store.values[key]!) as Map<String, dynamic>;
+      corrupt['records'][0]['font'] = 'pacifico';
+      store.values[key] = jsonEncode(corrupt);
+      final box = makeBox();
+      await expectLater(box.restore('alice'), throwsFormatException);
     });
   });
 }

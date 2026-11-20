@@ -145,6 +145,7 @@ class PlatformBackend extends FakeBackend
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async => queuedText.add((roomId, text));
 
   @override

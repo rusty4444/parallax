@@ -525,6 +525,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
+  /// The message font chosen in the composer (null for the default).
+  String? _messageFont() => context
+      .getInheritedWidgetOfExactType<FeatureSettingsScope>()
+      ?.preferences
+      .messageFont;
+
   Future<void> _sendContent(String text, MediaSelection? media) async {
     final body = text.trim();
     if (!mounted ||
@@ -554,6 +560,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     final composerContext = _composerContext;
     final reply = _replyingTo;
     final edit = _editing;
+    // The composer's font button writes this preference; read it now, with
+    // the draft, so the message goes out in the font shown while typing.
+    final font = media == null ? _messageFont() : null;
     _draftTimer?.cancel();
     setState(() => _sending = true);
     try {
@@ -573,6 +582,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
             body,
             replyToId: reply?.id,
             editEventId: edit?.id,
+            font: font,
           );
         } else {
           await features.queueMedia(
@@ -588,6 +598,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
           body,
           replyToId: reply?.id,
           editEventId: edit?.id,
+          font: font,
         );
       }
       if (owner.isCurrent &&

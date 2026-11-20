@@ -6,15 +6,20 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parallax/app_theme.dart';
+import 'package:parallax/appearance_preferences.dart';
 import 'package:parallax/chat_backend.dart';
+import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/features/message_fonts/message_fonts.dart';
 import 'package:parallax/features/threads/thread_features.dart';
 import 'package:parallax/features/threads/thread_hooks.dart';
 import 'package:parallax/features/threads/thread_list_screen.dart';
 import 'package:parallax/features/threads/thread_models.dart';
 import 'package:parallax/features/threads/timeline_navigation.dart';
 import 'package:parallax/hooks/hook_types.dart';
+import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/thread_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _roomId = '!room:example.org';
 
@@ -60,6 +65,7 @@ class _Backend extends ChatBackend
   final threadRequests = <({String? cursor, Completer<ThreadPage> result})>[];
   final receipts = <({String root, String event, bool public})>[];
   final sends = <({String text, String? reply, String? thread})>[];
+  final sendFonts = <String?>[];
   final activity = StreamController<String>.broadcast();
   String? focused;
   int _jumpGen = 0;
@@ -125,8 +131,10 @@ class _Backend extends ChatBackend
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async {
     sends.add((text: text, reply: replyToId, thread: threadRootId));
+    sendFonts.add(font);
   }
 
   @override
@@ -422,6 +430,68 @@ void main() {
       backend.activity.add(r'$other');
       await tester.pump();
       expect(backend.threadRequests, hasLength(requests));
+    });
+
+    testWidgets('replies go out and show in the chosen message font', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({
+        'parallax.appearance.v1.message_font': 'lobster',
+      });
+      final preferences = AppearancePreferences(
+        prefs: await SharedPreferences.getInstance(),
+      );
+      await preferences.load();
+      addTearDown(preferences.dispose);
+      final backend = _Backend();
+      await tester.pumpWidget(
+        FeatureSettingsScope(
+          preferences: preferences,
+          draftStore: MessageDraftStore(),
+          child: _app(
+            ThreadScreen(
+              backend: backend,
+              roomId: _roomId,
+              root: _entry(r'$root', body: 'Root message', replies: 1),
+            ),
+          ),
+        ),
+      );
+      backend.threadRequests.single.result.complete(
+        ThreadPage([
+          ChatEntry(
+            id: r'$r1',
+            sender: '@alice:example.org',
+            senderName: 'Alice',
+            body: 'fancy reply',
+            time: DateTime(2026, 1, 1, 9, 1),
+            mine: false,
+            content: const {
+              'msgtype': 'm.text',
+              'body': 'fancy reply',
+              messageFontContentKey: 'bangers',
+            },
+          ),
+        ]),
+      );
+      await tester.pump();
+      final reply = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .firstWhere((rich) => rich.text.toPlainText() == 'fancy reply');
+      expect(reply.text.style?.fontFamily, 'Bangers');
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).style?.fontFamily,
+        'Lobster',
+      );
+
+      await tester.enterText(find.byType(TextField), 'in lobster');
+      await tester.tap(find.byTooltip('Send reply'));
+      await tester.pump();
+      expect(backend.sends.single.text, 'in lobster');
+      expect(backend.sends.single.thread, r'$root');
+      expect(backend.sendFonts.single, 'lobster');
+      backend.threadRequests.last.result.complete(const ThreadPage([]));
+      await tester.pump();
     });
 
     testWidgets('thread replies offer exact phone-number copying', (

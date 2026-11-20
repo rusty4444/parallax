@@ -51,6 +51,8 @@ import 'queued_media_sender.dart';
 import 'push_notifications.dart';
 import 'secure_store.dart';
 import 'send_cancellation.dart';
+import 'features/message_fonts/message_fonts.dart'
+    show messageFontById, withMessageFont;
 import 'features/packs/custom_reactions.dart';
 import 'features/packs/matrix_packs.dart' show packShortcodeForKey;
 import 'hooks/registry.dart' show transformOutgoingText;
@@ -629,6 +631,7 @@ class MatrixBackend extends ChatBackend
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async {
     if (text.trim().isEmpty) return;
     final owner = _outboxIdentity ?? '';
@@ -647,6 +650,7 @@ class MatrixBackend extends ChatBackend
       replyToId: replyToId,
       editEventId: editEventId,
       threadRootId: threadRootId,
+      font: messageFontById(font)?.id,
       hold: hold,
     );
     if (hold > Duration.zero) _watchHeldSends();
@@ -884,26 +888,30 @@ class MatrixBackend extends ChatBackend
               );
             } else {
               // The outbox stores plain text; markdown, /me and m.mentions
-              // are derived deterministically here (rich_timeline module).
+              // are derived deterministically here (rich_timeline module),
+              // then the message font (message_fonts module) is added.
               final isEdit = record.editEventId != null;
               final eventId = await room.sendEvent(
-                transformOutgoingText(
-                  OutgoingTextContext(
-                    backend: this,
-                    roomId: room.id,
-                    text: record.body,
-                    editing: isEdit,
+                withMessageFont(
+                  transformOutgoingText(
+                    OutgoingTextContext(
+                      backend: this,
+                      roomId: room.id,
+                      text: record.body,
+                      editing: isEdit,
+                    ),
+                    composeTextMessage(
+                      record.body,
+                      ownUserId: client.userID,
+                      mentionLabels: record.body.contains('@')
+                          ? mentionLabelsForRoom(room)
+                          : const {},
+                      replyToSender: reply?.senderId,
+                      editEventId: record.editEventId,
+                      previousMentions: mentionedUserIds(edited?.content),
+                    ),
                   ),
-                  composeTextMessage(
-                    record.body,
-                    ownUserId: client.userID,
-                    mentionLabels: record.body.contains('@')
-                        ? mentionLabelsForRoom(room)
-                        : const {},
-                    replyToSender: reply?.senderId,
-                    editEventId: record.editEventId,
-                    previousMentions: mentionedUserIds(edited?.content),
-                  ),
+                  record.font,
                 ),
                 txid: record.id,
                 inReplyTo: isEdit ? null : reply,
@@ -1487,6 +1495,7 @@ class MatrixBackend extends ChatBackend
     String text, {
     String? replyToId,
     String? editEventId,
+    String? font,
   }) async {
     if (_directSendingRooms.contains(roomId)) {
       throw StateError('A send is already in progress');
@@ -1544,24 +1553,28 @@ class MatrixBackend extends ChatBackend
         }
         _requireEncryptedTransport(room);
         // Markdown, /me and m.mentions are derived from the plain text here
-        // (rich_timeline module); the guards above are unchanged.
-        final content = transformOutgoingText(
-          OutgoingTextContext(
-            backend: this,
-            roomId: roomId,
-            text: text.trim(),
-            editing: editEventId != null,
+        // (rich_timeline module), then the message font; the guards above
+        // are unchanged.
+        final content = withMessageFont(
+          transformOutgoingText(
+            OutgoingTextContext(
+              backend: this,
+              roomId: roomId,
+              text: text.trim(),
+              editing: editEventId != null,
+            ),
+            composeTextMessage(
+              text.trim(),
+              ownUserId: client.userID,
+              mentionLabels: text.contains('@')
+                  ? mentionLabelsForRoom(room)
+                  : const {},
+              replyToSender: reply?.senderId,
+              editEventId: editEventId,
+              previousMentions: mentionedUserIds(edited?.content),
+            ),
           ),
-          composeTextMessage(
-            text.trim(),
-            ownUserId: client.userID,
-            mentionLabels: text.contains('@')
-                ? mentionLabelsForRoom(room)
-                : const {},
-            replyToSender: reply?.senderId,
-            editEventId: editEventId,
-            previousMentions: mentionedUserIds(edited?.content),
-          ),
+          font,
         );
         final sentId = await _protectSend(
           room,

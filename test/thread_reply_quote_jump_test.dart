@@ -60,6 +60,7 @@ class _Backend extends ChatBackend
     String? replyToId,
     String? editEventId,
     String? threadRootId,
+    String? font,
   }) async {}
 
   int _jumpGen = 0;
