@@ -57,6 +57,22 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    override fun onPostResume() {
+        super.onPostResume()
+        // The FlutterView exists once the fragment has resumed.
+        ImeInsetRepair.install(this)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Back from another app: make Flutter re-read the real keyboard inset
+        // so a keyboard hidden while we were away can't leave a black band.
+        if (hasFocus) {
+            ImeInsetRepair.install(this)
+            ImeInsetRepair.resync(this)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
