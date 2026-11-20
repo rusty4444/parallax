@@ -8,6 +8,30 @@ import 'package:path/path.dart' as path;
 Uint8List _bytes(int length, [int value = 7]) =>
     Uint8List.fromList(List.filled(length, value));
 
+/// Delegates to a real store and keeps each background write, so a test can
+/// wait for the save itself instead of guessing how long it takes.
+class _RecordingStore implements ThumbnailStore {
+  _RecordingStore(this._inner);
+  final ThumbnailStore _inner;
+  final writes = <Future<bool>>[];
+
+  @override
+  Future<bool> contains(String key) => _inner.contains(key);
+  @override
+  Future<Uint8List?> read(String key) => _inner.read(key);
+  @override
+  Future<bool> write(String key, Uint8List bytes) {
+    final write = _inner.write(key, bytes);
+    writes.add(write);
+    return write;
+  }
+
+  @override
+  Future<MediaCacheUsage> usage() => _inner.usage();
+  @override
+  Future<void> clear() => _inner.clear();
+}
+
 void main() {
   // Real files in ordinary tests (not testWidgets), under the ignored build/.
   late Directory root;
@@ -175,7 +199,9 @@ void main() {
     });
 
     test('downloads once, then serves the saved copy', () async {
-      final cache = await MediaDiskCache.open('acct', root: root);
+      final cache = _RecordingStore(
+        await MediaDiskCache.open('acct', root: root),
+      );
       var downloads = 0;
       Future<Uint8List> fetch(Uri _) async {
         downloads++;
@@ -186,8 +212,10 @@ void main() {
         await cachedMediaDownload(cache, download, 100, fetch),
         _bytes(8, 5),
       );
-      // The save runs in the background.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // The save runs in the background; wait for it rather than a fixed
+      // delay, which a loaded CI machine can outlast.
+      expect(cache.writes, hasLength(1));
+      expect(await cache.writes.single, isTrue);
       expect(
         await cachedMediaDownload(cache, download, 100, fetch),
         _bytes(8, 5),
