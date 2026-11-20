@@ -20,6 +20,14 @@
 - Video players are released only after the picture has left the screen, which removes a crash when closing the full-screen viewer or scrolling away from a playing video.
 - GIF and WebP previews keep their own shape.
 
+## 1.1.1
+
+### Tablets and foldables show the chat list beside the conversation
+
+- On a tablet, a foldable opened out, or any window at least 600dp wide, Parallax keeps your chat list in a pane on the left and the open conversation on the right, so you can move between chats without leaving the list.
+- It switches back to the phone layout when the window gets narrow, including straight away when you fold a foldable closed. Phones look and work exactly as before.
+- This is the same app on every device: one purchase covers your phone, tablet and foldable, and Google Play installs the right download for each.
+
 ## 1.1.0
 
 ### Tap a reply's quote to see the original
