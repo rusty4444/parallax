@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../chat_backend.dart';
+import '../features/threads/timeline_navigation.dart';
 import '../features/rich_timeline/mention_suggestions.dart';
 import '../features/rich_timeline/message_actions.dart';
 import '../features/rich_timeline/rich_timeline_features.dart';
@@ -89,6 +92,7 @@ class _TimelineViewState extends State<TimelineView> {
   double _pullDistance = 0;
   bool _pullTriggered = false;
   bool _pullArmed = false;
+  bool _newerTriggered = false;
 
   /// Newest entry when the user scrolled away from the bottom.
   String? _awayNewestId;
@@ -121,6 +125,7 @@ class _TimelineViewState extends State<TimelineView> {
       _pullDistance = 0;
       _pullTriggered = false;
       _pullArmed = false;
+      _newerTriggered = false;
     }
   }
 
@@ -182,6 +187,7 @@ class _TimelineViewState extends State<TimelineView> {
       return false;
     }
     if (notification is ScrollStartNotification) {
+      _newerTriggered = false;
       _pullDistance = 0;
       _pullTriggered = false;
       _pullArmed =
@@ -196,6 +202,21 @@ class _TimelineViewState extends State<TimelineView> {
       _pullTriggered = false;
       _pullArmed = false;
       return false;
+    }
+    // A focused timeline (jumped to a message) hides newer messages.
+    // Scrolling down to the bottom reveals them, paging towards the live
+    // end, so scrolling back down works as well as "Jump to latest". One
+    // page per gesture; the latch resets when the next one starts.
+    final navigation = timelineNavigationOf(widget.backend);
+    if (!_newerTriggered &&
+        navigation != null &&
+        navigation.focusedEventIn(widget.roomId) != null &&
+        navigation.hasNewerThanFocus(widget.roomId) &&
+        notification.metrics.pixels <= 0 &&
+        (notification is ScrollUpdateNotification ||
+            notification is OverscrollNotification)) {
+      _newerTriggered = true;
+      unawaited(_loadNewer());
     }
     final dragDetails = switch (notification) {
       ScrollUpdateNotification(:final dragDetails) => dragDetails,
@@ -224,6 +245,18 @@ class _TimelineViewState extends State<TimelineView> {
       widget.onLoadOlder();
     }
     return false;
+  }
+
+  Future<void> _loadNewer() async {
+    try {
+      await widget.backend.loadNewer(widget.roomId);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('Couldn’t load newer messages.')),
+        );
+      }
+    }
   }
 
   void _openReceipts(String eventId) => showMessageReceipts(
@@ -459,13 +492,20 @@ class _TimelineViewState extends State<TimelineView> {
       };
     }
 
+    // A focused timeline must stay scrollable even when short, so scrolling
+    // towards the newer messages at the bottom can reveal them.
+    final navigation = timelineNavigationOf(backend);
+    final focusedNewer =
+        navigation != null &&
+        navigation.focusedEventIn(widget.roomId) != null &&
+        navigation.hasNewerThanFocus(widget.roomId);
     final list = NotificationListener<ScrollNotification>(
       onNotification: _onScrollNotification,
       child: ListView.builder(
         key: _listKey,
         controller: _scroll,
         reverse: true,
-        physics: backend.canLoadOlder
+        physics: backend.canLoadOlder || focusedNewer
             ? const AlwaysScrollableScrollPhysics()
             : null,
         padding: EdgeInsets.fromLTRB(
