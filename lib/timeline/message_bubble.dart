@@ -19,6 +19,7 @@ import '../room_avatar.dart';
 import 'bubble_column.dart';
 import 'double_tap_react.dart';
 import 'reaction_pills.dart';
+import 'reply_quote.dart';
 import '../features/appearance/bubble_colours.dart';
 
 /// Width of the sender-avatar column beside others' messages.
@@ -197,27 +198,32 @@ class MessageBubble extends StatelessWidget {
                               const SizedBox(height: 5),
                             ],
                             if (entry.replyToId != null) ...[
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    left: BorderSide(
-                                      color: palette.secondary,
-                                      width: 3,
+                              ReplyQuote(
+                                backend: backend,
+                                roomId: roomId,
+                                replyToId: entry.replyToId!,
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: palette.secondary,
+                                        width: 3,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                child: Text(
-                                  replyPreview == null
-                                      ? 'In reply to an earlier message'
-                                      : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: mine
-                                        ? palette.bubbleText
-                                        : palette.muted,
-                                    fontSize: 12,
+                                  child: Text(
+                                    replyPreview == null
+                                        ? 'In reply to an earlier message'
+                                        : '${replyPreview!.senderLabel}: ${replyPreview!.body}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: mine
+                                          ? palette.bubbleText
+                                          : palette.muted,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ),
