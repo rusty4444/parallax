@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### About
+
+- About has a Source code link to github.com/rusty4444/parallax and shows the AGPL licence notice.
+- Report a problem now opens an email to sam@samrusselltech.net with the app version filled in, instead of a private issue tracker that only worked at home. If no email app is installed, Parallax shows the address instead.
+
 ## 1.3.0
 
 ### Open source

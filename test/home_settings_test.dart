@@ -266,6 +266,52 @@ void main() {
     expect(find.byType(LicensePage), findsOneWidget);
   });
 
+  test('report a problem emails the developer with the app version', () {
+    expect(reportProblemUrl.scheme, 'mailto');
+    expect(reportProblemUrl.path, 'sam@samrusselltech.net');
+    expect(
+      reportProblemUrl.queryParameters['subject'],
+      'Parallax $parallaxVersion ($parallaxBuild) problem report',
+    );
+    expect(
+      reportProblemUrl.queryParameters['body'],
+      contains('Parallax $parallaxVersion ($parallaxBuild)'),
+    );
+    // Mail apps show a query-encoded `+` literally instead of a space.
+    expect(reportProblemUrl.query, isNot(contains('+')));
+  });
+
+  testWidgets('report a problem shows the address when no email app opens', (
+    tester,
+  ) async {
+    const launcher = MethodChannel('plugins.flutter.io/url_launcher');
+    final launched = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(launcher, (
+      call,
+    ) async {
+      if (call.method == 'launch') {
+        launched.add((call.arguments as Map)['url'] as String);
+      }
+      return false; // No app handles mailto: links.
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        launcher,
+        null,
+      ),
+    );
+    await pumpSettings(tester);
+    await open(tester, 'About & help');
+    expect(find.text('sam@samrusselltech.net'), findsOne);
+    await tester.tap(find.text('Report a problem'));
+    await tester.pumpAndSettle();
+    expect(launched, [reportProblemUrl.toString()]);
+    expect(
+      find.text('No email app found. Write to sam@samrusselltech.net.'),
+      findsOne,
+    );
+  });
+
   testWidgets('settings is a menu: every setting is on a category page', (
     tester,
   ) async {

@@ -131,7 +131,11 @@ Future<bool> openExternalLink(BuildContext context, Uri uri) async {
   if (!opened && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Couldn’t open ${uri.host.isEmpty ? uri : uri.host}.'),
+        content: Text(
+          uri.scheme == 'mailto'
+              ? 'No email app found. Write to ${uri.path}.'
+              : 'Couldn’t open ${uri.host.isEmpty ? uri : uri.host}.',
+        ),
       ),
     );
   }

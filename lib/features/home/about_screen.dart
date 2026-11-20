@@ -8,9 +8,17 @@ import 'settings_widgets.dart';
 const parallaxVersion = '1.3.0';
 const parallaxBuild = '26';
 
-/// Where problems are reported (private Gitea issue tracker).
+/// Where problems are reported: an email to the developer.
+const reportProblemEmail = 'sam@samrusselltech.net';
+
+/// A `mailto:` link with the app version in the subject and a short template.
+/// Spaces are encoded as `%20`: mail apps show the `+` that query encoding
+/// would produce literally.
 final reportProblemUrl = Uri.parse(
-  'http://192.168.68.247:3300/rusty4444/parallax/issues/new',
+  'mailto:$reportProblemEmail'
+  '?subject=${Uri.encodeComponent('Parallax $parallaxVersion ($parallaxBuild) problem report')}'
+  '&body=${Uri.encodeComponent('What happened:\n\n\nWhat you expected to happen:\n\n\n'
+  'Parallax $parallaxVersion ($parallaxBuild)\n')}',
 );
 
 /// Parallax's public source code (AGPL-3.0-or-later). Builds must point here
@@ -104,13 +112,14 @@ class AboutScreen extends StatelessWidget {
           palette: p,
           title: 'Help',
           footer:
-              'Reports open the Parallax issue tracker. Don’t include '
+              'Reports open an email to the developer. Don’t include '
               'passwords, recovery keys or message contents.',
           children: [
             ListTile(
               leading: const Icon(Icons.bug_report_outlined),
               title: const Text('Report a problem'),
-              trailing: const Icon(Icons.open_in_new_rounded),
+              subtitle: const Text(reportProblemEmail),
+              trailing: const Icon(Icons.mail_outline_rounded),
               onTap: () => openExternalLink(context, reportProblemUrl),
             ),
           ],
