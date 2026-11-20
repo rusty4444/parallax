@@ -258,6 +258,10 @@ void main() {
     await pumpSettings(tester);
     await open(tester, 'About & help');
     expect(find.text('Parallax $parallaxVersion ($parallaxBuild)'), findsOne);
+    expect(find.text('Source code'), findsOne);
+    expect(find.text('GNU AGPL v3 or later'), findsOne);
+    expect(find.text(licenceNotice), findsOne);
+    expect(sourceCodeUrl.toString(), 'https://github.com/rusty4444/parallax');
     await open(tester, 'Open source licences');
     expect(find.byType(LicensePage), findsOneWidget);
   });

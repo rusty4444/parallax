@@ -13,6 +13,15 @@ final reportProblemUrl = Uri.parse(
   'http://192.168.68.247:3300/rusty4444/parallax/issues/new',
 );
 
+/// Parallax's public source code (AGPL-3.0-or-later). Builds must point here
+/// so everyone who installs one can get the matching source.
+final sourceCodeUrl = Uri.parse('https://github.com/rusty4444/parallax');
+
+/// The licence notice shown under the Legal group.
+const licenceNotice =
+    'Parallax is free software under the GNU Affero General Public '
+    'License, version 3 or later, and comes with no warranty.';
+
 /// About, licences, legal links and problem reporting (Element X About and
 /// "Report a problem").
 class AboutScreen extends StatelessWidget {
@@ -51,7 +60,15 @@ class AboutScreen extends StatelessWidget {
         SettingsGroup(
           palette: p,
           title: 'Legal',
+          footer: licenceNotice,
           children: [
+            ListTile(
+              leading: const Icon(Icons.code_rounded),
+              title: const Text('Source code'),
+              subtitle: const Text('GNU AGPL v3 or later'),
+              trailing: const Icon(Icons.open_in_new_rounded),
+              onTap: () => openExternalLink(context, sourceCodeUrl),
+            ),
             ListTile(
               leading: const Icon(Icons.article_outlined),
               title: const Text('Open source licences'),
