@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
@@ -272,6 +273,9 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(
+          minimum: (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+              : EdgeInsets.zero,
           child: AnimatedBuilder(
             animation: _changes,
             builder: (context, _) {

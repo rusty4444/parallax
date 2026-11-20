@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
@@ -154,6 +155,10 @@ class _CryptoSetupScreenState extends State<CryptoSetupScreen> {
         body: GlowBackdrop(
           palette: p,
           child: SafeArea(
+            minimum:
+                (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+                ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+                : EdgeInsets.zero,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(22, 12, 22, 40),
               children: [
