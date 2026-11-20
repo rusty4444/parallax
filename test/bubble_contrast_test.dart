@@ -21,16 +21,22 @@ const _bubbles = [...bubbleSwatches, Color(0xFFF5C542)];
 /// Focuses own messages, so they show "Jumped to this message".
 class _FocusBackend extends FakeBackend implements TimelineNavigation {
   String? focused;
+  int _jumpGen = 0;
 
   @override
-  Future<void> openRoomAt(String roomId, String eventId) async =>
-      focused = eventId;
+  Future<void> openRoomAt(String roomId, String eventId) async {
+    focused = eventId;
+    _jumpGen++;
+  }
 
   @override
   String? focusedEventIn(String roomId) => focused;
 
   @override
-  bool hasNewerThanFocus(String roomId) => focused != null;
+  int jumpGenerationIn(String roomId) => _jumpGen;
+
+  @override
+  bool hasNewerThanFocus(String roomId) => false;
 
   @override
   Future<void> jumpToLatest(String roomId) async => focused = null;
@@ -237,7 +243,7 @@ void main() {
         ((tester.widget<DecoratedBox>(bubble)).decoration as BoxDecoration)
             .color!;
 
-    testWidgets('"Jump to latest" stays legible on a yellow bubble', (
+    testWidgets('the jump marker stays legible on a yellow bubble', (
       tester,
     ) async {
       // The reported case: Parallax theme, own messages in mustard yellow.
@@ -251,13 +257,15 @@ void main() {
         entries: [_entry(r'$mine', mine: true)],
         backend: backend,
       );
-      expect(find.text('Jump to latest'), findsOneWidget);
+      expect(find.text('Jumped to this message'), findsOneWidget);
+      // Nothing is hidden after a jump, so there is no "Jump to latest".
+      expect(find.text('Jump to latest'), findsNothing);
       final bubble = bubbleOf(r'$mine');
       final fill = fillOf(tester, bubble);
       final colour = tester
           .widget<RichText>(
             find.descendant(
-              of: find.text('Jump to latest'),
+              of: find.text('Jumped to this message'),
               matching: find.byType(RichText),
             ),
           )

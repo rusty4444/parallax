@@ -62,7 +62,7 @@ class _Backend extends ChatBackend
   final sends = <({String text, String? reply, String? thread})>[];
   final activity = StreamController<String>.broadcast();
   String? focused;
-  bool newer = true;
+  int _jumpGen = 0;
   int jumps = 0;
 
   @override
@@ -132,12 +132,15 @@ class _Backend extends ChatBackend
   @override
   Future<void> openRoomAt(String roomId, String eventId) async {
     focused = eventId;
+    _jumpGen++;
   }
 
   @override
   String? focusedEventIn(String roomId) => roomId == _roomId ? focused : null;
   @override
-  bool hasNewerThanFocus(String roomId) => focused != null && newer;
+  int jumpGenerationIn(String roomId) => _jumpGen;
+  @override
+  bool hasNewerThanFocus(String roomId) => false;
   @override
   Future<void> jumpToLatest(String roomId) async {
     jumps++;
@@ -517,20 +520,12 @@ void main() {
       );
     });
 
-    testWidgets('focused event is marked and can jump to latest', (
-      tester,
-    ) async {
+    testWidgets('jumped-to event is marked; nothing is hidden', (tester) async {
       final backend = _Backend()..focused = r'$hit';
       await tester.pumpWidget(hooked(backend, _entry(r'$hit')));
       expect(find.text('Jumped to this message'), findsOneWidget);
-      expect(find.byTooltip('Jump to latest'), findsOneWidget);
-      // One header slot: "Jump to latest" replaces "Threads" while focused.
-      expect(find.byTooltip('Threads'), findsNothing);
-      await tester.tap(find.widgetWithText(TextButton, 'Jump to latest'));
-      await tester.pump();
-      expect(backend.jumps, 1);
-      await tester.pumpWidget(hooked(backend, _entry(r'$hit')));
-      expect(find.text('Jumped to this message'), findsNothing);
+      // The live timeline stays whole: no "Jump to latest", and "Threads"
+      // keeps the header slot.
       expect(find.byTooltip('Jump to latest'), findsNothing);
       expect(find.byTooltip('Threads'), findsOneWidget);
     });

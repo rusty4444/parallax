@@ -62,17 +62,22 @@ class _Backend extends ChatBackend
     String? threadRootId,
   }) async {}
 
+  int _jumpGen = 0;
+
   @override
   Future<void> openRoomAt(String roomId, String eventId) async {
     jumps.add([roomId, eventId]);
     if (failJump) throw StateError('Message unavailable');
     focused = eventId;
+    _jumpGen++;
   }
 
   @override
   String? focusedEventIn(String roomId) => focused;
   @override
-  bool hasNewerThanFocus(String roomId) => focused != null;
+  int jumpGenerationIn(String roomId) => _jumpGen;
+  @override
+  bool hasNewerThanFocus(String roomId) => false;
   @override
   Future<void> jumpToLatest(String roomId) async {
     focused = null;
