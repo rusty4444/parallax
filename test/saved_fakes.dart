@@ -141,6 +141,9 @@ class SavedFakeBackend extends HomeFakeBackend
   String? focusedEventIn(String roomId) => null;
 
   @override
+  int jumpGenerationIn(String roomId) => 0;
+
+  @override
   bool hasNewerThanFocus(String roomId) => false;
 
   @override

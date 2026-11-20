@@ -14,11 +14,16 @@ abstract interface class TimelineNavigation {
   /// still be opened normally.
   Future<void> openRoomAt(String roomId, String eventId);
 
-  /// Event the active timeline of [roomId] is focused on, or null when it
-  /// shows the live end (or another room is active).
+  /// Event the active timeline of [roomId] was jumped to, or null when the
+  /// room was opened normally (or another room is active). The timeline stays
+  /// live; this marks the message to scroll to and highlight.
   String? focusedEventIn(String roomId);
 
-  /// Whether newer messages than the focused event are hidden.
+  /// Bumped on every jump so the view re-scrolls even to the same event.
+  int jumpGenerationIn(String roomId);
+
+  /// Whether newer messages than the jumped-to event are hidden. Always
+  /// false now: the whole live timeline is loaded, nothing is hidden.
   bool hasNewerThanFocus(String roomId);
 
   /// Leaves the focused timeline for the live end of [roomId].
@@ -46,6 +51,10 @@ class _MatrixTimelineNavigation implements TimelineNavigation {
   @override
   String? focusedEventIn(String roomId) =>
       _backend.activeRoomId == roomId ? _backend.focusedEventId : null;
+
+  @override
+  int jumpGenerationIn(String roomId) =>
+      _backend.activeRoomId == roomId ? _backend.jumpGeneration : 0;
 
   @override
   bool hasNewerThanFocus(String roomId) =>
