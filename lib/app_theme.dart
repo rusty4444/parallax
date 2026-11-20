@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Visual themes. [parallax] is the brand default; the others are alternatives.
@@ -82,6 +84,9 @@ class AppPalette {
     Color? surface,
     Color? foreground,
     Color? muted,
+    Color? accent,
+    Color? accentOn,
+    Color? secondary,
     Color? bubble,
     Color? bubbleText,
   }) => AppPalette(
@@ -90,13 +95,28 @@ class AppPalette {
     raised: raised,
     foreground: foreground ?? this.foreground,
     muted: muted ?? this.muted,
-    accent: accent,
-    accentOn: accentOn,
-    secondary: secondary,
+    accent: accent ?? this.accent,
+    accentOn: accentOn ?? this.accentOn,
+    secondary: secondary ?? this.secondary,
     stroke: stroke,
     bubble: bubble ?? this.bubble,
     bubbleText: bubbleText ?? this.bubbleText,
   );
+
+  /// This palette for content drawn on [fill] (a message bubble whose text
+  /// is [text]), whatever colours the room chose: accent marks keep 3:1
+  /// there, and secondary and muted text 4.5:1 (or as close as the bubble's
+  /// own text gets), darkening or lightening the way [text] does. The fill
+  /// colours themselves are unchanged.
+  AppPalette inkOn(Color fill, {Color? text}) {
+    final mark = legibleOn(fill, accent, minRatio: 3, toward: text);
+    return copyWith(
+      accent: mark,
+      accentOn: legibleOn(mark, accentOn),
+      secondary: legibleOn(fill, secondary, toward: text),
+      muted: legibleOn(fill, muted, toward: text),
+    );
+  }
 
   // Value equality: derived palettes (per-room bubble colours) must compare
   // equal across rebuilds so rendered message text stays cached.
@@ -129,6 +149,58 @@ class AppPalette {
     bubble,
     bubbleText,
   );
+}
+
+/// WCAG 2 contrast ratio of two colours (alpha ignored): 1 to 21.
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
+}
+
+const _darkInk = Color(0xFF141414);
+const _lightInk = Color(0xFFFFFFFF);
+
+/// Text colour for [background]: white while it reads at 3:1 or better (so
+/// saturated bubbles keep white text), otherwise near-black, which is then
+/// at least 6:1.
+Color readableOn(Color background) =>
+    contrastRatio(_lightInk, background) >= 3 ? _lightInk : _darkInk;
+
+/// [colour] when it reads at [minRatio] on [background] (translucent
+/// colours are judged as drawn). Otherwise the same hue moved just far
+/// enough towards [toward] (the text colour beside it, so accents match the
+/// text; default [readableOn]), or towards [readableOn] when [toward] cannot
+/// get there, or all the way to the better of the two when neither can.
+Color legibleOn(
+  Color background,
+  Color colour, {
+  double minRatio = 4.5,
+  Color? toward,
+}) {
+  final drawn = Color.alphaBlend(colour, background);
+  if (contrastRatio(drawn, background) >= minRatio) return colour;
+  final fallback = readableOn(background);
+  var target = toward == null ? fallback : Color.alphaBlend(toward, background);
+  if (contrastRatio(target, background) < minRatio &&
+      contrastRatio(fallback, background) > contrastRatio(target, background)) {
+    target = fallback;
+  }
+  if (contrastRatio(target, background) <= minRatio) return target;
+  // Contrast only grows past the background's luminance on the way to
+  // [target], so the colours that pass form one range ending at [target].
+  var low = 0.0;
+  var high = 1.0;
+  for (var i = 0; i < 16; i++) {
+    final mid = (low + high) / 2;
+    final candidate = Color.lerp(drawn, target, mid)!;
+    if (contrastRatio(candidate, background) >= minRatio) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+  return Color.lerp(drawn, target, high)!;
 }
 
 AppPalette paletteFor(VisualTheme style) => switch (style) {

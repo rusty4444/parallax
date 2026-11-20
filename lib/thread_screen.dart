@@ -378,6 +378,8 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Widget _bubble(AppPalette p, ChatEntry entry, {bool root = false}) {
     final mine = entry.mine && !root;
     final textColor = mine ? p.bubbleText : p.foreground;
+    // Sender, quote and time colours stay legible on this bubble.
+    final ink = p.inkOn(mine ? p.bubble : p.surface, text: textColor);
     final hook = EntryHookContext(
       backend: widget.backend,
       roomId: widget.roomId,
@@ -451,7 +453,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: p.secondary,
+                            color: ink.secondary,
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
                           ),
@@ -468,7 +470,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
                               border: Border(
-                                left: BorderSide(color: p.secondary, width: 3),
+                                left: BorderSide(
+                                  color: ink.secondary,
+                                  width: 3,
+                                ),
                               ),
                             ),
                             child: Text(
@@ -478,7 +483,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: mine ? p.bubbleText : p.muted,
+                                color: mine ? p.bubbleText : ink.muted,
                                 fontSize: 12,
                               ),
                             ),
@@ -502,7 +507,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                                 entry.isImage
                                     ? Icons.image_outlined
                                     : Icons.insert_drive_file_outlined,
-                                color: mine ? p.bubbleText : p.secondary,
+                                color: mine ? p.bubbleText : ink.secondary,
                               ),
                               const SizedBox(width: 8),
                               Flexible(
@@ -529,8 +534,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
                         style: TextStyle(
                           fontSize: 10,
                           color: mine
-                              ? p.bubbleText.withValues(alpha: 0.77)
-                              : p.muted,
+                              ? legibleOn(
+                                  p.bubble,
+                                  p.bubbleText.withValues(alpha: 0.77),
+                                  minRatio: 3,
+                                  toward: p.bubbleText,
+                                )
+                              : ink.muted,
                         ),
                       ),
                     ),
