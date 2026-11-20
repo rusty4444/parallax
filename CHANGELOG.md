@@ -6,6 +6,10 @@
 
 - Android, iPhone, iPad, Mac and Windows now build from the same code and history, so every fix and feature reaches all of them at once. Android picks up the shared parts of the 1.2.0 desktop work: a draggable divider between the chat list and the chat on tablets and foldables, video players released only after they leave the screen, the wider sign-in layout on large screens and the reworked invitation buttons in the chat list.
 
+### Messages pop out when you press them
+
+- Long-pressing a message (or right-clicking it on a computer) now lifts it off the screen like Messenger: the chat dims and blurs, and the message grows slightly with a soft shadow while its actions are open. If the action sheet would cover it, it moves up to stay in view, and it settles back when the sheet closes. Photos in a gallery, stickers and thread replies lift the same way; thread replies also open their actions on right-click.
+
 ### Message fonts
 
 - A Message font button in the compose box offers eight fonts (DM Serif Display, Indie Flower, Pacifico, Lobster, Comic Neue, Space Mono, Press Start 2P and Bangers), each shown in its own face. The draft shows the chosen font as you type, and the choice stays until you pick another.
