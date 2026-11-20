@@ -4,8 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
-import 'package:path_provider/path_provider.dart';
 
+import '../../app_temporary_directory.dart';
 import '../../messaging_features.dart';
 import '../../voice_recorder.dart'
     show maxComposerMediaBytes, readComposerMedia;
@@ -250,7 +250,7 @@ Future<VideoInfo?> probeVideoBytes(Uint8List bytes, {VideoTools? tools}) async {
   final video = tools ?? VideoTools.instance;
   Directory? dir;
   try {
-    dir = await (await getTemporaryDirectory()).createTemp('parallax-probe');
+    dir = await (await appTemporaryDirectory()).createTemp('parallax-probe');
     final file = File('${dir.path}/video');
     await file.writeAsBytes(bytes, flush: true);
     return await video.probe(file.path);
@@ -277,7 +277,7 @@ Future<VideoFrameSample?> sampleVideoBytes(
   final video = tools ?? VideoTools.instance;
   Directory? dir;
   try {
-    final base = cacheDir ?? await getTemporaryDirectory();
+    final base = cacheDir ?? await appTemporaryDirectory();
     await base.create(recursive: true);
     dir = await base.createTemp('parallax-video-preview-');
     final file = File('${dir.path}/video');

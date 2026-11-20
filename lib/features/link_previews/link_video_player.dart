@@ -40,6 +40,7 @@ class _NetworkLinkVideoController implements LinkVideoController {
       );
 
   final VideoPlayerController _controller;
+  final VideoTextureGate _texture = VideoTextureGate();
 
   @override
   void addListener(VoidCallback listener) => _controller.addListener(listener);
@@ -82,11 +83,16 @@ class _NetworkLinkVideoController implements LinkVideoController {
   @override
   Future<void> seekTo(Duration position) => _controller.seekTo(position);
 
+  /// The texture leaves the screen before the native player releases it.
   @override
-  Future<void> dispose() => _controller.dispose();
+  Future<void> dispose() async {
+    await _texture.retire();
+    await _controller.dispose();
+  }
 
   @override
-  Widget buildVideo(BuildContext context) => VideoPlayer(_controller);
+  Widget buildVideo(BuildContext context) =>
+      _texture.build(VideoPlayer(_controller));
 
   @override
   Widget buildProgress(BuildContext context) => VideoProgressIndicator(

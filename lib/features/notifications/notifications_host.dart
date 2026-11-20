@@ -11,8 +11,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../../app_temporary_directory.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
@@ -37,7 +37,7 @@ class NotificationHostEnvironment {
       NotificationHostEnvironment(
         store: NotificationStore.open,
         surface: PluginNotificationSurface.new,
-        cacheRoot: getTemporaryDirectory,
+        cacheRoot: appTemporaryDirectory,
       );
 
   final Future<NotificationStore> Function() store;

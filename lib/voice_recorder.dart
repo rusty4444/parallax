@@ -3,9 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'app_temporary_directory.dart';
 import 'features/media/voice_waveform.dart';
 import 'messaging_features.dart';
 
@@ -119,7 +119,7 @@ class NativeVoiceRecorder implements VoiceRecorder {
   });
 
   Future<Directory> _temporaryDirectory() async {
-    return _directory ??= await (await getTemporaryDirectory()).createTemp(
+    return _directory ??= await (await appTemporaryDirectory()).createTemp(
       'parallax-voice-',
     );
   }

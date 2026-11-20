@@ -5,10 +5,11 @@ import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart' as audio;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
+import 'app_temporary_directory.dart';
 import 'chat_backend.dart';
 
 /// All injected factories transfer exclusive ownership of their result.
@@ -250,7 +251,9 @@ Future<MediaTempFile> createMediaTempFile(
   DownloadedAttachment attachment, {
   Directory? temporaryDirectory,
 }) async {
-  final root = temporaryDirectory ?? await getTemporaryDirectory();
+  // The root may not exist yet (macOS sandbox caches folder).
+  final root = await (temporaryDirectory ?? await appTemporaryDirectory())
+      .create(recursive: true);
   final directory = await root.createTemp('parallax-media-');
   try {
     final mime = attachment.mimeType.split(';').first.trim().toLowerCase();
@@ -298,6 +301,65 @@ double? videoDisplayAspectRatio(Size size) {
   return ratio.isFinite && ratio > 0 ? ratio : null;
 }
 
+/// Keeps a native video texture on screen only while its player is live.
+///
+/// A player must not unregister its texture while the raster thread may
+/// still be drawing it: on macOS the engine reads the freed Metal texture in
+/// `EmbedderExternalTextureMetal::ResolveTexture` and the app crashes with
+/// SIGSEGV (flutter/flutter#195730), and video_player_win frees the surface
+/// descriptor its Windows texture callback hands to the raster thread.
+/// [retire] takes the texture out of the widget tree and waits until frames
+/// without it have been drawn; only then may the player be disposed.
+class VideoTextureGate {
+  final ValueNotifier<bool> _visible = ValueNotifier<bool>(true);
+  Future<void>? _retiring;
+
+  /// [texture] while the player is live; an empty box once it is retiring.
+  Widget build(Widget texture) => ValueListenableBuilder<bool>(
+    valueListenable: _visible,
+    builder: (context, visible, child) =>
+        visible ? child! : const SizedBox.expand(),
+    child: texture,
+  );
+
+  /// Removes the texture from the tree and waits for frames drawn without it.
+  /// Every caller gets the same future.
+  Future<void> retire() => _retiring ??= _retire();
+
+  Future<void> _retire() async {
+    final binding = SchedulerBinding.instance;
+    // Never mark widgets dirty in the middle of building/painting a frame.
+    if (binding.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      await binding.endOfFrame;
+    }
+    _visible.value = false;
+    await debugVideoTextureRetirement();
+  }
+}
+
+/// Waits for frames drawn without a retired video texture. Overridable in
+/// tests, which cannot produce real frames inside `runAsync`.
+@visibleForTesting
+Future<void> Function() debugVideoTextureRetirement =
+    waitForFramesWithoutVideoTexture;
+
+/// The first frame drops the texture's layer; by the end of the second the
+/// raster thread has finished the last frame that still drew it (the layer
+/// tree pipeline holds at most one frame besides the one being drawn).
+/// Bounded, because a hidden window draws no frames, and then nothing is
+/// drawing the texture either.
+Future<void> waitForFramesWithoutVideoTexture({
+  Duration limit = const Duration(milliseconds: 750),
+}) async {
+  final binding = SchedulerBinding.instance;
+  Future<void> twoFrames() async {
+    await binding.endOfFrame;
+    await binding.endOfFrame;
+  }
+
+  await twoFrames().timeout(limit, onTimeout: () {});
+}
+
 class _NativeVideoPlayer extends MediaPlaybackController {
   _NativeVideoPlayer(String path)
     : _controller = VideoPlayerController.file(
@@ -308,6 +370,7 @@ class _NativeVideoPlayer extends MediaPlaybackController {
     _controller.addListener(notifyListeners);
   }
   final VideoPlayerController _controller;
+  final VideoTextureGate _texture = VideoTextureGate();
   double? get _displayAspectRatio {
     final v = _controller.value;
     if (!v.isInitialized) return null;
@@ -336,12 +399,21 @@ class _NativeVideoPlayer extends MediaPlaybackController {
   Widget buildVideo(BuildContext context) => Center(
     child: AspectRatio(
       aspectRatio: _displayAspectRatio ?? _controller.value.aspectRatio,
-      child: VideoPlayer(_controller),
+      child: _texture.build(VideoPlayer(_controller)),
     ),
   );
   @override
   Future<void> disposePlayer() async {
     _controller.removeListener(notifyListeners);
+    final retiring = _texture.retire();
+    // Stop new frames first: the Windows plugin's video thread keeps copying
+    // into the texture while playing, which races its own shutdown.
+    try {
+      if (_controller.value.isPlaying) await _controller.pause();
+    } catch (_) {
+      // Disposal below still has to run.
+    }
+    await retiring;
     await _controller.dispose();
     super.dispose();
   }

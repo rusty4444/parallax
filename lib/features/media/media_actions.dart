@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../app_temporary_directory.dart';
 import '../../attachment_picker.dart';
 import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
@@ -33,7 +33,7 @@ MediaSharePresenter debugMediaSharePresenter = _systemShare;
 
 /// Overridable in tests; production uses the app cache directory.
 @visibleForTesting
-Future<Directory> Function() debugShareTemporaryRoot = getTemporaryDirectory;
+Future<Directory> Function() debugShareTemporaryRoot = appTemporaryDirectory;
 
 /// Loader for one media event: the live timeline when the room is open (its
 /// cached event), falling back to the module's history-capable loader for
