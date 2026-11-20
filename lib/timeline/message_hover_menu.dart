@@ -62,6 +62,11 @@ class _MessageHoverMenuState extends State<MessageHoverMenu> {
   bool _overMessage = false;
   bool _overBar = false;
 
+  /// When the message sits too close to the top of the viewport for the bar
+  /// to fit above it, the bar flips below the message's bottom edge instead
+  /// of painting over the header (or off the window).
+  bool _below = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -122,6 +127,9 @@ class _MessageHoverMenuState extends State<MessageHoverMenu> {
     } else {
       _entry!.markNeedsBuild();
     }
+    // Place the bar before its first paint: a message already near the top
+    // of the viewport must flip below immediately, not only after a scroll.
+    _updatePlacement();
   }
 
   /// Resolves the current actions; hides the bar when there are none left.
@@ -164,17 +172,20 @@ class _MessageHoverMenuState extends State<MessageHoverMenu> {
     if (position == _scrollPosition) return;
     _detachScroll();
     _scrollPosition = position;
-    position?.addListener(_checkVisible);
+    position?.addListener(_updatePlacement);
   }
 
   void _detachScroll() {
-    _scrollPosition?.removeListener(_checkVisible);
+    _scrollPosition?.removeListener(_updatePlacement);
     _scrollPosition = null;
   }
 
-  /// Keeps the bar inside the timeline viewport: it hides when the message
-  /// scrolls far enough that the bar would paint over the header or composer.
-  void _checkVisible() {
+  /// Keeps the bar inside the timeline viewport. It prefers the message's
+  /// top-right corner (Discord style); when the message is too close to the
+  /// top — e.g. partially scrolled out of frame — it flips to the bottom
+  /// edge so it never paints over the header or off the window. Only when
+  /// neither side has room (a message taller than the viewport) does it hide.
+  void _updatePlacement() {
     if (_entry == null || !mounted) return;
     final target = _targetKey.currentContext?.findRenderObject();
     if (target is! RenderBox || !target.attached) {
@@ -184,11 +195,15 @@ class _MessageHoverMenuState extends State<MessageHoverMenu> {
     final viewport = Scrollable.maybeOf(context)?.context.findRenderObject();
     if (viewport is RenderBox && viewport.attached) {
       final top = target.localToGlobal(Offset.zero, ancestor: viewport).dy;
-      if (top < _barHeight + _barGap ||
-          top + target.size.height > viewport.size.height) {
+      final bottom = top + target.size.height;
+      const needs = _barHeight + _barGap;
+      final roomAbove = top >= needs;
+      final roomBelow = bottom + needs <= viewport.size.height;
+      if (!roomAbove && !roomBelow) {
         _hideNow();
         return;
       }
+      _below = !roomAbove;
     }
     _entry!.markNeedsBuild();
   }
@@ -216,9 +231,9 @@ class _MessageHoverMenuState extends State<MessageHoverMenu> {
       CompositedTransformFollower(
         link: _link,
         showWhenUnlinked: false,
-        targetAnchor: Alignment.topRight,
-        followerAnchor: Alignment.bottomRight,
-        offset: const Offset(0, -_barGap),
+        targetAnchor: _below ? Alignment.bottomRight : Alignment.topRight,
+        followerAnchor: _below ? Alignment.topRight : Alignment.bottomRight,
+        offset: Offset(0, _below ? _barGap : -_barGap),
         child: MouseRegion(
           onEnter: _onBarEnter,
           onExit: _onBarExit,

@@ -7,6 +7,7 @@ import 'package:parallax/app_theme.dart';
 import 'package:parallax/appearance_preferences.dart';
 import 'package:parallax/chat_backend.dart';
 import 'package:parallax/feature_settings_scope.dart';
+import 'package:parallax/features/platform/desktop_shell.dart';
 import 'package:parallax/features/platform/desktop_title_bar.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/message_draft_store.dart';
@@ -373,5 +374,192 @@ void main() {
       expect(actions, 1);
       expect(hearts, 0);
     });
+  });
+
+  group('desktop window dragging', () {
+    late List<String> calls;
+
+    setUp(() {
+      calls = <String>[];
+      const channel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (call.method == 'isMaximized' || call.method == 'isFullScreen') {
+              return false;
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+    });
+
+    // Mirrors the signed-in shell: a Scaffold (opaque Material) whose header
+    // row sits flush in the title-bar strip, with an action button kept left
+    // of the caption-button zone like the two-pane inbox list header.
+    Future<void> pumpShell(
+      WidgetTester tester, {
+      VoidCallback? onAction,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: themeFor(VisualTheme.parallax),
+          home: DesktopShell(
+            palette: paletteFor(VisualTheme.parallax),
+            child: Scaffold(
+              body: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: SizedBox(
+                        width: 500,
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Parallax',
+                                style: TextStyle(fontSize: 26),
+                              ),
+                            ),
+                            IconButton(
+                              key: const ValueKey('header-action'),
+                              onPressed: onAction ?? () {},
+                              icon: const Icon(Icons.search_rounded),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Expanded(child: SizedBox.expand()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('dragging the empty header space moves the window', (
+      tester,
+    ) async {
+      await pumpShell(tester);
+      await tester.dragFrom(const Offset(300, 18), const Offset(140, 26));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(calls, contains('startDragging'));
+    });
+
+    testWidgets('a small mouse drag moves the window too', (tester) async {
+      await pumpShell(tester);
+      final gesture = await tester.startGesture(
+        const Offset(300, 18),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(12, 4));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(calls, contains('startDragging'));
+    });
+
+    testWidgets('dragging an interactive control in the strip resizes, '
+        'not moves the window', (tester) async {
+      var drags = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: themeFor(VisualTheme.parallax),
+          home: DesktopShell(
+            palette: paletteFor(VisualTheme.parallax),
+            child: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 200,
+                  height: kDesktopTitleBarHeight,
+                  child: GestureDetector(
+                    key: const ValueKey('strip-content-drag'),
+                    onHorizontalDragUpdate: (_) => drags++,
+                    child: const ColoredBox(color: Color(0xFF222222)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.dragFrom(const Offset(100, 18), const Offset(60, 0));
+      await tester.pump();
+      expect(drags, greaterThan(0));
+      expect(calls, isNot(contains('startDragging')));
+    });
+
+    testWidgets('a single click on the strip does nothing', (tester) async {
+      await pumpShell(tester);
+      await tester.tapAt(const Offset(300, 18));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(calls, isNot(contains('startDragging')));
+      expect(calls, isNot(contains('maximize')));
+    });
+
+    testWidgets('header buttons stay tappable under the drag strip', (
+      tester,
+    ) async {
+      var actions = 0;
+      await pumpShell(tester, onAction: () => actions++);
+      await tester.tap(find.byKey(const ValueKey('header-action')));
+      await tester.pump();
+      expect(actions, 1);
+      expect(calls, isNot(contains('startDragging')));
+    });
+
+    testWidgets('double-clicking the strip maximizes', (tester) async {
+      await pumpShell(tester);
+      await tester.tapAt(const Offset(300, 18));
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(const Offset(300, 18));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(calls, contains('maximize'));
+    });
+
+    testWidgets('double-clicking a header button does not maximize', (
+      tester,
+    ) async {
+      var actions = 0;
+      await pumpShell(tester, onAction: () => actions++);
+      final button = find.byKey(const ValueKey('header-action'));
+      await tester.tap(button);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(button);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(actions, 2);
+      expect(calls, isNot(contains('maximize')));
+      expect(calls, isNot(contains('startDragging')));
+    });
+
+    platformTestWidgets(
+      'caption buttons work and do not start a drag',
+      TargetPlatform.windows,
+      (tester) async {
+        await pumpShell(tester);
+        await tester.tap(find.byTooltip('Minimize'));
+        await tester.pump();
+        expect(calls, contains('minimize'));
+        calls.clear();
+        await tester.dragFrom(const Offset(780, 18), const Offset(-120, 20));
+        await tester.pump();
+        expect(calls, isNot(contains('startDragging')));
+      },
+    );
   });
 }
