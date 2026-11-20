@@ -59,7 +59,7 @@ Core screens (room, timeline, room info, settings and the app shell) expose exte
 
 ## Source and APKs
 
-The code is hosted on private Gitea at `http://192.168.68.247:3300/rusty4444/parallax` (git.samprim.net). The issues, pull requests and releases were migrated from the old GitHub repository, which has been deleted.
+The source code is public at <https://github.com/rusty4444/parallax>, with a `vX.Y.Z` tag for every release. Day-to-day development, issues and CI happen on Sam's own Gitea (`http://192.168.68.247:3300/rusty4444/parallax`, git.samprim.net); `main` and the release tags are copied to GitHub. The public history had private test data removed, so its commit hashes don't match Gitea's.
 
 `.gitea/workflows/android-apk.yml` checks and builds each push. Pushes to `main` also publish a per-commit prerelease APK (`build-<12-character SHA>`). It runs on Sam's Mac as the self-hosted Gitea Actions runner `sam-mac-parallax` (label `parallax-android`, LaunchAgent `ai.hermes.gitea-runner`), so the Mac needs to be awake for builds to run.
 
@@ -110,8 +110,22 @@ flutter build windows --release
 
 The portable app is `build\windows\x64\runner\Release\`. Video compression needs `ffmpeg.exe`/`ffprobe.exe` next to the executable. See [docs/windows-port.md](docs/windows-port.md) for the feature mapping, runtime layout and known gaps.
 
-## Licences
+## Licence
 
-The bundled Space Grotesk font is licensed under the SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The message fonts — DM Serif Display, Indie Flower, Pacifico, Lobster, Comic Neue, Space Mono, Press Start 2P and Bangers, taken from the [google/fonts](https://github.com/google/fonts) repository — are also under the SIL Open Font License 1.1; each family's licence and copyright notice is in `assets/fonts/licenses/` and on the app's licences page. The `matrix` Dart SDK is AGPL-3.0-or-later; check its distribution obligations before shipping any build. Map tiles are © OpenStreetMap contributors.
+Copyright © 2026 Sam Russell.
+
+Parallax is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
+
+This applies to every version of Parallax, including releases and commits made before the LICENSE file was added.
+
+Parallax is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+Under section 7(e) of the licence, it grants no rights to the Parallax name or logo. If you publish a modified version, give it a different name and icon.
+
+### Third-party licences
+
+The `matrix` Dart SDK and the `vodozemac` and `flutter_vodozemac` encryption packages are licensed under the AGPL-3.0, which is why Parallax uses the same licence. The other dependencies use the MIT, BSD, Apache-2.0 or (for `dbus`) MPL-2.0 licences; the app's licences page lists them all.
+
+The bundled Space Grotesk font is licensed under the SIL Open Font License 1.1 (`assets/fonts/OFL.txt`). The message fonts — DM Serif Display, Indie Flower, Pacifico, Lobster, Comic Neue, Space Mono, Press Start 2P and Bangers, taken from the [google/fonts](https://github.com/google/fonts) repository — are also under the SIL Open Font License 1.1; each family's licence and copyright notice is in `assets/fonts/licenses/` and on the app's licences page. Map tiles are © OpenStreetMap contributors.
 
 Parallax was built with AI-assisted implementation and review. Automated tests and an installable APK are engineering checks, not a security certification or proof that it works with other Matrix clients.

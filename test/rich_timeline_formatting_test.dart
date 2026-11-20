@@ -130,9 +130,7 @@ void main() {
       final content = composeTextMessage(
         '@Quinn Harper next time we should play a board game',
         ownUserId: me,
-        mentionLabels: const {
-          'Quinn Harper': '@meta_555000111:samprim.net',
-        },
+        mentionLabels: const {'Quinn Harper': '@meta_555000111:samprim.net'},
       );
       expect(
         content['body'],
@@ -153,9 +151,7 @@ void main() {
       final content = composeTextMessage(
         '@Quinn Harper check your messages when you can',
         ownUserId: me,
-        mentionLabels: const {
-          'Quinn Harper': '@meta_555000111:samprim.net',
-        },
+        mentionLabels: const {'Quinn Harper': '@meta_555000111:samprim.net'},
       );
       expect(
         content['body'],
@@ -182,9 +178,7 @@ void main() {
         '[Bob](https://matrix.to/#/@bob:example.org) and '
         '@alice:example.org and @Quinn Harper',
         ownUserId: me,
-        mentionLabels: const {
-          'Quinn Harper': '@meta_555000111:samprim.net',
-        },
+        mentionLabels: const {'Quinn Harper': '@meta_555000111:samprim.net'},
       );
       final html = content['formatted_body'] as String;
       expect(
@@ -231,9 +225,7 @@ void main() {
         '@Quinn Harper again',
         ownUserId: me,
         editEventId: r'$original',
-        mentionLabels: const {
-          'Quinn Harper': '@meta_555000111:samprim.net',
-        },
+        mentionLabels: const {'Quinn Harper': '@meta_555000111:samprim.net'},
       );
       final newContent = edit['m.new_content'] as Map;
       expect(
@@ -246,9 +238,7 @@ void main() {
       final code = composeTextMessage(
         '`@meta_555000111:samprim.net` stays literal',
         ownUserId: me,
-        mentionLabels: const {
-          'Quinn Harper': '@meta_555000111:samprim.net',
-        },
+        mentionLabels: const {'Quinn Harper': '@meta_555000111:samprim.net'},
       );
       final html = code['formatted_body'] as String?;
       if (html != null) {

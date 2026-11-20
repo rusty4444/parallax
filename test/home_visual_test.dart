@@ -91,13 +91,7 @@ ChatRoom _room(
 
 HomeFakeBackend _homeBackend() => HomeFakeBackend()
   ..roomList = [
-    _room(
-      '!p:x',
-      'Quinn Harper',
-      '11605.jpg',
-      direct: true,
-      favourite: true,
-    ),
+    _room('!p:x', 'Quinn Harper', '11605.jpg', direct: true, favourite: true),
     _room('!g:x', 'Giftnote', 'You’ve received a gift card!', favourite: true),
     _room('!m:x', 'Matrix Donkeys', 'Encrypted message', sender: 'You'),
     _room('!i:x', 'Is This Real?', 'Yardwork multitasking', sender: 'You'),
