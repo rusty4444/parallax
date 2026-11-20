@@ -25,6 +25,7 @@ class RoomListTile extends StatelessWidget {
     this.compact = false,
     this.hideInviteAvatar = false,
     this.busy = false,
+    this.selected = false,
     this.style = HomeRowStyle.cards,
     this.preview = HomePreview.long,
   });
@@ -45,6 +46,9 @@ class RoomListTile extends StatelessWidget {
   final bool compact;
   final bool hideInviteAvatar;
   final bool busy;
+
+  /// Open in the tablet/foldable detail pane: the row carries a tint.
+  final bool selected;
 
   /// Cards, flat list rows or compact rows (Settings → Appearance).
   final HomeRowStyle style;
@@ -290,14 +294,24 @@ class RoomListTile extends StatelessWidget {
       p.secondary.withValues(alpha: 0.08),
       p.surface,
     );
+    final selectedTint = Color.alphaBlend(
+      p.accent.withValues(alpha: 0.16),
+      p.surface,
+    );
     if (cards) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: room.invited ? inviteTint : p.surface,
+          color: selected
+              ? selectedTint
+              : room.invited
+              ? inviteTint
+              : p.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: room.invited
+            side: selected
+                ? BorderSide(color: p.accent.withValues(alpha: 0.5))
+                : room.invited
                 ? BorderSide(color: p.secondary.withValues(alpha: 0.5))
                 : BorderSide.none,
           ),
@@ -318,7 +332,11 @@ class RoomListTile extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Material(
-          color: room.invited ? inviteTint : Colors.transparent,
+          color: selected
+              ? selectedTint
+              : room.invited
+              ? inviteTint
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             onTap: onTap,

@@ -40,7 +40,8 @@ ChatEntry _entry(
 );
 
 Future<void> _surface(WidgetTester tester) async {
-  await tester.binding.setSurfaceSize(const Size(800, 1600));
+  // Phone window: these inbox tests assert single-pane behaviour.
+  await tester.binding.setSurfaceSize(const Size(400, 1600));
   addTearDown(() => tester.binding.setSurfaceSize(null));
 }
 

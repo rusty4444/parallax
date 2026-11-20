@@ -887,6 +887,9 @@ void main() {
   testWidgets(
     'directory selection creates a DM and Spaces returns a room route',
     (tester) async {
+      // Phone window: the flow asserts a pushed room route.
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final backend = FeaturesBackend();
       await tester.pumpWidget(
         FeatureSettingsScope(

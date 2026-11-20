@@ -270,6 +270,29 @@ Size mediaPreviewSizeForAspect(double? aspectRatio, {double maxWidth = 240}) {
   return Size(width, height);
 }
 
+/// Animated GIF/WebP previews keep their own shape instead of being cropped
+/// into a fixed box: full width at the media's aspect, capped in height.
+/// Unlike [mediaPreviewSizeForAspect] there is no minimum height, so a wide
+/// GIF renders as a short strip rather than having its sides cut off.
+Size gifPreviewSize(
+  double? aspectRatio, {
+  double maxWidth = 240,
+  double fallbackHeight = 170,
+}) {
+  final limit = maxWidth.isFinite ? math.max(80.0, maxWidth) : 240.0;
+  final ratio = aspectRatio != null && aspectRatio.isFinite && aspectRatio > 0
+      ? aspectRatio.clamp(0.2, 5.0)
+      : null;
+  if (ratio == null) return Size(limit, fallbackHeight);
+  var width = limit;
+  var height = width / ratio;
+  if (height > 320) {
+    height = 320;
+    width = height * ratio;
+  }
+  return Size(width, height);
+}
+
 /// In-memory image decoded within [maxEdge]×[maxEdge] (aspect preserved, never
 /// upscaled), so a hostile 1×100000 image cannot expand into a huge bitmap.
 /// Multi-frame GIF/WebP animate frame by frame at the same bound.
