@@ -1092,14 +1092,64 @@ void WindowManager::StartDragging() {
   HWND hwnd = GetMainWindow();
   ReleaseCapture();
   Undock();
-  // WM_NCLBUTTONDOWN with HTCAPTION is the robust Win32 drag mechanism for
-  // frameless windows. Unlike SC_MOVE, it correctly triggers the DWM
-  // "drag-to-restore" behaviour when the window is maximized, and it does not
-  // depend on the window having a native caption style.
-  POINT pt;
-  GetCursorPos(&pt);
-  ScreenToClient(hwnd, &pt);
-  SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(pt.x, pt.y));
+
+  // Manual drag loop: poll the cursor and move the window with SetWindowPos
+  // until the primary button is released. This is robust for frameless
+  // windows and works even when the DWM modal move loop does not track
+  // injected/synthetic input. It also implements drag-to-restore for a
+  // maximized window explicitly.
+  POINT startCursor;
+  GetCursorPos(&startCursor);
+
+  WINDOWPLACEMENT wp{};
+  wp.length = sizeof(WINDOWPLACEMENT);
+  GetWindowPlacement(hwnd, &wp);
+  bool wasMaximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+  if (wasMaximized) {
+    // Restore to the normal placement, keeping the cursor at the same
+    // relative horizontal position in the title bar so the drag feels
+    // natural (Windows' own drag-to-restore behaviour).
+    RECT normal = wp.rcNormalPosition;
+    int normalWidth = normal.right - normal.left;
+    RECT maxRect;
+    GetWindowRect(hwnd, &maxRect);
+    double frac = 0.5;
+    int maxWidth = maxRect.right - maxRect.left;
+    if (maxWidth > 0) {
+      frac = static_cast<double>(startCursor.x - maxRect.left) / maxWidth;
+      if (frac < 0.0) frac = 0.0;
+      if (frac > 1.0) frac = 1.0;
+    }
+    int newLeft = startCursor.x - static_cast<int>(frac * normalWidth);
+    int newTop = startCursor.y - 10;
+    wp.showCmd = SW_SHOWNORMAL;
+    wp.rcNormalPosition.left = newLeft;
+    wp.rcNormalPosition.top = newTop;
+    wp.rcNormalPosition.right = newLeft + normalWidth;
+    wp.rcNormalPosition.bottom = newTop + (normal.bottom - normal.top);
+    SetWindowPlacement(hwnd, &wp);
+    // Re-read the actual cursor/window after restore.
+    GetCursorPos(&startCursor);
+  }
+
+  RECT startRect;
+  GetWindowRect(hwnd, &startRect);
+
+  MSG msg;
+  while (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+    POINT cur;
+    GetCursorPos(&cur);
+    int dx = cur.x - startCursor.x;
+    int dy = cur.y - startCursor.y;
+    SetWindowPos(hwnd, nullptr, startRect.left + dx, startRect.top + dy, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // Keep the message loop alive so the app stays responsive during drag.
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+    Sleep(8);
+  }
 }
 
 void WindowManager::StartResizing(const flutter::EncodableMap& args) {
