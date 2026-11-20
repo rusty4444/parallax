@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
@@ -9,6 +10,7 @@ import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/threads/event_projection.dart';
 import 'features/threads/thread_features.dart';
 import 'features/threads/thread_widgets.dart';
+import 'features/threads/timeline_navigation.dart';
 import 'hooks/hook_types.dart';
 import 'media_viewer.dart';
 import 'messaging_features.dart';
@@ -55,6 +57,10 @@ class _ThreadScreenState extends State<ThreadScreen> {
   String? _lastReceipt;
   ChatEntry? _replyingTo;
   List<ChatEntry> _replies = const [];
+
+  /// Keys for scrolling to a reply's quoted source within the thread.
+  final _entryKeys = <String, GlobalKey>{};
+  GlobalKey _keyFor(String id) => _entryKeys.putIfAbsent(id, GlobalKey.new);
 
   MessagingFeatures? get _features => switch (widget.backend) {
     final MessagingFeatures features => features,
@@ -336,6 +342,39 @@ class _ThreadScreenState extends State<ThreadScreen> {
 
   String get _roomName => _room?.name ?? '';
 
+  /// Tapping a reply quote goes to the original message: scroll to it when
+  /// it is loaded in this thread, otherwise focus the room timeline on it
+  /// (the search/permalink jump) and leave the thread.
+  Future<void> _jumpToQuoted(String replyToId) async {
+    final sourceContext = _entryKeys[replyToId]?.currentContext;
+    if (sourceContext != null) {
+      await Scrollable.ensureVisible(
+        sourceContext,
+        alignment: 0.2,
+        duration: const Duration(milliseconds: 250),
+      );
+      return;
+    }
+    final navigation = timelineNavigationOf(widget.backend);
+    if (navigation == null || !replyToId.startsWith(r'$')) return;
+    if (navigation.focusedEventIn(widget.roomId) == replyToId) {
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await navigation.openRoomAt(widget.roomId, replyToId);
+      if (mounted) navigator.pop();
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Couldn’t jump to that message.')),
+        );
+      }
+    }
+  }
+
   Widget _bubble(AppPalette p, ChatEntry entry, {bool root = false}) {
     final mine = entry.mine && !root;
     final textColor = mine ? p.bubbleText : p.foreground;
@@ -419,23 +458,30 @@ class _ThreadScreenState extends State<ThreadScreen> {
                         ),
                       ),
                     if (entry.replyToId != null)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 5),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(color: p.secondary, width: 3),
-                          ),
-                        ),
-                        child: Text(
-                          quoted == null
-                              ? 'In reply to an earlier message'
-                              : '${quoted.senderLabel}: ${entryPreview(quoted)}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: mine ? p.bubbleText : p.muted,
-                            fontSize: 12,
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _jumpToQuoted(entry.replyToId!),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 5),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                left: BorderSide(color: p.secondary, width: 3),
+                              ),
+                            ),
+                            child: Text(
+                              quoted == null
+                                  ? 'In reply to an earlier message'
+                                  : '${quoted.senderLabel}: ${entryPreview(quoted)}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: mine ? p.bubbleText : p.muted,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -610,9 +656,16 @@ class _ThreadScreenState extends State<ThreadScreen> {
     onRefresh: _refresh,
     child: ListView(
       physics: const AlwaysScrollableScrollPhysics(),
+      // Keep every loaded reply built so a quote can scroll to its source
+      // even when it is far off screen (GlobalKey lookup needs a live
+      // element). Threads are paginated, so this stays bounded.
+      scrollCacheExtent: const ScrollCacheExtent.pixels(1000000),
       padding: const EdgeInsets.symmetric(vertical: 10),
       children: [
-        _bubble(p, widget.root, root: true),
+        KeyedSubtree(
+          key: _keyFor(widget.root.id),
+          child: _bubble(p, widget.root, root: true),
+        ),
         _divider(p),
         if (_loading)
           Padding(
@@ -658,7 +711,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
             ),
           ),
         for (final entry in _replies)
-          KeyedSubtree(key: ValueKey(entry.id), child: _bubble(p, entry)),
+          KeyedSubtree(key: _keyFor(entry.id), child: _bubble(p, entry)),
       ],
     ),
   );
