@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+
+### Tap a reply's quote to see the original
+
+- Tapping or clicking the quote at the top of a reply takes you to the message it answers. Parallax loads the conversation back as far as that message, scrolls up to it and marks it "Jumped to this message". Everything newer stays below it in order, so you can scroll back down or use the jump-to-bottom button. Tapping the same quote again scrolls back to it.
+- Quotes inside a thread work the same way: the original scrolls into view when it's in the thread, otherwise the room opens at it.
+- Search results, message links and pinned messages use the same jump, so they no longer swap the timeline for a slice that ends at the message.
+
+### Text stays readable on any bubble colour
+
+- Sender names, links, reply quotes, times and the jump marker inside a message bubble now adjust to the room's bubble colour, so none of them disappear on a light or bright bubble. They keep the theme's colour where it already reads clearly.
+- Automatic bubble text keeps white on strong colours only while it reads clearly, and switches to near-black otherwise.
+
 ## 1.0.0
 
 ### Edited messages preview their new text
