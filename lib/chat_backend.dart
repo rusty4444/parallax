@@ -522,6 +522,11 @@ abstract class ChatBackend extends ChangeNotifier {
   Future<void> logout();
   Future<void> openRoom(String roomId);
   Future<void> loadOlder(String roomId);
+
+  /// Reveals messages newer than the focused event after a jump, paging
+  /// towards the live end as the reader scrolls down. Backends without
+  /// focused timelines ignore it.
+  Future<void> loadNewer(String roomId) async {}
   void closeRoom(String roomId);
 
   /// Marks what the open room shows as read (Parallax came back on screen
