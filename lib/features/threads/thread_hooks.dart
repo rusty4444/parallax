@@ -18,35 +18,17 @@ import 'thread_list_screen.dart';
 import 'thread_widgets.dart';
 import 'timeline_navigation.dart';
 
-/// Room header: "Threads" (threads list). While the timeline is focused on an
-/// event, "Jump to latest" takes its place: the header has room for one
-/// module action (the threads list stays reachable from room details).
+/// Room header: "Threads" (threads list). A jump scrolls the live timeline
+/// to the target without hiding anything, so there is no "Jump to latest"
+/// mode to take the header's single module action slot.
 List<Widget> threadRoomHeaderActions(
   BuildContext context,
   RoomHookContext ctx,
 ) {
   _startDeviceIndex(ctx.backend);
-  final navigation = timelineNavigationOf(ctx.backend);
-  final focused = navigation?.focusedEventIn(ctx.roomId) != null;
   final threads = threadFeaturesOf(ctx.backend);
   return [
-    if (navigation != null && focused)
-      IconButton(
-        key: const ValueKey('thread-jump-to-latest'),
-        tooltip: 'Jump to latest',
-        visualDensity: VisualDensity.compact,
-        onPressed: () => jumpToLatest(context, navigation, ctx.roomId),
-        icon: Badge(
-          isLabelVisible: navigation.hasNewerThanFocus(ctx.roomId),
-          smallSize: 8,
-          backgroundColor: ctx.palette.accent,
-          child: Icon(
-            Icons.vertical_align_bottom_rounded,
-            color: ctx.palette.secondary,
-          ),
-        ),
-      )
-    else if (threads != null)
+    if (threads != null)
       IconButton(
         key: const ValueKey('thread-list-action'),
         tooltip: 'Threads',
@@ -77,7 +59,7 @@ Widget? threadEntryFooter(BuildContext context, EntryHookContext ctx) {
       if (summary)
         ThreadSummaryChip(
           entry: entry,
-          palette: ctx.palette,
+          palette: ctx.ink,
           onBubble: ctx.onBubble,
           onOpen: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -94,8 +76,9 @@ Widget? threadEntryFooter(BuildContext context, EntryHookContext ctx) {
         FocusedEventMarker(
           backend: ctx.backend,
           roomId: ctx.roomId,
-          palette: ctx.palette,
+          palette: ctx.ink,
           onBubble: ctx.onBubble,
+          fill: ctx.bubbleFill,
           navigation: navigation,
         ),
     ],

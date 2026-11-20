@@ -21,19 +21,24 @@ class _JumpBackend extends FakeBackend implements TimelineNavigation {
   final jumps = <List<String>>[];
   String? focused;
   bool failJump = false;
+  int _jumpGen = 0;
 
   @override
   Future<void> openRoomAt(String roomId, String eventId) async {
     jumps.add([roomId, eventId]);
     if (failJump) throw StateError('Message unavailable');
     focused = eventId;
+    _jumpGen++;
   }
 
   @override
   String? focusedEventIn(String roomId) => focused;
 
   @override
-  bool hasNewerThanFocus(String roomId) => focused != null;
+  int jumpGenerationIn(String roomId) => _jumpGen;
+
+  @override
+  bool hasNewerThanFocus(String roomId) => false;
 
   @override
   Future<void> jumpToLatest(String roomId) async {
@@ -179,9 +184,11 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('tapping while already focused on the source does nothing', (
+    testWidgets('tapping again re-jumps so the view scrolls back to it', (
       tester,
     ) async {
+      // Nothing is hidden after a jump, so the reader may have scrolled away;
+      // tapping the same quote again must scroll back to the source.
       final backend = _JumpBackend()
         ..currentUserId = '@me:example.org'
         ..focused = _sourceId;
@@ -194,7 +201,9 @@ void main() {
 
       await tapQuote(tester, 'Alice: pizza tonight?');
 
-      expect(backend.jumps, isEmpty);
+      expect(backend.jumps, [
+        [_roomId, _sourceId],
+      ]);
     });
 
     testWidgets('long-pressing the quote still opens the action menu', (
@@ -282,7 +291,7 @@ void main() {
       },
     };
 
-    testWidgets('focuses the cached timeline on the source message', (
+    testWidgets('jumps to the source without hiding newer messages', (
       tester,
     ) async {
       final db = _Database()
@@ -309,8 +318,13 @@ void main() {
       await tapQuote(tester, '${source.senderLabel}: pizza tonight?');
 
       expect(backend.focusedEventId, _sourceId);
-      // The source is the newest visible entry, older context kept.
-      expect(backend.messages.map((e) => e.id), [r'$older', _sourceId]);
+      // The whole live timeline stays loaded: the reply (newer) is still
+      // there below the source, so scrolling back down just works.
+      expect(backend.messages.map((e) => e.id), [
+        r'$older',
+        _sourceId,
+        _replyId,
+      ]);
 
       await timelineNavigationOf(backend)!.jumpToLatest(_roomId);
       expect(backend.focusedEventId, isNull);

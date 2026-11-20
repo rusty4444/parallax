@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 import '../chat_backend.dart';
 import '../features/threads/timeline_navigation.dart';
 
-/// The quoted source of a reply. Tapping or clicking it jumps the timeline
-/// to the original message, using the same focus as search results and
-/// permalinks: the source becomes the newest visible entry ("Jumped to this
-/// message" footer) and "Jump to latest" returns to the live end.
+/// The quoted source of a reply. Tapping or clicking it loads the room's
+/// live timeline and scrolls up to the original message (the same jump as
+/// search results and permalinks), marking it with a "Jumped to this
+/// message" footer. Newer messages stay visible below, so scrolling back
+/// down just works.
 ///
 /// Quotes without a server event ID (pending local echoes) or on backends
-/// that cannot focus events stay inert, exactly as before.
+/// that cannot jump stay inert, exactly as before.
 class ReplyQuote extends StatelessWidget {
   const ReplyQuote({
     super.key,
@@ -42,8 +43,6 @@ class ReplyQuote extends StatelessWidget {
     BuildContext context,
     TimelineNavigation navigation,
   ) async {
-    // Already focused on the source: there is nothing to jump to.
-    if (navigation.focusedEventIn(roomId) == replyToId) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
       await navigation.openRoomAt(roomId, replyToId);

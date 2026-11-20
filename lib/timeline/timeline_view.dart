@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../app_theme.dart';
 import '../chat_backend.dart';
+import '../features/threads/timeline_navigation.dart';
 import '../features/rich_timeline/mention_suggestions.dart';
 import '../features/rich_timeline/message_actions.dart';
 import '../features/rich_timeline/rich_timeline_features.dart';
@@ -83,6 +87,12 @@ class _TimelineViewState extends State<TimelineView> {
   final _scroll = ScrollController();
   final _listKey = GlobalKey();
   final _loadOlderKey = GlobalKey();
+  final _jumpKey = GlobalKey();
+
+  /// The jump (focused event + generation) already scrolled to.
+  String? _scrolledJump;
+  int _scrolledJumpGen = -1;
+  bool _jumpScheduled = false;
   final _groupIds = <String, String>{};
   final _expanded = <String>{};
   bool _away = false;
@@ -121,6 +131,8 @@ class _TimelineViewState extends State<TimelineView> {
       _pullDistance = 0;
       _pullTriggered = false;
       _pullArmed = false;
+      _scrolledJump = null;
+      _scrolledJumpGen = -1;
     }
   }
 
@@ -226,6 +238,25 @@ class _TimelineViewState extends State<TimelineView> {
     return false;
   }
 
+  Future<void> _scrollToJump(String target, int generation) async {
+    if (!mounted) return;
+    final ctx = _jumpKey.currentContext;
+    if (ctx != null) {
+      await Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.2,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _scrolledJump = target;
+      _scrolledJumpGen = generation;
+      _jumpScheduled = false;
+    });
+  }
+
   void _openReceipts(String eventId) => showMessageReceipts(
     context,
     backend: widget.backend,
@@ -286,6 +317,23 @@ class _TimelineViewState extends State<TimelineView> {
     final receipts = derived.receipts;
     final rows = derived.rows;
     final byId = derived.byId;
+    // A jump loads the whole live timeline and scrolls up to the target.
+    // Expand any collapsed group holding it so it can be scrolled to.
+    final navigation = timelineNavigationOf(backend);
+    final jumpTarget = navigation?.focusedEventIn(widget.roomId);
+    final jumpGen = navigation?.jumpGenerationIn(widget.roomId) ?? 0;
+    final jumpPending =
+        jumpTarget != null &&
+        byId.containsKey(jumpTarget) &&
+        (jumpTarget != _scrolledJump || jumpGen != _scrolledJumpGen);
+    if (jumpPending) {
+      for (final row in rows) {
+        if (row is CollapsedRow &&
+            row.entries.any((entry) => entry.id == jumpTarget)) {
+          _expanded.add(row.groupId);
+        }
+      }
+    }
     final items = _items(rows);
     // The newest item is index 0 (reverse list), so every new message shifts
     // every index. Give each item a key unique in this build and map it to
@@ -304,6 +352,30 @@ class _TimelineViewState extends State<TimelineView> {
       }
       itemKeys[i] = key;
       indexOfKey[key] = items.length - i - 1;
+    }
+    var jumpItemIndex = -1;
+    if (jumpPending) {
+      for (var i = 0; i < items.length; i++) {
+        final item = items[i];
+        final row = item.row;
+        final contains =
+            item.child?.id == jumpTarget ||
+            (row is EntryRow && row.entry.id == jumpTarget) ||
+            (row is GalleryRow &&
+                row.entries.any((entry) => entry.id == jumpTarget)) ||
+            (row is CollapsedRow &&
+                row.entries.any((entry) => entry.id == jumpTarget));
+        if (contains) {
+          jumpItemIndex = i;
+          break;
+        }
+      }
+      if (jumpItemIndex >= 0 && !_jumpScheduled) {
+        _jumpScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(_scrollToJump(jumpTarget, jumpGen));
+        });
+      }
     }
     final lastOwn = entries
         .where(
@@ -465,6 +537,11 @@ class _TimelineViewState extends State<TimelineView> {
         key: _listKey,
         controller: _scroll,
         reverse: true,
+        // While jumping, build the whole loaded timeline so the target can
+        // be scrolled to even when it is far from the current position.
+        scrollCacheExtent: jumpPending
+            ? const ScrollCacheExtent.pixels(1000000)
+            : null,
         physics: backend.canLoadOlder
             ? const AlwaysScrollableScrollPhysics()
             : null,
@@ -490,10 +567,14 @@ class _TimelineViewState extends State<TimelineView> {
             );
           }
           final i = items.length - index - 1;
-          return KeyedSubtree(
+          final slot = KeyedSubtree(
             key: _ItemKey(itemKeys[i]),
             child: buildItem(items[i]),
           );
+          if (i == jumpItemIndex) {
+            return KeyedSubtree(key: _jumpKey, child: slot);
+          }
+          return slot;
         },
       ),
     );

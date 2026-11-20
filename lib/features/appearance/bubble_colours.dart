@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app_theme.dart';
 
+export '../../app_theme.dart' show contrastRatio, legibleOn, readableOn;
+
 /// Per-room message bubble colours. Null fields follow the theme; a null
 /// text colour is chosen automatically for contrast with its bubble.
 @immutable
@@ -93,11 +95,6 @@ class BubbleColours {
   @override
   int get hashCode => Object.hash(mine, mineText, theirs, theirsText);
 }
-
-/// Black-ish or white, whichever reads better on [background].
-Color readableOn(Color background) => background.computeLuminance() > 0.42
-    ? const Color(0xFF141414)
-    : const Color(0xFFFFFFFF);
 
 String colourToHex(Color colour) {
   final rgb = colour.toARGB32() & 0xFFFFFF;

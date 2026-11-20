@@ -137,6 +137,7 @@ class FocusedEventMarker extends StatelessWidget {
     required this.palette,
     required this.onBubble,
     required this.navigation,
+    this.fill,
   });
   final ChatBackend backend;
   final String roomId;
@@ -144,9 +145,21 @@ class FocusedEventMarker extends StatelessWidget {
   final Color onBubble;
   final TimelineNavigation navigation;
 
+  /// The bubble behind the marker; its button text is kept legible on it.
+  final Color? fill;
+
   @override
   Widget build(BuildContext context) {
     final newer = navigation.hasNewerThanFocus(roomId);
+    final tint = palette.accent.withValues(alpha: 0.12);
+    final bubble = fill;
+    final action = bubble == null
+        ? palette.secondary
+        : legibleOn(
+            Color.alphaBlend(tint, bubble),
+            palette.secondary,
+            toward: onBubble,
+          );
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Container(
@@ -154,7 +167,7 @@ class FocusedEventMarker extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: palette.accent, width: 1.4),
-          color: palette.accent.withValues(alpha: 0.12),
+          color: tint,
         ),
         child: Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -170,12 +183,15 @@ class FocusedEventMarker extends StatelessWidget {
                     color: palette.accent,
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    'Jumped to this message',
-                    style: TextStyle(
-                      color: onBubble,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                  // Wraps in narrow bubbles and at large text sizes.
+                  Flexible(
+                    child: Text(
+                      'Jumped to this message',
+                      style: TextStyle(
+                        color: onBubble,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -185,7 +201,7 @@ class FocusedEventMarker extends StatelessWidget {
               TextButton(
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  foregroundColor: palette.secondary,
+                  foregroundColor: action,
                 ),
                 onPressed: () => jumpToLatest(context, navigation, roomId),
                 child: const Text('Jump to latest'),

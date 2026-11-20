@@ -1346,7 +1346,6 @@ class MatrixBackend extends ChatBackend
         client == null ||
         roomId == null ||
         timeline == null ||
-        _focusedEventId != null ||
         !_isAppVisible()) {
       return;
     }
@@ -1358,30 +1357,28 @@ class MatrixBackend extends ChatBackend
   // --- Jump to event (lib/features/threads/timeline_navigation.dart) ------
 
   String? _focusedEventId;
-  bool _focusHasNewer = false;
+  int _jumpGeneration = 0;
 
-  /// Event the active timeline is focused on after [openRoomAt], or null
-  /// while the active timeline shows the live end of the room.
+  /// Event the active timeline was jumped to via [openRoomAt], or null when
+  /// the room was opened normally. The timeline stays live (newer messages
+  /// are visible); this only marks the message to scroll to and highlight.
   String? get focusedEventId =>
       _timeline == null || _activeRoomId == null ? null : _focusedEventId;
 
-  /// Whether messages newer than the focused event exist (or arrived) and are
-  /// hidden. Always true for a server-fetched (fragmented) context.
-  bool get focusHasNewer {
-    final timeline = _timeline;
-    final focus = focusedEventId;
-    if (timeline == null || focus == null) return false;
-    return _focusHasNewer ||
-        timeline.canRequestFuture ||
-        timeline.events.indexWhere((event) => event.eventId == focus) > 0;
-  }
+  /// Bumped on every jump so the timeline re-scrolls even to the same event.
+  int get jumpGeneration => _jumpGeneration;
 
-  /// Opens [roomId] with its timeline loaded around [eventId] (search results,
-  /// permalinks, pinned messages). Messages newer than the event stay hidden
-  /// until [jumpToLatest], so the event is the newest visible entry. Sync
-  /// updates keep flowing; a server-fetched context switches to the live
-  /// timeline on [jumpToLatest]. Read receipts are not sent for a focused
-  /// timeline because the latest messages have not been seen.
+  /// Nothing is hidden after a jump any more: the whole live timeline is
+  /// loaded and the view scrolls to the target, so newer messages are always
+  /// reachable by scrolling down.
+  bool get focusHasNewer => false;
+
+  /// Opens [roomId] and scrolls to [eventId] (reply quotes, search results,
+  /// permalinks, pinned messages). The room's live timeline is loaded — all
+  /// messages up to now — paging back through history until the target is
+  /// included, then the view scrolls up to it. Newer messages stay visible
+  /// below it, so scrolling back down just works; nothing is hidden and there
+  /// is no separate context to jump out of.
   Future<void> openRoomAt(String roomId, String eventId) async {
     final client = _requireClient();
     final room = client.getRoomById(roomId);
@@ -1389,75 +1386,55 @@ class MatrixBackend extends ChatBackend
       throw StateError('Room is not joined');
     }
     if (!eventId.startsWith(r'$')) throw ArgumentError.value(eventId);
-    _roomGeneration++;
+
+    // Load the live timeline (a no-op when this room is already open).
+    if (_activeRoomId != roomId || _timeline == null) {
+      await openRoom(roomId);
+    }
+    final timeline = _timeline;
+    if (_activeRoomId != roomId || timeline == null) {
+      throw StateError('Room is not open');
+    }
     final generation = _roomGeneration;
     final security = _securityGeneration;
-    _timeline?.cancelSubscriptions();
-    _timeline = null;
-    _activeRoomId = roomId;
-    _focusedEventId = eventId;
-    _focusHasNewer = false;
-    _visibleMessageLimit = 100;
-    _loadingHistory = false;
-    _messages = const [];
-    _requestedSenders.clear();
-    notifyListeners();
     bool current() =>
         generation == _roomGeneration &&
         security == _securityGeneration &&
         !_disposed &&
         isSessionCurrent(client);
-    matrix.Timeline? created;
-    try {
-      created = await room.getTimeline(
-        eventContextId: eventId,
-        onUpdate: () {
-          if (current() && created != null) _scheduleMessageRefresh(created);
-        },
-        onNewEvent: () {
-          if (current() && !_focusHasNewer && _focusedEventId != null) {
-            _focusHasNewer = true;
-            notifyListeners();
-          }
-        },
-      );
-    } catch (_) {
-      if (current()) {
-        _activeRoomId = null;
-        _focusedEventId = null;
-        notifyListeners();
-      }
-      rethrow;
+
+    // Page back through history until the target is loaded.
+    var pages = 0;
+    while (current() &&
+        !timeline.events.any((event) => event.eventId == eventId) &&
+        timeline.canRequestHistory &&
+        pages < 40) {
+      _visibleMessageLimit += 50;
+      await timeline.requestHistory(historyCount: 50);
+      pages++;
     }
     if (!current()) {
-      created.cancelSubscriptions();
       throw StateError('Room changed while jumping to the message');
     }
-    if (!created.events.any((event) => event.eventId == eventId)) {
-      created.cancelSubscriptions();
-      _activeRoomId = null;
-      _focusedEventId = null;
-      notifyListeners();
-      throw StateError('Message unavailable');
-    }
-    _timeline = created;
-    _refreshMessages(created);
+    final index = timeline.events.indexWhere(
+      (event) => event.eventId == eventId,
+    );
+    if (index < 0) throw StateError('Message unavailable');
+    if (index >= _visibleMessageLimit) _visibleMessageLimit = index + 50;
+
+    _focusedEventId = eventId;
+    _jumpGeneration++;
+    _refreshMessages(timeline);
   }
 
-  /// Leaves a focused timeline for the live end of [roomId].
+  /// Clears the jump marker. Nothing is hidden after a jump, so this only
+  /// removes the highlight; the newest messages are already reachable by
+  /// scrolling down (or the jump-to-bottom button).
   Future<void> jumpToLatest(String roomId) async {
-    final timeline = _timeline;
     if (_activeRoomId != roomId || _focusedEventId == null) return;
     _focusedEventId = null;
-    _focusHasNewer = false;
-    if (timeline != null && !timeline.canRequestFuture) {
-      // The context was the cached live timeline: just reveal newer entries.
-      _refreshMessages(timeline);
-      return;
-    }
-    _timeline?.cancelSubscriptions();
-    _timeline = null;
-    await openRoom(roomId);
+    final timeline = _timeline;
+    if (timeline != null) _refreshMessages(timeline);
   }
 
   @override
@@ -4282,12 +4259,7 @@ class MatrixBackend extends ChatBackend
     final client = _client;
     if (_disposed || timeline != _timeline || client == null) return;
     final queuedIds = _outbox.records.map((record) => record.id).toSet();
-    var events = timeline.events;
-    // Jump to event: the focused event is the newest visible entry.
-    final focus = _focusedEventId == null
-        ? -1
-        : events.indexWhere((event) => event.eventId == _focusedEventId);
-    if (focus > 0) events = events.sublist(focus);
+    final events = timeline.events;
     final visible = events
         .take(_visibleMessageLimit)
         .where(
@@ -4308,7 +4280,7 @@ class MatrixBackend extends ChatBackend
       ordered.map((event) => _projectEntry(event, timeline)).toList().reversed,
     );
     _requestMissingSenders(timeline, events.take(_visibleMessageLimit));
-    if (_focusedEventId == null) _scheduleMarkRead();
+    _scheduleMarkRead();
     notifyListeners();
   }
 
