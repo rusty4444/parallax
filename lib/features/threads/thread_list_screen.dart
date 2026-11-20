@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
@@ -248,6 +249,12 @@ class _ThreadsListScreenState extends State<ThreadsListScreen> {
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(
+          // Full-screen threads-list route on a desktop window: clear the
+          // shell's top-right caption buttons — the header's Refresh action
+          // would otherwise sit directly under the close button.
+          minimum: (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+              : EdgeInsets.zero,
           child: Column(
             children: [
               Padding(

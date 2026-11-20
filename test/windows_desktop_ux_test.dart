@@ -547,15 +547,19 @@ void main() {
       expect(calls, isNot(contains('startDragging')));
     });
 
-    testWidgets('caption buttons work and do not start a drag', (tester) async {
-      await pumpShell(tester);
-      await tester.tap(find.byTooltip('Minimize'));
-      await tester.pump();
-      expect(calls, contains('minimize'));
-      calls.clear();
-      await tester.dragFrom(const Offset(780, 18), const Offset(-120, 20));
-      await tester.pump();
-      expect(calls, isNot(contains('startDragging')));
-    });
+    platformTestWidgets(
+      'caption buttons work and do not start a drag',
+      TargetPlatform.windows,
+      (tester) async {
+        await pumpShell(tester);
+        await tester.tap(find.byTooltip('Minimize'));
+        await tester.pump();
+        expect(calls, contains('minimize'));
+        calls.clear();
+        await tester.dragFrom(const Offset(780, 18), const Offset(-120, 20));
+        await tester.pump();
+        expect(calls, isNot(contains('startDragging')));
+      },
+    );
   });
 }

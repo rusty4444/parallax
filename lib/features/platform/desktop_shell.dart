@@ -128,9 +128,15 @@ class _DragStripState extends State<_DragStrip> {
   /// Whether the hit path below the strip contains a pointer listener
   /// inside the app content (a header button, the pane divider, tappable
   /// text). Gestures there belong to that widget, so they must not drag or
-  /// double-click the window. The scan stops at the content root: the
-  /// route's own barrier listeners sit above it and are always present,
-  /// even over empty header space.
+  /// double-click the window. The scan stops at the content root.
+  ///
+  /// The Navigator itself wraps its Overlay in a pointer-tracking `Listener`
+  /// (with an `AbsorbPointer` child) on EVERY route. In the production wiring
+  /// the Navigator lives INSIDE the content root, so that infrastructure
+  /// listener lands between the strip and the content root in the hit path —
+  /// it is not a control and must not block the drag. It is identified by its
+  /// direct `AbsorbPointer` child; a real control's listener wraps the
+  /// control's own content instead.
   bool _interactiveBelow(Offset position) {
     final result = HitTestResult();
     WidgetsBinding.instance.hitTestInView(
@@ -143,8 +149,11 @@ class _DragStripState extends State<_DragStrip> {
     var belowStrip = false;
     for (final entry in result.path) {
       final target = entry.target;
-      if (belowStrip && target is RenderPointerListener) return true;
       if (target == contentRoot) return false;
+      if (belowStrip && target is RenderPointerListener) {
+        if (target.child is RenderAbsorbPointer) continue;
+        return true;
+      }
       if (target == strip) belowStrip = true;
     }
     return false;

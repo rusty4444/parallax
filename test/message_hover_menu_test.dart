@@ -315,4 +315,150 @@ void main() {
       },
     );
   });
+
+  group('hover bar viewport placement', () {
+    final palette = paletteFor(VisualTheme.parallax);
+
+    /// A timeline-like viewport below a fixed header: the bar must stay
+    /// inside the ListView's bounds, never paint over the header.
+    Future<void> pumpTimeline(
+      WidgetTester tester, {
+      required double topPad,
+      required double itemHeight,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const SizedBox(
+                  height: 60,
+                  child: Center(child: Text('Header')),
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.only(top: topPad),
+                    children: [
+                      MessageHoverMenu(
+                        actionsBuilder: () => [
+                          _item('reply', Icons.reply_rounded, () {}),
+                        ],
+                        palette: palette,
+                        child: Container(
+                          key: _childKey,
+                          height: itemHeight,
+                          color: palette.surface,
+                        ),
+                      ),
+                      // Filler so the timeline is taller than the viewport
+                      // and can actually scroll.
+                      const SizedBox(height: 900),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    platformTestWidgets(
+      'a message near the top flips the bar below it, not over the header',
+      TargetPlatform.windows,
+      (tester) async {
+        await pumpTimeline(tester, topPad: 10, itemHeight: 60);
+        final item = tester.getRect(find.byKey(_childKey));
+        final gesture = await hover(tester, item.center);
+        await tester.pump();
+        final bar = tester.getRect(find.byKey(_barKey));
+        // Below the message's bottom edge, inside the viewport (which
+        // starts at y=60, below the header).
+        expect(bar.top, closeTo(item.bottom + 6, 0.01));
+        expect(bar.top, greaterThanOrEqualTo(60));
+        expect(bar.right, closeTo(item.right, 0.01));
+        await leave(tester, gesture);
+      },
+    );
+
+    platformTestWidgets(
+      'with room above, the bar stays above the message',
+      TargetPlatform.macOS,
+      (tester) async {
+        await pumpTimeline(tester, topPad: 120, itemHeight: 60);
+        final item = tester.getRect(find.byKey(_childKey));
+        final gesture = await hover(tester, item.center);
+        await tester.pump();
+        final bar = tester.getRect(find.byKey(_barKey));
+        expect(bar.bottom, closeTo(item.top - 6, 0.01));
+        await leave(tester, gesture);
+      },
+    );
+
+    platformTestWidgets(
+      'scrolling a hovered message to the top flips the bar below',
+      TargetPlatform.windows,
+      (tester) async {
+        await pumpTimeline(tester, topPad: 120, itemHeight: 60);
+        final gesture = await hover(
+          tester,
+          tester.getRect(find.byKey(_childKey)).center,
+        );
+        await tester.pump();
+        expect(
+          tester.getRect(find.byKey(_barKey)).bottom,
+          closeTo(tester.getRect(find.byKey(_childKey)).top - 6, 0.01),
+        );
+        await tester.drag(find.byType(ListView), const Offset(0, -100));
+        await tester.pump();
+        // Follow the message so the hover stays alive.
+        final item = tester.getRect(find.byKey(_childKey));
+        await gesture.moveTo(item.center);
+        await tester.pump();
+        final bar = tester.getRect(find.byKey(_barKey));
+        expect(bar.top, closeTo(item.bottom + 6, 0.01));
+        await leave(tester, gesture);
+      },
+    );
+
+    platformTestWidgets(
+      'a message partially scrolled out of the top gets the bar at its '
+      'visible bottom',
+      TargetPlatform.windows,
+      (tester) async {
+        await pumpTimeline(tester, topPad: 0, itemHeight: 100);
+        final gesture = await hover(
+          tester,
+          tester.getRect(find.byKey(_childKey)).center,
+        );
+        await tester.pump();
+        await tester.drag(find.byType(ListView), const Offset(0, -50));
+        await tester.pump();
+        final item = tester.getRect(find.byKey(_childKey));
+        expect(item.top, lessThan(60)); // partially out of frame
+        await gesture.moveTo(item.center);
+        await tester.pump();
+        final bar = tester.getRect(find.byKey(_barKey));
+        expect(bar.top, closeTo(item.bottom + 6, 0.01));
+        expect(bar.top, greaterThanOrEqualTo(60));
+        await leave(tester, gesture);
+      },
+    );
+
+    platformTestWidgets(
+      'a message taller than the viewport hides the bar',
+      TargetPlatform.macOS,
+      (tester) async {
+        await pumpTimeline(tester, topPad: 0, itemHeight: 600);
+        final gesture = await hover(
+          tester,
+          tester.getRect(find.byKey(_childKey)).center,
+        );
+        await tester.pump();
+        expect(find.byKey(_barKey), findsNothing);
+        await leave(tester, gesture);
+      },
+    );
+  });
 }
