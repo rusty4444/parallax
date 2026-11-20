@@ -174,6 +174,140 @@ void main() {
     expect(backend.focusedEventId, isNull);
   });
 
+  test(
+    'scrolling down reveals newer messages page by page to the live end',
+    () async {
+      final requests = <String>[];
+      final db = _Database()
+        ..cached = [_event(r'$live2', 9000), _event(r'$live1', 8000)];
+      final client = _Client(db, (request) async {
+        final path = request.url.path;
+        requests.add(path);
+        if (path.contains('/context/')) {
+          return http.Response(
+            jsonEncode({
+              'event': _event(r'$target', 2000),
+              'events_before': [_event(r'$before', 1000)],
+              'events_after': [_event(r'$after', 3000)],
+              'start': 'start-token',
+              'end': 'end-token',
+              'state': <Object?>[],
+            }),
+            200,
+          );
+        }
+        if (path.contains('/messages') &&
+            request.url.queryParameters['dir'] == 'f') {
+          final from = request.url.queryParameters['from'];
+          // Forward pages arrive oldest first; start == end means the live end.
+          final pages = {
+            'end-token': ([_event(r'$newer1', 4000)], 'page2-token'),
+            'page2-token': ([_event(r'$newer2', 5000)], 'live-token'),
+            'live-token': (<Map<String, Object?>>[], 'live-token'),
+          };
+          final page = pages[from];
+          expect(page, isNotNull, reason: 'unexpected forward page $from');
+          return http.Response(
+            jsonEncode({
+              'chunk': page!.$1,
+              'start': from,
+              'end': page.$2,
+              'state': <Object?>[],
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      });
+      final backend = MatrixBackend.withClient(client);
+      addTearDown(backend.dispose);
+      final navigation = timelineNavigationOf(backend)!;
+
+      await navigation.openRoomAt(_roomId, r'$target');
+      expect(backend.messages.map((e) => e.id), [r'$before', r'$target']);
+
+      // First scroll down reveals the newer message loaded with the context.
+      await backend.loadNewer(_roomId);
+      expect(backend.messages.map((e) => e.id), [
+        r'$before',
+        r'$target',
+        r'$after',
+      ]);
+      expect(navigation.focusedEventIn(_roomId), r'$target');
+      expect(navigation.hasNewerThanFocus(_roomId), isTrue);
+
+      // Further scrolls page forward through the server context.
+      await backend.loadNewer(_roomId);
+      expect(backend.messages.last.id, r'$newer1');
+      expect(navigation.focusedEventIn(_roomId), r'$target');
+      await backend.loadNewer(_roomId);
+      expect(backend.messages.last.id, r'$newer2');
+      expect(navigation.focusedEventIn(_roomId), r'$target');
+
+      // Reaching the live end leaves the focus, like "Jump to latest".
+      await backend.loadNewer(_roomId);
+      expect(navigation.focusedEventIn(_roomId), isNull);
+      expect(navigation.hasNewerThanFocus(_roomId), isFalse);
+      expect(backend.messages.map((e) => e.id), [
+        r'$before',
+        r'$target',
+        r'$after',
+        r'$newer1',
+        r'$newer2',
+      ]);
+      // A focused timeline never sends read receipts, even while paging.
+      expect(requests.where((path) => path.contains('read_markers')), isEmpty);
+    },
+  );
+
+  test('a cached timeline reveals its newer messages in place', () async {
+    final requests = <String>[];
+    final db = _Database()
+      ..cached = [
+        _event(r'$newest', 3000),
+        _event(r'$target', 2000),
+        _event(r'$older', 1000),
+      ];
+    final backend = MatrixBackend.withClient(
+      _Client(db, (request) async {
+        requests.add(request.url.path);
+        return http.Response('{}', 200);
+      }),
+    );
+    addTearDown(backend.dispose);
+    final navigation = timelineNavigationOf(backend)!;
+
+    await navigation.openRoomAt(_roomId, r'$target');
+    expect(backend.messages.map((e) => e.id), [r'$older', r'$target']);
+
+    await backend.loadNewer(_roomId);
+    expect(navigation.focusedEventIn(_roomId), isNull);
+    expect(navigation.hasNewerThanFocus(_roomId), isFalse);
+    expect(backend.messages.map((e) => e.id), [
+      r'$older',
+      r'$target',
+      r'$newest',
+    ]);
+    expect(requests.where((p) => p.contains('/messages')), isEmpty);
+  });
+
+  test('loadNewer without a focused timeline does nothing', () async {
+    final requests = <String>[];
+    final db = _Database()..cached = [_event(r'$a', 1000)];
+    final backend = MatrixBackend.withClient(
+      _Client(db, (request) async {
+        requests.add(request.url.path);
+        return http.Response('{}', 200);
+      }),
+    );
+    addTearDown(backend.dispose);
+    await backend.openRoom(_roomId);
+    await backend.loadNewer(_roomId);
+    await backend.loadNewer('!other:matrix.example');
+    expect(backend.focusedEventId, isNull);
+    expect(requests.where((p) => p.contains('/messages')), isEmpty);
+  });
+
   test('rejects non-joined rooms and malformed event IDs', () async {
     final backend = MatrixBackend.withClient(
       _Client(_Database(), (_) async => http.Response('{}', 200)),

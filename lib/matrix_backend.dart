@@ -1359,6 +1359,8 @@ class MatrixBackend extends ChatBackend
 
   String? _focusedEventId;
   bool _focusHasNewer = false;
+  bool _focusTrimmed = true;
+  bool _loadingNewer = false;
 
   /// Event the active timeline is focused on after [openRoomAt], or null
   /// while the active timeline shows the live end of the room.
@@ -1366,22 +1368,25 @@ class MatrixBackend extends ChatBackend
       _timeline == null || _activeRoomId == null ? null : _focusedEventId;
 
   /// Whether messages newer than the focused event exist (or arrived) and are
-  /// hidden. Always true for a server-fetched (fragmented) context.
+  /// hidden. Always true for a server-fetched (fragmented) context that has
+  /// not reached the live end yet.
   bool get focusHasNewer {
     final timeline = _timeline;
     final focus = focusedEventId;
     if (timeline == null || focus == null) return false;
     return _focusHasNewer ||
         timeline.canRequestFuture ||
-        timeline.events.indexWhere((event) => event.eventId == focus) > 0;
+        (_focusTrimmed &&
+            timeline.events.indexWhere((event) => event.eventId == focus) > 0);
   }
 
   /// Opens [roomId] with its timeline loaded around [eventId] (search results,
   /// permalinks, pinned messages). Messages newer than the event stay hidden
-  /// until [jumpToLatest], so the event is the newest visible entry. Sync
-  /// updates keep flowing; a server-fetched context switches to the live
-  /// timeline on [jumpToLatest]. Read receipts are not sent for a focused
-  /// timeline because the latest messages have not been seen.
+  /// until the reader scrolls down ([loadNewer]) or taps [jumpToLatest], so
+  /// the event is the newest visible entry at first. Sync updates keep
+  /// flowing; a server-fetched context switches to the live timeline on
+  /// [jumpToLatest]. Read receipts are not sent for a focused timeline
+  /// because the latest messages have not been seen.
   Future<void> openRoomAt(String roomId, String eventId) async {
     final client = _requireClient();
     final room = client.getRoomById(roomId);
@@ -1397,6 +1402,7 @@ class MatrixBackend extends ChatBackend
     _activeRoomId = roomId;
     _focusedEventId = eventId;
     _focusHasNewer = false;
+    _focusTrimmed = true;
     _visibleMessageLimit = 100;
     _loadingHistory = false;
     _messages = const [];
@@ -1450,6 +1456,7 @@ class MatrixBackend extends ChatBackend
     if (_activeRoomId != roomId || _focusedEventId == null) return;
     _focusedEventId = null;
     _focusHasNewer = false;
+    _focusTrimmed = true;
     if (timeline != null && !timeline.canRequestFuture) {
       // The context was the cached live timeline: just reveal newer entries.
       _refreshMessages(timeline);
@@ -1458,6 +1465,52 @@ class MatrixBackend extends ChatBackend
     _timeline?.cancelSubscriptions();
     _timeline = null;
     await openRoom(roomId);
+  }
+
+  /// Scrolls a focused timeline towards the live end: reveals the newer
+  /// messages already loaded, then pages forward through the server context.
+  /// Reaching the live end leaves the focus, so scrolling down and "Jump to
+  /// latest" both return to the newest messages.
+  @override
+  Future<void> loadNewer(String roomId) async {
+    final timeline = _timeline;
+    if (_activeRoomId != roomId ||
+        _focusedEventId == null ||
+        timeline == null ||
+        _loadingNewer) {
+      return;
+    }
+    final generation = _securityGeneration;
+    _loadingNewer = true;
+    notifyListeners();
+    try {
+      if (_focusTrimmed) {
+        // First scroll down: show the newer messages already in the timeline.
+        _focusTrimmed = false;
+        final focusIndex = timeline.events.indexWhere(
+          (event) => event.eventId == _focusedEventId,
+        );
+        if (focusIndex <= 0 && timeline.canRequestFuture) {
+          // Nothing newer was loaded with the context; page forward at once.
+          await timeline.requestFuture(historyCount: 50);
+        }
+      } else if (timeline.canRequestFuture) {
+        await timeline.requestFuture(historyCount: 50);
+      }
+      if (_securityGeneration == generation && _timeline == timeline) {
+        if (!timeline.canRequestFuture) {
+          _focusedEventId = null;
+          _focusHasNewer = false;
+          _focusTrimmed = true;
+        }
+        _refreshMessages(timeline);
+      }
+    } finally {
+      if (_securityGeneration == generation) {
+        _loadingNewer = false;
+        if (!_disposed) notifyListeners();
+      }
+    }
   }
 
   @override
@@ -1500,6 +1553,7 @@ class MatrixBackend extends ChatBackend
     _timeline?.cancelSubscriptions();
     _timeline = null;
     _focusedEventId = null;
+    _focusTrimmed = true;
     _activeRoomId = null;
     _messages = const [];
   }
@@ -4283,8 +4337,9 @@ class MatrixBackend extends ChatBackend
     if (_disposed || timeline != _timeline || client == null) return;
     final queuedIds = _outbox.records.map((record) => record.id).toSet();
     var events = timeline.events;
-    // Jump to event: the focused event is the newest visible entry.
-    final focus = _focusedEventId == null
+    // Jump to event: the focused event is the newest visible entry until the
+    // reader scrolls down towards the live end (loadNewer).
+    final focus = _focusedEventId == null || !_focusTrimmed
         ? -1
         : events.indexWhere((event) => event.eventId == _focusedEventId);
     if (focus > 0) events = events.sublist(focus);
