@@ -137,12 +137,10 @@ class MessageBubble extends StatelessWidget {
       mine: mine,
       avatars: avatars,
     );
-    // Stickers render without bubble chrome, as in Element X.
-    final standalone = mediaEntryStandalone(
-      context,
-      hook,
-      onLongPress: onAction,
-    );
+    // Stickers render without bubble chrome, as in Element X. Their long
+    // press goes through the DoubleTapReact below, so they lift like any
+    // other message.
+    final standalone = mediaEntryStandalone(context, hook);
     final bubble = standalone != null
         ? ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),

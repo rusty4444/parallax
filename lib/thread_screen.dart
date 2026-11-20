@@ -18,6 +18,7 @@ import 'hooks/hook_types.dart';
 import 'media_viewer.dart';
 import 'messaging_features.dart';
 import 'haptics.dart';
+import 'timeline/message_lift.dart';
 
 /// A thread: its root, the replies (oldest first) and an in-thread composer.
 /// Replies are sent with `m.thread` relations through the outbox; viewing the
@@ -289,9 +290,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
   Future<void> _actions(ChatEntry entry) async {
     if (!mounted || !_ownerCurrent || entry.redacted) return;
     Haptics.longPress();
-    final choice = await showModalBottomSheet<String>(
+    // A long press or right-click lifts the message above the sheet.
+    final choice = await showMessageActionSheet<String>(
       context: context,
-      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -429,131 +430,139 @@ class _ThreadScreenState extends State<ThreadScreen> {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onLongPress: () => _actions(entry),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: mine ? p.bubble : p.surface,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(19),
-                  topRight: const Radius.circular(19),
-                  bottomLeft: Radius.circular(mine || root ? 19 : 5),
-                  bottomRight: Radius.circular(mine && !root ? 5 : 19),
-                ),
-                border: mine
-                    ? null
-                    : Border.all(
-                        color: root
-                            ? p.accent.withValues(alpha: 0.6)
-                            : p.stroke,
-                      ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (!mine)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Text(
-                          entry.senderLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: ink.secondary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
+          child: MessageLiftTarget(
+            child: Builder(
+              builder: (liftContext) => GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPress: () =>
+                    liftMessage(liftContext, () => _actions(entry)),
+                // Desktop: right-click opens the same actions as a long press.
+                onSecondaryTapUp: (_) =>
+                    liftMessage(liftContext, () => _actions(entry)),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: mine ? p.bubble : p.surface,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(19),
+                      topRight: const Radius.circular(19),
+                      bottomLeft: Radius.circular(mine || root ? 19 : 5),
+                      bottomRight: Radius.circular(mine && !root ? 5 : 19),
+                    ),
+                    border: mine
+                        ? null
+                        : Border.all(
+                            color: root
+                                ? p.accent.withValues(alpha: 0.6)
+                                : p.stroke,
                           ),
-                        ),
-                      ),
-                    if (entry.replyToId != null)
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => _jumpToQuoted(entry.replyToId!),
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 5),
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                left: BorderSide(
-                                  color: ink.secondary,
-                                  width: 3,
-                                ),
-                              ),
-                            ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (!mine)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 5),
                             child: Text(
-                              quoted == null
-                                  ? 'In reply to an earlier message'
-                                  : '${quoted.senderLabel}: ${entryPreview(quoted)}',
-                              maxLines: 2,
+                              entry.senderLabel,
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: mine ? p.bubbleText : ink.muted,
-                                fontSize: 12,
+                                color: ink.secondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    if (hasMedia)
-                      InkWell(
-                        onTap: () => openMediaViewer(
-                          context,
-                          backend: widget.backend,
-                          roomId: widget.roomId,
-                          eventId: entry.id,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                entry.isImage
-                                    ? Icons.image_outlined
-                                    : Icons.insert_drive_file_outlined,
-                                color: mine ? p.bubbleText : ink.secondary,
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
+                        if (entry.replyToId != null)
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _jumpToQuoted(entry.replyToId!),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 5),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: ink.secondary,
+                                      width: 3,
+                                    ),
+                                  ),
+                                ),
                                 child: Text(
-                                  entryPreview(entry),
+                                  quoted == null
+                                      ? 'In reply to an earlier message'
+                                      : '${quoted.senderLabel}: ${entryPreview(quoted)}',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: textColor),
+                                  style: TextStyle(
+                                    color: mine ? p.bubbleText : ink.muted,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ],
+                            ),
+                          ),
+                        if (hasMedia)
+                          InkWell(
+                            onTap: () => openMediaViewer(
+                              context,
+                              backend: widget.backend,
+                              roomId: widget.roomId,
+                              eventId: entry.id,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    entry.isImage
+                                        ? Icons.image_outlined
+                                        : Icons.insert_drive_file_outlined,
+                                    color: mine ? p.bubbleText : ink.secondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      entryPreview(entry),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(color: textColor),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          body,
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.bottomRight,
+                          child: Text(
+                            MaterialLocalizations.of(context).formatTimeOfDay(
+                              TimeOfDay.fromDateTime(entry.time.toLocal()),
+                            ),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: mine
+                                  ? legibleOn(
+                                      p.bubble,
+                                      p.bubbleText.withValues(alpha: 0.77),
+                                      minRatio: 3,
+                                      toward: p.bubbleText,
+                                    )
+                                  : ink.muted,
+                            ),
                           ),
                         ),
-                      )
-                    else
-                      body,
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.bottomRight,
-                      child: Text(
-                        MaterialLocalizations.of(context).formatTimeOfDay(
-                          TimeOfDay.fromDateTime(entry.time.toLocal()),
-                        ),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: mine
-                              ? legibleOn(
-                                  p.bubble,
-                                  p.bubbleText.withValues(alpha: 0.77),
-                                  minRatio: 3,
-                                  toward: p.bubbleText,
-                                )
-                              : ink.muted,
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

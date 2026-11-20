@@ -31,6 +31,7 @@ import 'widgets.dart';
 import 'features/composer/edit_markdown.dart';
 import 'haptics.dart';
 import 'timeline/double_tap_react.dart';
+import 'timeline/message_lift.dart';
 import 'features/appearance/bubble_colours.dart';
 import 'features/appearance/bubble_colours_screen.dart';
 import 'pending_failure.dart';
@@ -897,10 +898,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
         entry.mine ||
         remainingHookActions.isNotEmpty;
     var expanded = false;
-    final choice = await showModalBottomSheet<String>(
+    // A long press or right-click lifts the message above the sheet.
+    final choice = await showMessageActionSheet<String>(
       isScrollControlled: true,
       context: context,
-      showDragHandle: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheetState) {
           ListTile hookTile(MessageActionItem item) => ListTile(

@@ -19,6 +19,7 @@ import 'package:parallax/hooks/hook_types.dart';
 import 'package:parallax/message_draft_store.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/thread_screen.dart';
+import 'package:parallax/timeline/message_lift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _roomId = '!room:example.org';
@@ -540,6 +541,49 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(clipboard, ['+61 400 123 456']);
+    });
+
+    testWidgets('long press and right-click lift a reply above its sheet', (
+      tester,
+    ) async {
+      final backend = _Backend();
+      await tester.pumpWidget(
+        _app(
+          ThreadScreen(
+            backend: backend,
+            roomId: _roomId,
+            root: _entry(r'$root', body: 'Root message', replies: 1),
+          ),
+        ),
+      );
+      backend.threadRequests.single.result.complete(
+        ThreadPage([_entry(r'$r1', body: 'first reply', minute: 1)]),
+      );
+      await tester.pump();
+      final lifted = find.byKey(messageLiftSnapshotKey);
+      ModalBottomSheetRoute<dynamic> sheet() =>
+          ModalRoute.of(tester.element(find.byType(BottomSheet)))!
+              as ModalBottomSheetRoute<dynamic>;
+
+      await tester.longPress(find.text('first reply'));
+      await tester.pumpAndSettle();
+      expect(find.text('Quote in reply'), findsOneWidget);
+      expect(lifted, findsOneWidget);
+      expect(find.byKey(messageLiftDimKey), findsOneWidget);
+      expect(sheet().barrierColor, Colors.transparent);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(find.text('Quote in reply'), findsNothing);
+      expect(lifted, findsNothing);
+
+      await tester.tap(find.text('first reply'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Quote in reply'), findsOneWidget);
+      expect(lifted, findsOneWidget);
+      await tester.tap(find.text('Copy text'));
+      await tester.pumpAndSettle();
+      expect(lifted, findsNothing);
+      expect(find.byKey(messageLiftDimKey), findsNothing);
     });
   });
 

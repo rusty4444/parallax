@@ -992,6 +992,9 @@ class StickerMessageBody extends StatelessWidget {
       image: true,
       child: Tooltip(
         message: ctx.entry.body,
+        // Hover still shows it; a long press opens the message's actions
+        // (and lifts the sticker) instead of claiming the gesture.
+        triggerMode: TooltipTriggerMode.manual,
         child: GestureDetector(
           onTap: () => _open(context, ctx),
           child: SizedBox(
