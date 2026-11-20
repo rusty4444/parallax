@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
+
+### Open source
+
+- Parallax is free software under the GNU AGPL-3.0-or-later, covering every version, with the source for each release public at https://github.com/rusty4444/parallax.
 
 ### One version for every device
 
