@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
+
+### Edited messages preview their new text
+
+- The chat list shows an edited message's new text instead of the "* …" fallback meant for old clients, including edits that bridges cut short. Edited replies no longer carry the quoted fallback text, and an edit without usable new content drops the "* " marker. A literal asterisk message that isn't an edit keeps its text.
+
+### Portrait videos play upright
+
+- A portrait recording played squashed flat into a landscape box, in the message bubble, the full-screen viewer and linked videos. The player now lays the video out at the size the video plugin reports instead of swapping it again, so a phone recording with a rotation flag plays in a portrait box.
+
+### Mention pills keep display names
+
+- Outgoing mentions keep the contact's display name on bridges that use the pill's text as the remote mention's visible name (such as Teams), instead of showing the raw bridged account ID. The message body and mention metadata still carry the IDs.
 
 ### Copy a code from the chat list
 

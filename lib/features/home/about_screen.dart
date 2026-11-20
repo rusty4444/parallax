@@ -5,8 +5,8 @@ import '../../widgets.dart';
 import 'settings_widgets.dart';
 
 /// Keep in step with `version:` in pubspec.yaml.
-const parallaxVersion = '0.5.0';
-const parallaxBuild = '8';
+const parallaxVersion = '1.0.0';
+const parallaxBuild = '21';
 
 /// Where problems are reported (private Gitea issue tracker).
 final reportProblemUrl = Uri.parse(
