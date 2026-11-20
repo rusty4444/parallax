@@ -43,6 +43,12 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
+  # MSVC 14.40+ (VS 2022 17.10) constructs std::mutex with constexpr. Run
+  # against an older msvcp140.dll (14.36 seen on a user's laptop) the first
+  # lock reads a null pointer and the app crashes; video_player_win locks one
+  # the moment Play is tapped. Keep the older layout so plugins and the
+  # runner work with any VC++ runtime (the bundled one below is preferred).
+  target_compile_definitions(${TARGET} PRIVATE "_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
 endfunction()
 
 # Flutter library and tool build rules.
@@ -79,6 +85,17 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+# Ship the MSVC C++ runtime the app was built with next to parallax.exe.
+# Windows loads these from the application folder before System32, so the
+# app never runs against whatever (possibly older) VC++ redistributable the
+# machine happens to have installed.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+include(InstallRequiredSystemLibraries)
+install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
