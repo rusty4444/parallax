@@ -77,7 +77,7 @@ Widget? threadEntryFooter(BuildContext context, EntryHookContext ctx) {
       if (summary)
         ThreadSummaryChip(
           entry: entry,
-          palette: ctx.palette,
+          palette: ctx.ink,
           onBubble: ctx.onBubble,
           onOpen: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -94,8 +94,9 @@ Widget? threadEntryFooter(BuildContext context, EntryHookContext ctx) {
         FocusedEventMarker(
           backend: ctx.backend,
           roomId: ctx.roomId,
-          palette: ctx.palette,
+          palette: ctx.ink,
           onBubble: ctx.onBubble,
+          fill: ctx.bubbleFill,
           navigation: navigation,
         ),
     ],
