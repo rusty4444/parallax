@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0
+
+### Parallax on Mac, iPhone and iPad
+
+- Parallax now runs on Apple Silicon Macs (macOS 13+), iPhone, iPad and iPhone Fold from the same codebase, with the same chats, encryption and Parallax extras as Android.
+- Tablets, foldables and wide windows show the chat list and the open chat side by side; the divider can be dragged and resizing keeps the open chat.
+
+### Desktop windows feel native
+
+- A quick-action bar appears when you hover a message on Mac and Windows: react, reply, open the thread, edit your own text, pin and more. It flips below the message near the top of the chat. Right-click still opens the full action sheet.
+- Drag-select message text and copy it with Ctrl+C / Cmd+C. Enter sends and Shift+Enter adds a new line; pasting a copied image attaches it.
+- The title bar blends into the theme, the chat list and room headers sit flush in it, and the window can be dragged from any empty part of the top bar, including when maximised.
+
+### Videos play reliably on desktop
+
+- Playing a video no longer crashes Windows PCs with an older Microsoft C++ runtime installed. Parallax now ships the runtime it was built with, and its plugins also work with older runtimes.
+- On Mac, videos that showed "Couldn't play this video" now play: the temporary folder they open from is created first. Voice recording, sharing and preparing videos to send use the same folder.
+- Video players are released only after the picture has left the screen, which removes a crash when closing the full-screen viewer or scrolling away from a playing video.
+- GIF and WebP previews keep their own shape.
+
 ## 1.1.0
 
 ### Tap a reply's quote to see the original
