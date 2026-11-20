@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'chat_backend.dart';
@@ -225,6 +226,12 @@ class _LoginScreenState extends State<LoginScreen> {
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(
+          // Full-screen login route on a desktop window: clear the shell's
+          // top title-bar band so the scrollable does not extend under the
+          // drag strip (which would block window dragging).
+          minimum: (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+              : EdgeInsets.zero,
           child: LayoutBuilder(
             builder: (context, constraints) {
               // Desktop windows get a wide two-column layout that fits the

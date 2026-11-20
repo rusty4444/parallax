@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
@@ -147,6 +148,9 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(
+          minimum: (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+              : EdgeInsets.zero,
           child: Column(
             children: [
               Padding(

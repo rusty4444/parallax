@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'features/home/about_screen.dart';
@@ -288,6 +289,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(
+          minimum: (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+              ? const EdgeInsets.only(top: kDesktopTitleBarHeight)
+              : EdgeInsets.zero,
           child: ListView(
             padding: const EdgeInsets.fromLTRB(22, 12, 22, 34),
             children: [
