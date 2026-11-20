@@ -135,6 +135,121 @@ void main() {
     );
 
     platformTestWidgets(
+      'pasting more images adds them instead of replacing (#15)',
+      TargetPlatform.windows,
+      (tester) async {
+        var next = 0;
+        const channel = MethodChannel('parallax/clipboard');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              next++;
+              return Uint8List.fromList(List.filled(32, next));
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null),
+        );
+        final controller = TextEditingController();
+        addTearDown(controller.dispose);
+        final sent = <(String, int?)>[];
+        await mount(
+          tester,
+          controller: controller,
+          onSend: (text, media) async => sent.add((text, media?.bytes.first)),
+        );
+        Future<void> paste() async {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+        }
+
+        await focusField(tester);
+        await paste();
+        expect(find.text('pasted-image.png'), findsOneWidget);
+        await paste();
+        await paste();
+        // All three stay staged, in paste order.
+        expect(
+          find.byKey(const ValueKey('composer-staged-images')),
+          findsOneWidget,
+        );
+        expect(find.text('3 images'), findsOneWidget);
+        for (var i = 0; i < 3; i++) {
+          expect(
+            find.byKey(ValueKey('composer-staged-image-$i')),
+            findsOneWidget,
+          );
+        }
+
+        // Remove the middle one, then send: each image goes in order and
+        // the typed text follows as its own message.
+        await tester.tap(find.byTooltip('Remove image 2'));
+        await tester.pump();
+        expect(find.text('2 images'), findsOneWidget);
+        await tester.enterText(find.byType(TextField), 'look at these');
+        await focusField(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, [('', 1), ('', 3), ('look at these', null)]);
+        expect(
+          find.byKey(const ValueKey('composer-staged-images')),
+          findsNothing,
+        );
+        expect(find.text('pasted-image.png'), findsNothing);
+        expect(controller.text, isEmpty);
+      },
+    );
+
+    platformTestWidgets(
+      'a failed image keeps only the unsent ones staged (#15)',
+      TargetPlatform.windows,
+      (tester) async {
+        var next = 0;
+        const channel = MethodChannel('parallax/clipboard');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              next++;
+              return Uint8List.fromList(List.filled(32, next));
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null),
+        );
+        final controller = TextEditingController();
+        addTearDown(controller.dispose);
+        final sent = <int?>[];
+        await mount(
+          tester,
+          controller: controller,
+          onSend: (text, media) async {
+            if (media?.bytes.first == 2) throw StateError('offline');
+            sent.add(media?.bytes.first);
+          },
+        );
+        await focusField(tester);
+        for (var i = 0; i < 3; i++) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, [1]);
+        // Image 1 went; 2 and 3 are still staged for a retry.
+        expect(find.text('2 images'), findsOneWidget);
+        expect(find.textContaining('Could not send'), findsOneWidget);
+      },
+    );
+
+    platformTestWidgets(
       'Ctrl+V falls back to text paste',
       TargetPlatform.windows,
       (tester) async {

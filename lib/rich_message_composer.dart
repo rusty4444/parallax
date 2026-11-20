@@ -59,6 +59,9 @@ class RichMessageComposer extends StatefulWidget {
   });
 
   static const maxMediaBytes = maxComposerMediaBytes;
+
+  /// Pasted images stack up to this many before sending, like a photo pick.
+  static const maxStagedImages = 10;
   final TextEditingController controller;
   final bool sending;
   final Future<void> Function(String text, MediaSelection? media) onSend;
@@ -124,6 +127,10 @@ class RichMessageComposer extends StatefulWidget {
 class _RichMessageComposerState extends State<RichMessageComposer>
     with WidgetsBindingObserver {
   MediaSelection? _media;
+
+  /// Further images pasted after [_media] (an image). Each is sent as its
+  /// own message after [_media]; the typed text follows as a message.
+  final List<MediaSelection> _moreMedia = [];
   bool _voiceMedia = false;
   String? _error;
   bool _closed = false;
@@ -420,11 +427,20 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     _pickEpoch++; // Invalidate native results, including stale error completions.
     _mediaVersion++;
     _media = selection;
+    _moreMedia.clear();
     _voiceMedia = voice;
     _error = null;
   }
 
-  void _stage(MediaSelection selection) {
+  static bool _isImage(MediaSelection media) =>
+      media.mimeType.toLowerCase().startsWith('image/');
+
+  /// Every staged attachment, in send order.
+  List<MediaSelection> get _staged => [?_media, ..._moreMedia];
+
+  /// Stages [selection]. With [add], an image joins the images already
+  /// staged instead of replacing them (pasting several images in a row).
+  void _stage(MediaSelection selection, {bool add = false}) {
     final error = _validate(selection);
     if (error != null) {
       _showError(error);
@@ -437,7 +453,41 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       return;
     }
     if (_voiceMedia) _discardVoice();
+    final current = _media;
+    if (add &&
+        current != null &&
+        !_voiceMedia &&
+        _isImage(current) &&
+        _isImage(selection)) {
+      if (_staged.length >= RichMessageComposer.maxStagedImages) {
+        _showError(
+          'You can attach up to ${RichMessageComposer.maxStagedImages} '
+          'images at a time.',
+        );
+        return;
+      }
+      setState(() {
+        _mediaVersion++;
+        _moreMedia.add(selection);
+        _error = null;
+      });
+      return;
+    }
     setState(() => _assignMedia(selection));
+  }
+
+  /// Removes one of several staged images.
+  void _removeStaged(MediaSelection media) {
+    if (!_alive) return;
+    setState(() {
+      _mediaVersion++;
+      if (identical(_media, media)) {
+        _media = _moreMedia.isEmpty ? null : _moreMedia.removeAt(0);
+      } else {
+        _moreMedia.removeWhere((m) => identical(m, media));
+      }
+      _error = null;
+    });
   }
 
   Future<MediaSelection?> _pickImage(ImageSource source) async {
@@ -751,6 +801,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
               name: 'pasted-image.png',
               mimeType: 'image/png',
             ),
+            add: true,
           );
           return;
         }
@@ -808,6 +859,7 @@ class _RichMessageComposerState extends State<RichMessageComposer>
         name: 'keyboard.$extension',
         mimeType: content.mimeType,
       ),
+      add: true,
     );
   }
 
@@ -934,6 +986,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     // stop() returns durable bytes, not a recorder-owned file. The send may
     // outlive this widget without retaining the microphone or preview player.
     final media = _media;
+    if (media != null && _moreMedia.isNotEmpty) {
+      _sendStaged(text);
+      return;
+    }
     final problem = _draftError(text, media);
     if (problem != null) {
       _showError(problem);
@@ -945,6 +1001,33 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       await onSend(text, media);
       return true;
     }, media: media);
+  }
+
+  /// Several staged images: each goes as its own message, in order, then
+  /// the typed text as a message of its own (a caption on one photo of a
+  /// gallery would be hidden by the grid). Images already accepted leave
+  /// the composer, so a failure part-way keeps only what didn't go.
+  void _sendStaged(String text) {
+    final hasText = text.trim().isNotEmpty;
+    final problem = hasText ? _draftError(text, null) : null;
+    if (problem != null) {
+      _showError(problem);
+      return;
+    }
+    Haptics.confirm();
+    final onSend = widget.onSend;
+    final batch = _staged;
+    _consumeDraft(() async {
+      for (final item in batch) {
+        if (!_alive) return false;
+        // Removed from the strip while earlier images were sending.
+        if (!_staged.any((m) => identical(m, item))) continue;
+        await onSend('', item);
+        if (_alive) _removeStaged(item);
+      }
+      if (hasText) await onSend(text, null);
+      return true;
+    });
   }
 
   /// Runs [action] under the send lock. When it reports the draft consumed
@@ -1394,6 +1477,88 @@ class _RichMessageComposerState extends State<RichMessageComposer>
     return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
   }
 
+  /// Several pasted images: a strip of thumbnails, each removable.
+  Widget _stagedImagesPreview() {
+    final staged = _staged;
+    return Card(
+      key: const ValueKey('composer-staged-images'),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 64,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: staged.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 6),
+                  itemBuilder: (context, index) {
+                    final media = staged[index];
+                    return Stack(
+                      key: ValueKey('composer-staged-image-$index'),
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            media.bytes,
+                            width: 64,
+                            height: 64,
+                            fit: BoxFit.cover,
+                            cacheWidth: 192,
+                            errorBuilder: (_, _, _) => const SizedBox(
+                              width: 64,
+                              height: 64,
+                              child: Icon(Icons.image_outlined),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: Material(
+                            color: Colors.black54,
+                            shape: const CircleBorder(),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () => _removeStaged(media),
+                              child: Tooltip(
+                                message: 'Remove image ${index + 1}',
+                                child: const Padding(
+                                  padding: EdgeInsets.all(3),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 14,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${staged.length} images',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            IconButton(
+              tooltip: 'Remove all images',
+              onPressed: _removeAttachment,
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _attachmentPreview(MediaSelection media) => Card(
     margin: const EdgeInsets.only(bottom: 8),
     child: Padding(
@@ -1527,7 +1692,10 @@ class _RichMessageComposerState extends State<RichMessageComposer>
                 ],
               ),
             ),
-          if (_media != null) _attachmentPreview(_media!),
+          if (_media != null && _moreMedia.isNotEmpty)
+            _stagedImagesPreview()
+          else if (_media != null)
+            _attachmentPreview(_media!),
           if (_suggestions.isNotEmpty && _suggestionQuery != null)
             _suggestionList(),
           if (voiceActive)
@@ -1680,7 +1848,11 @@ class _RichMessageComposerState extends State<RichMessageComposer>
       ),
       onSubmitted: (_) => _send(),
       decoration: InputDecoration(
-        hintText: _media == null ? 'Write a message…' : 'Add a caption…',
+        hintText: _media == null
+            ? 'Write a message…'
+            : _moreMedia.isEmpty
+            ? 'Add a caption…'
+            : 'Add a message…',
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 12,
