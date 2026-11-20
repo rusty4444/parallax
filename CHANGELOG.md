@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### One version for every device
+
+- Android, iPhone, iPad, Mac and Windows now build from the same code and history, so every fix and feature reaches all of them at once. Android picks up the shared parts of the 1.2.0 desktop work: a draggable divider between the chat list and the chat on tablets and foldables, video players released only after they leave the screen, the wider sign-in layout on large screens and the reworked invitation buttons in the chat list.
+
+### Message fonts
+
+- A Message font button in the compose box offers eight fonts (DM Serif Display, Indie Flower, Pacifico, Lobster, Comic Neue, Space Mono, Press Start 2P and Bangers), each shown in its own face. The draft shows the chosen font as you type, and the choice stays until you pick another.
+- Other Parallax users see your message in that font, including replies in threads and edits. Other Matrix apps show the message in their usual font.
+
+### Unpin Note to self
+
+- Long-press Note to self in the chat list for Unpin from top. It then sorts with your other chats and loses its pin; Pin to top puts it back. The choice syncs to your other devices.
+
+### Paste several images
+
+- Pasting another image while one is waiting to send now adds it instead of replacing the first, up to ten. Each thumbnail has its own remove button. They send in order, with anything you typed following as its own message.
+
+### Keyboard space on Android
+
+- Switching away from Parallax while the keyboard was opening or closing could leave a black band the height of the keyboard when you came back. Parallax now asks Android for the real keyboard size when it returns and after every keyboard animation.
+
 ## 1.2.0
 
 ### Parallax on Mac, iPhone and iPad
