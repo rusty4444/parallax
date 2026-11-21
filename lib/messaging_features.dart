@@ -31,11 +31,16 @@ class MediaSelection {
     required this.name,
     required this.mimeType,
     this.durationMs,
+    this.extraContent = const {},
   });
   final Uint8List bytes;
   final String name;
   final String mimeType;
   final int? durationMs;
+
+  /// Extra event-content keys merged into the sent message (for example the
+  /// Parallax video-note marker). Must not override core media keys.
+  final Map<String, Object?> extraContent;
 }
 
 class DirectoryUser {

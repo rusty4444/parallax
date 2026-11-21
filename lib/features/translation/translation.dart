@@ -39,8 +39,9 @@ class TranslationTools {
         'source': source,
         'target': target,
       });
-      if (result == null)
+      if (result == null) {
         throw const TranslationUnavailable('No translation returned.');
+      }
       return result;
     } on MissingPluginException {
       throw const TranslationUnavailable();

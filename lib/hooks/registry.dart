@@ -9,6 +9,7 @@ import '../features/home/home_hooks.dart';
 import '../features/link_previews/link_preview_hooks.dart';
 import '../features/live_location/live_location_hooks.dart';
 import '../features/media/media_hooks.dart';
+import '../features/media/video_note.dart';
 import '../features/message_requests/message_requests_hooks.dart';
 import '../features/notifications/notification_hooks.dart';
 import '../features/packs/packs_hooks.dart';
@@ -74,6 +75,7 @@ List<ComposerAttachmentAction> composerAttachmentsFor(
   ...pollComposerAttachments(context, ctx),
   ...liveLocationComposerAttachments(context, ctx),
   ...packsComposerAttachments(context, ctx),
+  ...videoNoteComposerAttachments(context, ctx),
 ];
 
 /// Long-press options on the composer's send button.

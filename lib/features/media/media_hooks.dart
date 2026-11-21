@@ -17,6 +17,7 @@ import 'media_gallery_screen.dart';
 import 'media_settings_section.dart';
 import 'thumbnail_sync.dart';
 import 'thumbnail_sync_section.dart';
+import 'video_note.dart';
 
 /// Body for media kinds (image captions, video, audio, voice, sticker, file).
 /// Return null to use the core rendering.
@@ -24,7 +25,14 @@ Widget? mediaEntryBody(BuildContext context, EntryHookContext ctx) {
   if (ctx.entry.redacted) return null;
   return switch (ctx.entry.kind) {
     EntryKind.image => ImageMessageBody(ctx: ctx),
-    EntryKind.video => VideoMessageBody(ctx: ctx),
+    EntryKind.video =>
+      isVideoNote(ctx.entry.content)
+          ? SizedBox(
+              width: 220,
+              height: 220,
+              child: ClipOval(child: VideoMessageBody(ctx: ctx)),
+            )
+          : VideoMessageBody(ctx: ctx),
     EntryKind.audio => AudioMessageBody(ctx: ctx),
     EntryKind.voice => VoiceMessageBody(ctx: ctx),
     EntryKind.sticker => StickerMessageBody(ctx: ctx),

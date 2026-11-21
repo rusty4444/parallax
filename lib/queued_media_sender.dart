@@ -219,6 +219,7 @@ Future<void> sendQueuedAttachment({
       'org.matrix.msc3245.voice': <String, dynamic>{},
     },
   };
+  content.addAll(media.extraContent);
   check();
   final eventId = await room.sendEvent(
     content,
