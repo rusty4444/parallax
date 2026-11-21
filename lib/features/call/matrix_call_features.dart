@@ -230,6 +230,7 @@ class MatrixCallFeatures implements CallFeatures {
           language: options.language,
           theme: options.theme,
           fontScale: options.fontScale,
+          screenSharing: _settings.screenSharingEnabled,
         ),
       ),
       widgetId: widgetId,

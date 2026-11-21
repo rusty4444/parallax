@@ -4,6 +4,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../app_theme.dart';
@@ -11,8 +12,10 @@ import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../platform_permissions.dart';
 import '../../widgets.dart';
+import '../home/home_features.dart' show matrixToRoomLink;
 import 'active_call.dart';
 import 'call_features.dart';
+import 'call_integration.dart';
 import 'call_web_host.dart';
 import 'widget_driver.dart';
 
@@ -115,6 +118,7 @@ class _CallScreenState extends State<CallScreen> {
     _claimed = ActiveCall.enter(widget.roomId);
     widget.backend.addListener(_onBackendChanged);
     unawaited(_keepAwake(true));
+    unawaited(CallIntegration.setAutoPip(true));
   }
 
   /// Sign-out or an account switch ends the call screen immediately.
@@ -328,6 +332,52 @@ class _CallScreenState extends State<CallScreen> {
     if (leave == true && mounted) await _leave();
   }
 
+  Future<void> _shareCallLink() async {
+    final link = matrixToRoomLink(widget.roomId);
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Join my Parallax call: $link',
+        subject: 'Parallax call',
+      ),
+    );
+  }
+
+  Future<void> _chooseAudioOutput() async {
+    final outputs = await CallIntegration.audioOutputs();
+    if (!mounted) return;
+    if (outputs.isEmpty) {
+      setState(() => _notice = 'No audio outputs available on this device.');
+      return;
+    }
+    final chosen = await showModalBottomSheet<AudioOutput>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Audio output',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            for (final output in outputs)
+              ListTile(
+                leading: const Icon(Icons.speaker_phone_outlined),
+                title: Text(output.name),
+                subtitle: Text(output.type),
+                onTap: () => Navigator.pop(sheetContext, output),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) {
+      await CallIntegration.setAudioOutput(chosen.id);
+    }
+  }
+
   @override
   void dispose() {
     widget.backend.removeListener(_onBackendChanged);
@@ -338,6 +388,7 @@ class _CallScreenState extends State<CallScreen> {
     _host?.dispose();
     if (_claimed) ActiveCall.leave(widget.roomId);
     unawaited(_keepAwake(false));
+    unawaited(CallIntegration.setAutoPip(false));
     _owner.release();
     super.dispose();
   }
@@ -358,6 +409,38 @@ class _CallScreenState extends State<CallScreen> {
             fit: StackFit.expand,
             children: [
               if (host != null && _phase != _Phase.failed) host.build(context),
+              if (_phase == _Phase.ready)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Row(
+                    children: [
+                      _CallControlButton(
+                        key: const ValueKey('call-audio-output'),
+                        palette: p,
+                        icon: Icons.speaker_phone_outlined,
+                        tooltip: 'Audio output',
+                        onTap: _chooseAudioOutput,
+                      ),
+                      const SizedBox(width: 8),
+                      _CallControlButton(
+                        key: const ValueKey('call-pip'),
+                        palette: p,
+                        icon: Icons.picture_in_picture_alt_outlined,
+                        tooltip: 'Picture in picture',
+                        onTap: () => unawaited(CallIntegration.enterPip()),
+                      ),
+                      const SizedBox(width: 8),
+                      _CallControlButton(
+                        key: const ValueKey('call-share-link'),
+                        palette: p,
+                        icon: Icons.ios_share_rounded,
+                        tooltip: 'Share call link',
+                        onTap: _shareCallLink,
+                      ),
+                    ],
+                  ),
+                ),
               if (_phase == _Phase.starting || _phase == _Phase.loading)
                 _CallStatusPanel(
                   palette: p,
@@ -470,6 +553,32 @@ class _Notice extends StatelessWidget {
         textAlign: TextAlign.center,
         style: TextStyle(color: palette.foreground, fontSize: 13),
       ),
+    ),
+  );
+}
+
+/// A small translucent control button overlaid on the call (PiP, audio).
+class _CallControlButton extends StatelessWidget {
+  const _CallControlButton({
+    super.key,
+    required this.palette,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final AppPalette palette;
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.black.withValues(alpha: 0.45),
+    shape: const CircleBorder(),
+    child: IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      icon: Icon(icon, color: Colors.white, size: 20),
     ),
   );
 }

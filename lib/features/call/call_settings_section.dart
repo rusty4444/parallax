@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
@@ -210,6 +211,30 @@ class _CallSettingsSectionState extends State<CallSettingsSection> {
                   ),
                 ],
               ),
+              if (!kIsWeb &&
+                  (defaultTargetPlatform == TargetPlatform.windows ||
+                      defaultTargetPlatform == TargetPlatform.macOS ||
+                      defaultTargetPlatform == TargetPlatform.linux)) ...[
+                const SizedBox(height: 8),
+                ListenableBuilder(
+                  listenable: CallSettingsStore.instance,
+                  builder: (context, _) => SwitchListTile(
+                    key: const ValueKey('call-screen-sharing'),
+                    contentPadding: EdgeInsets.zero,
+                    value: CallSettingsStore.instance.screenSharingEnabled,
+                    title: Text(
+                      'Screen sharing',
+                      style: TextStyle(color: p.foreground, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Offer screen sharing in calls on this desktop.',
+                      style: TextStyle(color: p.muted, fontSize: 12),
+                    ),
+                    onChanged: (value) => CallSettingsStore.instance
+                        .setScreenSharingEnabled(value),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

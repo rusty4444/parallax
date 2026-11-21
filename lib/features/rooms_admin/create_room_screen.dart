@@ -40,6 +40,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   bool _addressEdited = false;
   _Access _access = _Access.private;
   bool _broadcast = false;
+  bool _voiceRoom = false;
   PickedImage? _avatar;
   bool _submitted = false;
   bool _waiting = false;
@@ -104,6 +105,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       aliasLocalpart: _public ? _address.text.trim() : null,
       avatar: _avatar,
       broadcastChannel: _broadcast,
+      voiceRoom: _voiceRoom,
     );
     setState(() => _submitted = true);
     _request.startWith(
@@ -318,6 +320,22 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                   style: TextStyle(color: p.muted),
                 ),
                 secondary: Icon(Icons.campaign_outlined, color: p.secondary),
+              ),
+              SwitchListTile(
+                key: const ValueKey('create-room-voice'),
+                value: _voiceRoom,
+                onChanged: locked
+                    ? null
+                    : (value) => setState(() => _voiceRoom = value),
+                title: Text(
+                  'Voice room',
+                  style: TextStyle(color: p.foreground),
+                ),
+                subtitle: Text(
+                  'Drop-in audio anyone can join',
+                  style: TextStyle(color: p.muted),
+                ),
+                secondary: Icon(Icons.graphic_eq_rounded, color: p.secondary),
               ),
             ],
           ),

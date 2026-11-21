@@ -1007,6 +1007,7 @@ class MatrixBackend extends ChatBackend
           // Broadcast-channel detection (events_default) in the room list
           // needs power levels for rooms that were never opened.
           matrix.EventTypes.RoomPowerLevels,
+          'net.samrusselltech.parallax.voice_room',
         },
       );
       final client = openedClient;
@@ -4182,6 +4183,8 @@ class MatrixBackend extends ChatBackend
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       network: room.parallaxNetwork,
       isBroadcastChannel: _isBroadcastChannel(room),
+      isVoiceRoom:
+          room.getState('net.samrusselltech.parallax.voice_room') != null,
       id: room.id,
       name: name,
       preview: isDeletion

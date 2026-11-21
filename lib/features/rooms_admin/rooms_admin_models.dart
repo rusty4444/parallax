@@ -261,6 +261,7 @@ class RoomCreationOptions {
     this.aliasLocalpart,
     this.avatar,
     this.broadcastChannel = false,
+    this.voiceRoom = false,
   });
   final String name;
   final String topic;
@@ -273,6 +274,9 @@ class RoomCreationOptions {
 
   /// Only admins may post (`events_default` 50); members read announcements.
   final bool broadcastChannel;
+
+  /// A drop-in audio room: an always-available voice call members can join.
+  final bool voiceRoom;
 
   bool get isPublic => visibility == RoomVisibilityOption.public;
 

@@ -120,6 +120,7 @@ class ChatRoom {
     this.canonicalAlias,
     this.network,
     this.isBroadcastChannel = false,
+    this.isVoiceRoom = false,
   });
 
   final String id;
@@ -173,6 +174,9 @@ class ChatRoom {
   /// regular members read announcements.
   final bool isBroadcastChannel;
 
+  /// A drop-in voice room with an always-available audio call.
+  final bool isVoiceRoom;
+
   bool get muted => notificationMode == RoomNotificationMode.mute;
 
   ChatRoom copyWith({
@@ -187,6 +191,7 @@ class ChatRoom {
     List<String>? tags,
     RoomNotificationMode? notificationMode,
     bool? isBroadcastChannel,
+    bool? isVoiceRoom,
   }) => ChatRoom(
     id: id,
     name: name ?? this.name,
@@ -213,6 +218,7 @@ class ChatRoom {
     canonicalAlias: canonicalAlias,
     network: network,
     isBroadcastChannel: isBroadcastChannel ?? this.isBroadcastChannel,
+    isVoiceRoom: isVoiceRoom ?? this.isVoiceRoom,
   );
 }
 
@@ -241,6 +247,7 @@ bool sameChatRoom(ChatRoom a, ChatRoom b) {
       a.canonicalAlias != b.canonicalAlias ||
       a.network != b.network ||
       a.isBroadcastChannel != b.isBroadcastChannel ||
+      a.isVoiceRoom != b.isVoiceRoom ||
       a.tags.length != b.tags.length ||
       a.heroes.length != b.heroes.length) {
     return false;

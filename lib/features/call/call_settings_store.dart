@@ -11,14 +11,25 @@ class CallSettingsStore extends ChangeNotifier {
 
   static final instance = CallSettingsStore();
   static const customUrlKey = 'parallax.call.element_call_url';
+  static const screenSharingKey = 'parallax.call.screen_sharing';
 
   final Future<SharedPreferences> Function() _preferences;
   Uri? _custom;
+  bool _screenSharing = false;
   bool _loaded = false;
   int _generation = 0;
 
   bool get loaded => _loaded;
   Uri? get customBaseUrl => _custom;
+  bool get screenSharingEnabled => _screenSharing;
+
+  Future<void> setScreenSharingEnabled(bool value) async {
+    _screenSharing = value;
+    notifyListeners();
+    try {
+      await (await _preferences()).setBool(screenSharingKey, value);
+    } catch (_) {}
+  }
 
   Future<Uri?> load() async {
     if (_loaded) return _custom;
@@ -26,6 +37,7 @@ class CallSettingsStore extends ChangeNotifier {
     final prefs = await _preferences();
     if (generation != _generation) return _custom;
     _custom = parseElementCallBaseUrl(prefs.getString(customUrlKey));
+    _screenSharing = prefs.getBool(screenSharingKey) ?? false;
     _loaded = true;
     notifyListeners();
     return _custom;

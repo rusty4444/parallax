@@ -93,6 +93,7 @@ class ElementCallUrlParams {
     this.theme = 'dark',
     this.clientId = parallaxCallClientId,
     this.fontScale,
+    this.screenSharing = false,
   });
 
   final Uri baseUrl;
@@ -108,6 +109,10 @@ class ElementCallUrlParams {
   final String theme;
   final String clientId;
   final double? fontScale;
+
+  /// Offer screen sharing where the platform WebView supports getDisplayMedia
+  /// (desktop). Android WebView cannot capture the screen, so it stays hidden.
+  final bool screenSharing;
 }
 
 /// Builds the WebView URL. Parameter order follows the Rust SDK so URLs are
@@ -131,8 +136,9 @@ Uri buildElementCallUrl(ElementCallUrlParams p) {
     ('header', 'none'),
     ('hideHeader', 'true'),
     ('preload', 'false'),
-    // Android WebView has no getDisplayMedia, so screen sharing cannot work.
-    ('hideScreensharing', 'true'),
+    // Screen sharing needs getDisplayMedia, which Android WebView lacks; it is
+    // offered on desktop when the user enables it.
+    ('hideScreensharing', p.screenSharing ? 'false' : 'true'),
     ('perParticipantE2EE', p.encrypted ? 'true' : 'false'),
     ('intent', p.intent.value),
     if (p.fontScale case final scale? when (scale - 1).abs() > 0.01)

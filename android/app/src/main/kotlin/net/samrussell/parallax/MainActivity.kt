@@ -145,6 +145,9 @@ class MainActivity : FlutterFragmentActivity() {
         }
         intentChannel = channel
         SharedIntentStore.listener = { channel.invokeMethod("pending", null) }
+        // Call integration (PiP, audio routing, incoming-call notification) is
+        // activity-scoped because picture-in-picture needs the activity.
+        CallIntegration.register(this, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -161,6 +164,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
         permissionRequests.clear()
         SharedIntentStore.listener = null
+        CallIntegration.unregister()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

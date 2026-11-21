@@ -31,6 +31,7 @@ import '../features/threads/thread_hooks.dart';
 import '../features/transcription/transcription_hooks.dart';
 import '../features/translation/translation_hooks.dart';
 import '../features/user_status/user_status_hooks.dart';
+import '../features/widgets_host/widgets_hooks.dart';
 import 'hook_types.dart';
 
 export 'hook_types.dart';
@@ -134,6 +135,7 @@ List<Widget> roomDetailsSectionsFor(
   ...retentionRoomDetailsSections(context, ctx),
   ...chatLockRoomDetailsSections(context, ctx),
   ...chatExportRoomDetailsSections(context, ctx),
+  ...widgetsRoomDetailsSections(context, ctx),
 ];
 
 // Settings is a menu of category pages (lib/settings_screen.dart). Each

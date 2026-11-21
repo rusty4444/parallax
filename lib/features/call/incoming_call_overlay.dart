@@ -12,6 +12,7 @@ import '../../widgets.dart';
 import 'active_call.dart';
 import 'call_features.dart';
 import 'call_ringer.dart';
+import 'call_integration.dart';
 import 'call_screen.dart';
 
 typedef AnswerCall = void Function(IncomingCall call);
@@ -101,6 +102,16 @@ class _IncomingCallOverlayState extends State<IncomingCallOverlay> {
         .listen((_) => _checkCall());
     _checkCall();
     unawaited(_ringer.start());
+    // When the app is backgrounded or locked, ring through a full-screen
+    // incoming-call notification so the call is answerable from anywhere.
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      unawaited(
+        CallIntegration.showIncomingCall(
+          call.senderName.isNotEmpty ? call.senderName : call.roomName,
+          audioOnly: call.audioOnly,
+        ),
+      );
+    }
   }
 
   void _checkCall() {
@@ -126,6 +137,7 @@ class _IncomingCallOverlayState extends State<IncomingCallOverlay> {
     _changes = null;
     if (_ringing == null) return;
     unawaited(_ringer.stop());
+    unawaited(CallIntegration.dismissIncomingCall());
     if (mounted) setState(() => _ringing = null);
   }
 

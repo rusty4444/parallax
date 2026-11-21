@@ -3,11 +3,14 @@
 // Embedded Element Call widget, call buttons, banners and ringing.
 // Core screens call these through lib/hooks/registry.dart. Keep the function
 // signatures stable; return empty lists / null when not applicable.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../chat_backend.dart';
 import '../../hooks/hook_types.dart';
 import 'call_features.dart';
+import 'call_screen.dart';
 import 'call_settings_section.dart';
 import 'call_ui.dart';
 import 'incoming_call_overlay.dart';
@@ -16,6 +19,22 @@ List<Widget> callRoomHeaderActions(BuildContext context, RoomHookContext ctx) {
   final features = callFeaturesOf(ctx.backend);
   if (features == null || (ctx.room?.invited ?? false)) return const [];
   return [
+    if (ctx.room?.isVoiceRoom ?? false)
+      TextButton.icon(
+        key: ValueKey('voice-room-drop-in-${ctx.roomId}'),
+        onPressed: () => unawaited(
+          openCallScreen(
+            context,
+            backend: ctx.backend,
+            roomId: ctx.roomId,
+            palette: ctx.palette,
+            navigator: Navigator.of(context),
+            audioOnly: true,
+          ),
+        ),
+        icon: const Icon(Icons.graphic_eq_rounded, size: 18),
+        label: const Text('Drop in'),
+      ),
     CallHeaderButton(
       key: ValueKey('call-header-${ctx.roomId}'),
       features: features,

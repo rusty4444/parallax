@@ -398,6 +398,12 @@ class MatrixRoomsAdmin implements RoomsAdminFeatures {
               stateKey: '',
               content: {'join_rule': 'knock'},
             ),
+          if (options.voiceRoom)
+            matrix.StateEvent(
+              type: 'net.samrusselltech.parallax.voice_room',
+              stateKey: '',
+              content: {'drop_in': true},
+            ),
           if (avatar != null)
             matrix.StateEvent(
               type: matrix.EventTypes.RoomAvatar,
