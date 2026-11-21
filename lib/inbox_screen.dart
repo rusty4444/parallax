@@ -14,6 +14,8 @@ import 'features/home/room_list_filters.dart';
 import 'features/home/room_list_menu.dart';
 import 'features/home/room_list_tile.dart';
 import 'features/chat_lock/chat_lock_gate.dart';
+import 'features/message_requests/message_requests.dart';
+import 'features/message_requests/message_requests_screen.dart';
 import 'features/home/space_switcher.dart';
 import 'features/rooms_admin/rooms_admin_hooks.dart';
 import 'features/saved/folder_tabs.dart';
@@ -1659,6 +1661,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       animation: _changes,
       builder: (context, _) {
         final source = widget.backend.rooms;
+        final requestsCtrl = MessageRequestsScope.maybeOf(context);
+        final separateRequests = requestsCtrl?.separate ?? false;
         final chatCount = _memo(
           #chatCount,
           source,
@@ -1718,6 +1722,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             _filters,
             _query,
             spaceRooms,
+            separateRequests,
           ),
           () {
             final allRooms = [
@@ -1743,6 +1748,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 query: _query,
               ),
             );
+            // Message requests from unknown senders live in their own inbox.
+            final requestIds = separateRequests
+                ? (requestsCtrl?.requestIds(allRooms) ?? const <String>{})
+                : const <String>{};
+            final visible = requestIds.isEmpty
+                ? filtered
+                : filtered
+                      .where((room) => !requestIds.contains(room.id))
+                      .toList();
             return (
               unreadByFolder: {
                 for (final f in folderList)
@@ -1750,13 +1764,17 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               },
               rooms: notePinned
                   ? [
-                      ...filtered.where((room) => room.id == noteId),
-                      ...filtered.where((room) => room.id != noteId),
+                      ...visible.where((room) => room.id == noteId),
+                      ...visible.where((room) => room.id != noteId),
                     ]
-                  : filtered,
+                  : visible,
             );
           },
         );
+        // Invitations from unknown senders, shown in their own inbox banner.
+        final requestRooms = separateRequests
+            ? (requestsCtrl?.requests(source) ?? const <ChatRoom>[])
+            : const <ChatRoom>[];
         // Rooms eligible for message search: the same Space/folder/filters
         // as the list, but ignoring the name query (a message can match in a
         // room whose name does not). Memoised without the query so typing
@@ -2129,6 +2147,20 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                           : const SizedBox(width: double.infinity, height: 14),
                     ),
                   ],
+                  if (requestRooms.isNotEmpty && !_searchOpen)
+                    _MessageRequestsBanner(
+                      palette: p,
+                      count: requestRooms.length,
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => MessageRequestsScreen(
+                            backend: widget.backend,
+                            palette: p,
+                            controller: requestsCtrl!,
+                          ),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child:
                         chatCount == 0 &&
@@ -2396,4 +2428,62 @@ class _FilterChip extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
   );
+}
+
+/// Inbox banner opening the dedicated message-requests inbox.
+class _MessageRequestsBanner extends StatelessWidget {
+  const _MessageRequestsBanner({
+    required this.palette,
+    required this.count,
+    required this.onTap,
+  });
+  final AppPalette palette;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Material(
+        color: p.raised,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: p.accent.withValues(alpha: 0.4)),
+        ),
+        child: InkWell(
+          key: const ValueKey('home.message_requests'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.mark_email_unread_outlined,
+                  color: p.secondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    count == 1
+                        ? '1 message request'
+                        : '$count message requests',
+                    style: TextStyle(
+                      color: p.foreground,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: p.muted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

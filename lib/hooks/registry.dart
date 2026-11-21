@@ -7,6 +7,7 @@ import '../features/home/home_hooks.dart';
 import '../features/link_previews/link_preview_hooks.dart';
 import '../features/live_location/live_location_hooks.dart';
 import '../features/media/media_hooks.dart';
+import '../features/message_requests/message_requests_hooks.dart';
 import '../features/notifications/notification_hooks.dart';
 import '../features/packs/packs_hooks.dart';
 import '../features/platform/platform_hooks.dart';
@@ -160,7 +161,10 @@ List<Widget> mediaSettingsSectionsFor(
 List<Widget> privacySettingsSectionsFor(
   BuildContext context,
   SettingsHookContext ctx,
-) => [...messageSearchSettingsSections(context, ctx)];
+) => [
+  ...messageSearchSettingsSections(context, ctx),
+  ...messageRequestsPrivacySections(context, ctx),
+];
 
 /// Settings → Security: key storage, recovery, room keys and reset.
 List<Widget> securitySettingsSectionsFor(
@@ -202,7 +206,11 @@ Widget wrapSignedInApp(
           wrapWithPlatformIntents(
             context,
             ctx,
-            wrapWithChatLock(context, ctx, child),
+            wrapWithChatLock(
+              context,
+              ctx,
+              wrapWithMessageRequests(context, ctx, child),
+            ),
           ),
         ),
       ),
