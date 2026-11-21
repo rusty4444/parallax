@@ -119,6 +119,7 @@ class ChatRoom {
     this.previewCode,
     this.canonicalAlias,
     this.network,
+    this.isBroadcastChannel = false,
   });
 
   final String id;
@@ -168,6 +169,10 @@ class ChatRoom {
   /// unknown. Picks the logo shown when the chat has no picture.
   final ChatNetwork? network;
 
+  /// A broadcast channel: only admins may post (`events_default` >= 50), so
+  /// regular members read announcements.
+  final bool isBroadcastChannel;
+
   bool get muted => notificationMode == RoomNotificationMode.mute;
 
   ChatRoom copyWith({
@@ -181,6 +186,7 @@ class ChatRoom {
     bool? lowPriority,
     List<String>? tags,
     RoomNotificationMode? notificationMode,
+    bool? isBroadcastChannel,
   }) => ChatRoom(
     id: id,
     name: name ?? this.name,
@@ -206,6 +212,7 @@ class ChatRoom {
     previewCode: preview == null ? previewCode : null,
     canonicalAlias: canonicalAlias,
     network: network,
+    isBroadcastChannel: isBroadcastChannel ?? this.isBroadcastChannel,
   );
 }
 
@@ -233,6 +240,7 @@ bool sameChatRoom(ChatRoom a, ChatRoom b) {
       a.previewCode != b.previewCode ||
       a.canonicalAlias != b.canonicalAlias ||
       a.network != b.network ||
+      a.isBroadcastChannel != b.isBroadcastChannel ||
       a.tags.length != b.tags.length ||
       a.heroes.length != b.heroes.length) {
     return false;
@@ -374,6 +382,9 @@ class ChatEntry {
     this.threadLatestBody,
     this.pinned = false,
     this.highlight = false,
+    this.redactedBy,
+    this.redactedByMe = false,
+    this.redactedByName,
     // Public name `kind`, private storage: the getter supplies a fallback.
     // ignore: prefer_initializing_formals
   }) : _kind = kind;
@@ -427,6 +438,16 @@ class ChatEntry {
 
   /// Whether the event mentions the current user (or @room).
   final bool highlight;
+
+  /// User ID of whoever redacted this event, when known (`redacted_because`).
+  /// Null for live redactions whose cause has not been projected yet.
+  final String? redactedBy;
+
+  /// The current user redacted this event.
+  final bool redactedByMe;
+
+  /// Display name of the redactor (when not the current user), if cached.
+  final String? redactedByName;
 
   EntryKind get kind =>
       _kind ??

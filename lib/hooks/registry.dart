@@ -12,6 +12,7 @@ import '../features/platform/platform_hooks.dart';
 import '../features/polls/poll_hooks.dart';
 import '../features/qr_login/qr_login_hooks.dart';
 import '../features/reactions/reaction_hooks.dart';
+import '../features/retention/retention_hooks.dart';
 import '../features/rich_timeline/rich_timeline_hooks.dart';
 import '../features/rooms_admin/rooms_admin_hooks.dart';
 import '../features/saved/saved_hooks.dart';
@@ -100,6 +101,7 @@ List<Widget> roomBannersFor(BuildContext context, RoomHookContext ctx) => [
   ...liveLocationRoomBanners(context, ctx),
   ...scheduledRoomBanners(context, ctx),
   ...reactionRoomBanners(context, ctx),
+  ...retentionRoomBanners(context, ctx),
 ];
 
 List<Widget> roomDetailsSectionsFor(
@@ -112,6 +114,7 @@ List<Widget> roomDetailsSectionsFor(
   ...pollRoomDetailsSections(context, ctx),
   ...spacesAdminRoomDetailsSections(context, ctx),
   ...packsRoomDetailsSections(context, ctx),
+  ...retentionRoomDetailsSections(context, ctx),
 ];
 
 // Settings is a menu of category pages (lib/settings_screen.dart). Each

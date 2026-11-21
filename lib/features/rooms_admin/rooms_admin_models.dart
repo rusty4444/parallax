@@ -260,6 +260,7 @@ class RoomCreationOptions {
     this.askToJoin = false,
     this.aliasLocalpart,
     this.avatar,
+    this.broadcastChannel = false,
   });
   final String name;
   final String topic;
@@ -269,6 +270,9 @@ class RoomCreationOptions {
   /// Address localpart for public rooms (published in the directory).
   final String? aliasLocalpart;
   final PickedImage? avatar;
+
+  /// Only admins may post (`events_default` 50); members read announcements.
+  final bool broadcastChannel;
 
   bool get isPublic => visibility == RoomVisibilityOption.public;
 

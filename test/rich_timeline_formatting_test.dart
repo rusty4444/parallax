@@ -660,7 +660,7 @@ void main() {
       expect(rows.whereType<EntryRow>().single.showSender, isFalse);
     });
 
-    test('collapses room changes and long runs of removed messages', () {
+    test('collapses room changes and runs of removed messages', () {
       final registry = <String, String>{};
       ChatEntry change(String id) => member(
         id,
@@ -682,13 +682,16 @@ void main() {
         removed('x3'),
       ], groupIds: registry);
       final collapsed = rows.whereType<CollapsedRow>().toList();
+      // Two or more sequential removals collapse (Element Web), attributed to
+      // the uniform sender when no redaction cause is projected.
       expect(collapsed.map((r) => r.label), [
         '2 room changes',
-        '3 removed messages',
+        '@alice:example.org removed 2 messages',
+        '@alice:example.org removed 3 messages',
       ]);
       expect(
         rows.whereType<EntryRow>().where((r) => r.entry.redacted),
-        hasLength(2),
+        isEmpty,
       );
       final firstId = collapsed.first.groupId;
       // Older history joining the group keeps its identity.
@@ -698,6 +701,69 @@ void main() {
         change('s2'),
       ], groupIds: registry);
       expect(rows.whereType<CollapsedRow>().single.groupId, firstId);
+    });
+
+    test('removed-message runs attribute to the redactor', () {
+      ChatEntry removed(
+        String id, {
+        String sender = '@alice:example.org',
+        String? redactedBy,
+        bool redactedByMe = false,
+        String? redactedByName,
+      }) => ChatEntry(
+        id: id,
+        sender: sender,
+        body: 'Message removed',
+        time: DateTime(2026, 11, 12, 10),
+        mine: sender == me,
+        kind: EntryKind.redacted,
+        redacted: true,
+        redactedBy: redactedBy,
+        redactedByMe: redactedByMe,
+        redactedByName: redactedByName,
+      );
+      String label(List<ChatEntry> run) =>
+          buildTimelineRows(run).whereType<CollapsedRow>().single.label;
+      // You removed your own messages.
+      expect(
+        label([
+          removed('a', sender: me, redactedBy: me, redactedByMe: true),
+          removed('b', sender: me, redactedBy: me, redactedByMe: true),
+        ]),
+        'You removed 2 messages',
+      );
+      // A moderator removed someone else's messages: attribute to the mod.
+      expect(
+        label([
+          removed('a', redactedBy: '@mod:example.org', redactedByName: 'Mod'),
+          removed('b', redactedBy: '@mod:example.org', redactedByName: 'Mod'),
+        ]),
+        'Mod removed 2 messages',
+      );
+      // Redactor known but name not cached: fall back to their Matrix ID.
+      expect(
+        label([
+          removed('a', redactedBy: '@mod:example.org'),
+          removed('b', redactedBy: '@mod:example.org'),
+        ]),
+        '@mod:example.org removed 2 messages',
+      );
+      // Mixed redactors: no attribution.
+      expect(
+        label([
+          removed('a', redactedBy: me, redactedByMe: true),
+          removed('b', redactedBy: '@mod:example.org', redactedByName: 'Mod'),
+        ]),
+        '2 removed messages',
+      );
+      // Mixed senders without redaction causes: no attribution.
+      expect(
+        label([
+          removed('a', sender: '@alice:example.org'),
+          removed('b', sender: '@bob:example.org'),
+        ]),
+        '2 removed messages',
+      );
     });
 
     test('day labels', () {

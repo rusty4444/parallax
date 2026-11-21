@@ -39,6 +39,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   final _address = TextEditingController();
   bool _addressEdited = false;
   _Access _access = _Access.private;
+  bool _broadcast = false;
   PickedImage? _avatar;
   bool _submitted = false;
   bool _waiting = false;
@@ -102,6 +103,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       askToJoin: _access == _Access.askToJoin,
       aliasLocalpart: _public ? _address.text.trim() : null,
       avatar: _avatar,
+      broadcastChannel: _broadcast,
     );
     setState(() => _submitted = true);
     _request.startWith(
@@ -291,6 +293,31 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       ),
                   ],
                 ),
+              ),
+            ],
+          ),
+          AdminSection(
+            palette: p,
+            title: 'Channel',
+            footer:
+                'In a broadcast channel only administrators can post; '
+                'everyone else reads the announcements.',
+            children: [
+              SwitchListTile(
+                key: const ValueKey('create-room-broadcast'),
+                value: _broadcast,
+                onChanged: locked
+                    ? null
+                    : (value) => setState(() => _broadcast = value),
+                title: Text(
+                  'Broadcast channel',
+                  style: TextStyle(color: p.foreground),
+                ),
+                subtitle: Text(
+                  'Admins post, members read',
+                  style: TextStyle(color: p.muted),
+                ),
+                secondary: Icon(Icons.campaign_outlined, color: p.secondary),
               ),
             ],
           ),

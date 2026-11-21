@@ -54,6 +54,7 @@ import 'send_cancellation.dart';
 import 'features/message_fonts/message_fonts.dart'
     show messageFontById, withMessageFont;
 import 'features/packs/custom_reactions.dart';
+import 'features/retention/retention_model.dart';
 import 'features/packs/matrix_packs.dart' show packShortcodeForKey;
 import 'hooks/registry.dart' show transformOutgoingText;
 import 'hooks/hook_types.dart' show OutgoingTextContext;
@@ -1001,7 +1002,12 @@ class MatrixBackend extends ChatBackend
         defaultNetworkRequestTimeout: const Duration(seconds: 90),
         // Bridge state names bridge bots, which room names and avatar
         // clusters leave out; keep it loaded for rooms not yet opened.
-        importantStateEvents: {...bridgeStateTypes},
+        importantStateEvents: {
+          ...bridgeStateTypes,
+          // Broadcast-channel detection (events_default) in the room list
+          // needs power levels for rooms that were never opened.
+          matrix.EventTypes.RoomPowerLevels,
+        },
       );
       final client = openedClient;
       _client = client;
@@ -4039,6 +4045,14 @@ class MatrixBackend extends ChatBackend
         : redaction.senderId;
   }
 
+  /// A room where regular members cannot post (`events_default` >= 50) is a
+  /// broadcast channel: admins announce, everyone else reads.
+  static bool _isBroadcastChannel(matrix.Room room) {
+    final levels = room.getState(matrix.EventTypes.RoomPowerLevels)?.content;
+    final eventsDefault = levels?['events_default'];
+    return eventsDefault is int && eventsDefault >= 50;
+  }
+
   ChatRoom _projectRoom(matrix.Room room, matrix.Client client) {
     final event = room.lastEvent;
     final isDeletion =
@@ -4167,6 +4181,7 @@ class MatrixBackend extends ChatBackend
       previewCode: previewCode,
       canonicalAlias: room.canonicalAlias.isEmpty ? null : room.canonicalAlias,
       network: room.parallaxNetwork,
+      isBroadcastChannel: _isBroadcastChannel(room),
       id: room.id,
       name: name,
       preview: isDeletion
@@ -4273,11 +4288,18 @@ class MatrixBackend extends ChatBackend
     if (_disposed || timeline != _timeline || client == null) return;
     final queuedIds = _outbox.records.map((record) => record.id).toSet();
     final events = timeline.events;
+    // Disappearing messages: hide events past the room's retention lifetime
+    // as soon as they expire locally (the server purges them too).
+    final retention = RoomRetention.fromContent(
+      timeline.room.getState(RoomRetention.eventType)?.content,
+    );
+    final now = DateTime.now();
     final visible = events
         .take(_visibleMessageLimit)
         .where(
           (event) =>
               isTimelineVisibleType(event.type) &&
+              !retention.isExpired(event.originServerTs, now) &&
               event.relationshipType != matrix.RelationshipTypes.edit &&
               event.relationshipType != matrix.RelationshipTypes.thread &&
               // Undecryptable relations (reactions, poll votes) keep their
@@ -4295,6 +4317,13 @@ class MatrixBackend extends ChatBackend
     _requestMissingSenders(timeline, events.take(_visibleMessageLimit));
     _scheduleMarkRead();
     notifyListeners();
+  }
+
+  /// Re-projects the open room's messages on demand (for example the
+  /// disappearing-messages expiry ticker). No-op when no room is open.
+  void refreshOpenRoom() {
+    final timeline = _timeline;
+    if (!_disposed && timeline != null) _refreshMessages(timeline);
   }
 
   /// The SDK prefixes its newest-first timeline with all sending/failed local
@@ -4368,6 +4397,22 @@ class MatrixBackend extends ChatBackend
     final threadLatestContent = threadLatest?['content'] as Map?;
     final mentions = content['m.mentions'];
     final mentionIds = mentions is Map ? mentions['user_ids'] : null;
+    // Who removed a redacted message (Element Web's "[user] removed N
+    // messages" grouping). Cached membership only, like the sender name.
+    final redaction = event.redactedBecause;
+    final redactedByMe =
+        redaction != null && redaction.senderId == client.userID;
+    String? redactedByName;
+    if (redaction != null && !redactedByMe) {
+      final redactorMember = event.room.getState(
+        matrix.EventTypes.RoomMember,
+        redaction.senderId,
+      );
+      final redactorName = redactorMember?.content['displayname'];
+      redactedByName = redactorName is String && redactorName.trim().isNotEmpty
+          ? redactorName.trim()
+          : null;
+    }
     return ChatEntry(
       id: event.eventId,
       sender: event.senderId,
@@ -4414,6 +4459,9 @@ class MatrixBackend extends ChatBackend
       highlight:
           mentionIds is List && mentionIds.contains(client.userID) ||
           (mentions is Map && mentions['room'] == true),
+      redactedBy: redaction?.senderId,
+      redactedByMe: redactedByMe,
+      redactedByName: redactedByName,
     );
   }
 

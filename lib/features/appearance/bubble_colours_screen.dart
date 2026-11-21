@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
 import 'bubble_colours.dart';
+import 'room_theme_sync.dart';
 import 'colour_picker.dart';
 
 /// Per-room bubble colours: your messages and everyone else's, each with a
@@ -13,6 +14,7 @@ class BubbleColoursScreen extends StatefulWidget {
     required this.roomName,
     required this.palette,
     RoomBubbleColourStore? store,
+    this.themeSync,
   }) : store = store ?? _shared;
 
   static final _shared = RoomBubbleColourStore.shared;
@@ -21,6 +23,9 @@ class BubbleColoursScreen extends StatefulWidget {
   final String roomName;
   final AppPalette palette;
   final RoomBubbleColourStore store;
+
+  /// When set, the chosen colours also sync to the account's other devices.
+  final RoomThemeSync? themeSync;
 
   @override
   State<BubbleColoursScreen> createState() => _BubbleColoursScreenState();
@@ -57,6 +62,7 @@ class _BubbleColoursScreenState extends State<BubbleColoursScreen> {
     _saving = _saving.then((_) async {
       try {
         await widget.store.save(widget.roomId, colours);
+        await widget.themeSync?.push(widget.roomId, colours);
       } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -92,7 +98,7 @@ class _BubbleColoursScreenState extends State<BubbleColoursScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
           Text(
-            'Only for ${widget.roomName}, on this device.',
+            'For ${widget.roomName}. Colours sync across your devices.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),

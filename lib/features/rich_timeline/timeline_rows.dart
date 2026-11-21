@@ -6,8 +6,9 @@ import '../../message_groups.dart';
 /// Element X groups consecutive messages from one sender within 5 minutes.
 const senderGroupingWindow = Duration(minutes: 5);
 
-/// Runs of this many removed messages collapse into one row (Element X).
-const minRemovedRun = 3;
+/// Runs of this many removed messages collapse into one row (Element Web
+/// groups sequential deletions from two upwards).
+const minRemovedRun = 2;
 
 /// One visual row of the room timeline.
 sealed class TimelineRow {
@@ -75,12 +76,35 @@ class CollapsedRow extends TimelineRow {
 
   String get label {
     final count = entries.length;
-    return switch (kind) {
-      CollapsedKind.roomChanges =>
-        count == 1 ? '1 room change' : '$count room changes',
-      CollapsedKind.removedMessages =>
-        count == 1 ? '1 removed message' : '$count removed messages',
-    };
+    switch (kind) {
+      case CollapsedKind.roomChanges:
+        return count == 1 ? '1 room change' : '$count room changes';
+      case CollapsedKind.removedMessages:
+        final noun = count == 1 ? 'message' : 'messages';
+        // Attribute to the redactor when every removal in the run has one
+        // (Element Web's "[user] removed N messages").
+        final redactors = entries.map((entry) => entry.redactedBy).toSet();
+        if (redactors.length == 1 && redactors.first != null) {
+          if (entries.every((entry) => entry.redactedByMe)) {
+            return 'You removed $count $noun';
+          }
+          final who = entries.first.redactedByName ?? redactors.first!;
+          return '$who removed $count $noun';
+        }
+        // Mixed or partially-known redactors: don't guess an attribution.
+        if (redactors.any((redactor) => redactor != null)) {
+          return '$count removed $noun';
+        }
+        // No redaction cause projected: fall back to the message sender.
+        if (entries.every((entry) => entry.mine)) {
+          return 'You removed $count $noun';
+        }
+        final senders = entries.map((entry) => entry.sender).toSet();
+        if (senders.length == 1 && entries.first.sender.isNotEmpty) {
+          return '${entries.first.senderLabel} removed $count $noun';
+        }
+        return '$count removed $noun';
+    }
   }
 }
 

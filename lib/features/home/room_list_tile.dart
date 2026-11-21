@@ -186,6 +186,11 @@ class RoomListTile extends StatelessWidget {
           ),
         ),
         if (favourite) Icon(Icons.star_rounded, size: 16, color: p.accent),
+        if (room.isBroadcastChannel)
+          Tooltip(
+            message: 'Broadcast channel',
+            child: Icon(Icons.campaign_outlined, size: 16, color: p.secondary),
+          ),
         if (failedSend)
           Tooltip(
             message: 'Message not sent',

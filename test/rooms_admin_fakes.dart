@@ -267,6 +267,10 @@ class AdminBackend extends FakeBackend
   RoomDetails? cachedRoomDetails(String roomId) => details;
 
   @override
+  bool canSendMessages(String roomId) =>
+      details.ownPowerLevel >= details.requiredForEvent('m.room.message');
+
+  @override
   Future<RoomNotificationSettings> notificationSettings(String roomId) async =>
       notifications;
   @override

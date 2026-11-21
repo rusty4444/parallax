@@ -15,6 +15,7 @@ import 'features/rich_timeline/message_actions.dart';
 import 'features/rich_timeline/rich_timeline_hooks.dart';
 import 'features/scheduled/undo_send.dart';
 import 'hooks/registry.dart';
+import 'features/rooms_admin/rooms_admin_features.dart';
 import 'media_viewer.dart';
 import 'message_draft_store.dart';
 import 'message_receipts_sheet.dart';
@@ -34,6 +35,7 @@ import 'timeline/double_tap_react.dart';
 import 'timeline/message_lift.dart';
 import 'features/appearance/bubble_colours.dart';
 import 'features/appearance/bubble_colours_screen.dart';
+import 'features/appearance/room_theme_sync.dart';
 import 'pending_failure.dart';
 import 'package:flutter/services.dart';
 
@@ -177,6 +179,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       widget.bubbleColourStore ?? RoomBubbleColourStore.shared;
   late BubbleColours _bubbleColours =
       _bubbleStore.cached(widget.roomId) ?? BubbleColours.none;
+  late final RoomThemeSync _themeSync = RoomThemeSync(widget.backend);
+  Object? _appliedThemeToken;
   File? _background;
   int _backgroundVersion = 0;
   bool _backgroundBusy = false;
@@ -194,8 +198,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     _draft.addListener(_draftChanged);
     _loadBackground();
     _bubbleStore.addListener(_bubbleColoursChanged);
+    widget.backend.addListener(_syncedThemeChanged);
     unawaited(
-      _bubbleStore.load(widget.roomId).then((_) => _bubbleColoursChanged()),
+      _bubbleStore.load(widget.roomId).then((_) {
+        _bubbleColoursChanged();
+        return _applySyncedTheme(initial: true);
+      }),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _owner.isCurrent && _timelineOwner.isCurrent) {
@@ -411,6 +419,34 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     setState(() => _bubbleColours = colours);
   }
 
+  void _syncedThemeChanged() => unawaited(_applySyncedTheme());
+
+  /// Adopt the account-wide room theme. On first open, only when this device
+  /// has no local choice; afterwards, whenever another device writes a newer
+  /// theme (the synced account-data event identity changes).
+  Future<void> _applySyncedTheme({bool initial = false}) async {
+    if (!mounted || !_owner.isCurrent) return;
+    if (initial) {
+      final local = _bubbleStore.cached(widget.roomId);
+      if (local != null && !local.isEmpty) {
+        _appliedThemeToken = _themeSync.themeToken(widget.roomId);
+        return;
+      }
+      var colours = _themeSync.coloursFromSync(widget.roomId);
+      colours ??= await _themeSync.loadRemote(widget.roomId);
+      if (!mounted || !_owner.isCurrent || colours == null) return;
+      _appliedThemeToken = _themeSync.themeToken(widget.roomId);
+      await _bubbleStore.save(widget.roomId, colours);
+      return;
+    }
+    final token = _themeSync.themeToken(widget.roomId);
+    if (token == null || token == _appliedThemeToken) return;
+    final colours = _themeSync.coloursFromSync(widget.roomId);
+    _appliedThemeToken = token;
+    if (colours == null || !mounted || !_owner.isCurrent) return;
+    await _bubbleStore.save(widget.roomId, colours);
+  }
+
   Future<void> _openBubbleColours(String roomName) =>
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -419,6 +455,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
             roomName: roomName,
             palette: widget.palette,
             store: _bubbleStore,
+            themeSync: _themeSync,
           ),
         ),
       );
@@ -500,6 +537,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _bubbleStore.removeListener(_bubbleColoursChanged);
+    widget.backend.removeListener(_syncedThemeChanged);
     _draftTimer?.cancel();
     unawaited(_flushClosingDraft());
     _draftOwner?.release();
@@ -1267,6 +1305,33 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     });
   }
 
+  /// Read-only footer for a broadcast channel the user may not post in.
+  Widget _channelReadOnlyBar(AppPalette p) => Container(
+    key: const ValueKey('channel-read-only'),
+    decoration: BoxDecoration(
+      color: p.surface,
+      border: Border(top: BorderSide(color: p.stroke)),
+    ),
+    padding: EdgeInsets.fromLTRB(
+      18,
+      14,
+      18,
+      14 + MediaQuery.paddingOf(context).bottom * 0.5,
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.campaign_outlined, color: p.secondary, size: 20),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            'Only channel admins can post here',
+            style: TextStyle(color: p.muted, fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
+
   Widget _pendingPanel(AppPalette palette) {
     final pending = _features!.pendingSends
         .where((item) => item.roomId == widget.roomId)
@@ -1396,6 +1461,14 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
             ? widget.backend.messages
             : const <ChatEntry>[];
         final roomCtx = _roomContext(room);
+        // Broadcast channels: members who may not post get a read-only bar
+        // instead of the composer (the server still makes the final call).
+        final channelReadOnly =
+            (room?.isBroadcastChannel ?? false) &&
+            !(roomsAdminFeaturesOf(
+                  widget.backend,
+                )?.canSendMessages(widget.roomId) ??
+                true);
         // Per-room bubble colours (header menu → Bubble colours).
         return BubbleColoursScope(
           colours: _bubbleColours,
@@ -1758,7 +1831,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           ),
                         ),
                       ),
-                    if (_features != null) ...[
+                    if (channelReadOnly)
+                      _channelReadOnlyBar(p)
+                    else if (_features != null) ...[
                       RichMessageComposer(
                         extraAttachments: [
                           ComposerAttachmentAction(

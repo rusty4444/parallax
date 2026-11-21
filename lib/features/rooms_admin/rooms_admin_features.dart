@@ -91,6 +91,10 @@ abstract interface class RoomsAdminFeatures {
   /// Permission projection from synced state, for synchronous hooks.
   RoomDetails? cachedRoomDetails(String roomId);
 
+  /// Whether the current user may post messages in [roomId] (live power
+  /// levels). True when unknown, so a loading room never blocks its admin.
+  bool canSendMessages(String roomId);
+
   // --- Notifications ----------------------------------------------------------
 
   Future<RoomNotificationSettings> notificationSettings(String roomId);
@@ -372,6 +376,9 @@ class MatrixRoomsAdmin implements RoomsAdminFeatures {
             ? matrix.Visibility.public
             : matrix.Visibility.private,
         roomAliasName: options.isPublic ? alias : null,
+        powerLevelContentOverride: options.broadcastChannel
+            ? {'events_default': 50}
+            : null,
         initialState: [
           if (options.encrypted)
             matrix.StateEvent(
@@ -708,6 +715,13 @@ class MatrixRoomsAdmin implements RoomsAdminFeatures {
     } catch (_) {
       return null; // A malformed cached event must not break the room screen.
     }
+  }
+
+  @override
+  bool canSendMessages(String roomId) {
+    final room = _sdk.sdkClient?.getRoomById(roomId);
+    // Unknown room/state: don't block (the server is the final authority).
+    return room?.canSendDefaultMessages ?? true;
   }
 
   @override
