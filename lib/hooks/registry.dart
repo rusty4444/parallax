@@ -26,6 +26,8 @@ import '../features/security/security_hooks.dart';
 import '../features/spaces_admin/spaces_admin_hooks.dart';
 import '../features/stories/stories_hooks.dart';
 import '../features/threads/thread_hooks.dart';
+import '../features/transcription/transcription_hooks.dart';
+import '../features/translation/translation_hooks.dart';
 import '../features/user_status/user_status_hooks.dart';
 import 'hook_types.dart';
 
@@ -56,6 +58,8 @@ List<MessageActionItem> messageActionsFor(
   ...mediaMessageActions(context, ctx),
   ...savedMessageActions(context, ctx),
   ...reminderMessageActions(context, ctx),
+  ...translationMessageActions(context, ctx),
+  ...transcriptionMessageActions(context, ctx),
   ...richTimelineMessageActions(context, ctx),
   // Moderator removal comes from the reactions module (live power levels);
   // roomsAdminMessageActions duplicates it once room details were cached.

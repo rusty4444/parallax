@@ -39,6 +39,8 @@ object ParallaxEngine {
         VideoTools.register(app, engine.dartExecutor.binaryMessenger)
         PdfTools.register(app, engine.dartExecutor.binaryMessenger)
         ShareShortcuts.register(app, engine.dartExecutor.binaryMessenger)
+        TranslationTools.register(app, engine.dartExecutor.binaryMessenger)
+        SpeechTools.register(app, engine.dartExecutor.binaryMessenger)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ID, engine)
         return engine

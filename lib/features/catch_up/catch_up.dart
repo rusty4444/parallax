@@ -53,8 +53,9 @@ String _snippet(String body, [int max = 140]) {
 CatchUpSummary summarizeCatchUp(List<ChatEntry> entries, String? myUserId) {
   final unread = entries.where((e) => !e.mine && !e.redacted).toList()
     ..sort((a, b) => a.time.compareTo(b.time));
-  if (unread.isEmpty)
+  if (unread.isEmpty) {
     return const CatchUpSummary(messageCount: 0, senderCount: 0);
+  }
 
   final senders = <String, int>{};
   final mentions = <CatchUpItem>[];
@@ -90,7 +91,9 @@ CatchUpSummary summarizeCatchUp(List<ChatEntry> entries, String? myUserId) {
         e.kind == EntryKind.audio) {
       mediaCount++;
     }
-    if (RegExp(r'https?://').hasMatch(e.body)) linkCount++;
+    if (RegExp(r'https?://').hasMatch(e.body)) {
+      linkCount++;
+    }
   }
 
   final top = senders.entries.toList()
