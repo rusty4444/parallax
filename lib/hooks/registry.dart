@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/call/call_hooks.dart';
+import '../features/chat_export/chat_export_hooks.dart';
 import '../features/chat_lock/chat_lock_hooks.dart';
 import '../features/composer/composer_hooks.dart';
 import '../features/home/home_hooks.dart';
@@ -123,6 +124,7 @@ List<Widget> roomDetailsSectionsFor(
   ...packsRoomDetailsSections(context, ctx),
   ...retentionRoomDetailsSections(context, ctx),
   ...chatLockRoomDetailsSections(context, ctx),
+  ...chatExportRoomDetailsSections(context, ctx),
 ];
 
 // Settings is a menu of category pages (lib/settings_screen.dart). Each
