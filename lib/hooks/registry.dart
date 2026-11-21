@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/call/call_hooks.dart';
+import '../features/catch_up/catch_up_hooks.dart';
 import '../features/chat_export/chat_export_hooks.dart';
 import '../features/chat_lock/chat_lock_hooks.dart';
 import '../features/composer/composer_hooks.dart';
@@ -110,6 +111,7 @@ List<Widget> roomBannersFor(BuildContext context, RoomHookContext ctx) => [
   ...reactionRoomBanners(context, ctx),
   ...retentionRoomBanners(context, ctx),
   ...userStatusRoomBanners(context, ctx),
+  ...catchUpRoomBanners(context, ctx),
 ];
 
 List<Widget> roomDetailsSectionsFor(
