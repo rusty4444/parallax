@@ -9,6 +9,7 @@ import 'features/home/profile_screen.dart';
 import 'features/home/settings_widgets.dart';
 import 'features/home/sign_out.dart';
 import 'hooks/registry.dart';
+import 'l10n/app_localizations.dart';
 import 'appearance_settings_screen.dart';
 import 'feature_settings_scope.dart';
 import 'chat_backend.dart';
@@ -270,6 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final p = paletteFor(_style);
+    final l10n = ParallaxLocalizations.of(context);
     final features = FeatureSettingsScope.maybeOf(context);
     final preferences = features?.preferences;
     final notifications = features?.notifications;
@@ -307,7 +309,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Eyebrow('Make it yours', palette: p),
               const SizedBox(height: 4),
               Text(
-                'Settings',
+                l10n.settings,
                 style: TextStyle(
                   color: p.foreground,
                   fontSize: 38,
@@ -325,7 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _category(
                       key: const ValueKey('settings.account'),
                       icon: Icons.person_outline_rounded,
-                      title: 'Account',
+                      title: l10n.account,
                       subtitle: const Text('Profile, devices, deletion'),
                       onTap: () => _push(
                         (palette) => AccountSettingsPage(
@@ -339,7 +341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.notifications'),
                     icon: Icons.notifications_outlined,
-                    title: 'Notifications',
+                    title: l10n.notifications,
                     subtitle: notifications == null
                         ? const Text('Chats, mentions and calls')
                         : ListenableBuilder(
@@ -368,7 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.appearance'),
                     icon: Icons.palette_outlined,
-                    title: 'Appearance',
+                    title: l10n.appearance,
                     subtitle: Text(
                       'Theme: ${_followSystem ? 'Match system' : _style.label}',
                     ),
@@ -387,7 +389,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.chats'),
                     icon: Icons.chat_bubble_outline_rounded,
-                    title: 'Chats',
+                    title: l10n.chats,
                     subtitle: const Text('Undo send, reactions, emoji'),
                     onTap: () => _push(
                       (palette) => ChatsSettingsPage(
@@ -400,7 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.media'),
                     icon: Icons.perm_media_outlined,
-                    title: 'Media',
+                    title: l10n.media,
                     subtitle: const Text('Thumbnails and upload quality'),
                     onTap: () => _push(
                       (palette) => MediaSettingsPage(
@@ -419,7 +421,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _category(
                       key: const ValueKey('settings.privacy'),
                       icon: Icons.visibility_off_outlined,
-                      title: 'Privacy',
+                      title: l10n.privacy,
                       subtitle: const Text('Screen lock, read receipts'),
                       onTap: () => _push(
                         (palette) => PrivacySettingsPage(
@@ -439,7 +441,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.advanced'),
                     icon: Icons.tune_rounded,
-                    title: 'Advanced',
+                    title: l10n.advanced,
                     subtitle: const Text('Calls, links and server setup'),
                     onTap: () => _push(
                       (palette) => AdvancedSettingsPage(
@@ -451,7 +453,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _category(
                     key: const ValueKey('settings.about'),
                     icon: Icons.info_outline_rounded,
-                    title: 'About & help',
+                    title: l10n.about,
                     subtitle: const Text('Version, licences, feedback'),
                     onTap: () =>
                         _push((palette) => AboutScreen(palette: palette)),
@@ -462,7 +464,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               OutlinedButton.icon(
                 onPressed: _logout,
                 icon: const Icon(Icons.logout_rounded),
-                label: const Text('Sign out'),
+                label: Text(l10n.signOut),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: p.foreground,
                   side: BorderSide(color: p.stroke),

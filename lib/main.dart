@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:matrix/matrix.dart' as matrix;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -33,6 +34,8 @@ import 'features/platform/desktop_content_insets.dart';
 import 'features/platform/desktop_shell.dart';
 import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
+import 'l10n/app_localizations.dart';
+import 'l10n/locale_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -218,6 +221,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       if (!mounted) return;
       unawaited(_start());
       unawaited(_loadTheme());
+      unawaited(LocaleController.instance.load());
     });
   }
 
@@ -654,13 +658,21 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final p = paletteFor(_style);
     return AnimatedBuilder(
-      animation: _preferences,
+      animation: Listenable.merge([_preferences, LocaleController.instance]),
       builder: (context, _) => MaterialApp(
         navigatorKey: _navigatorKey,
         navigatorObservers: [_roomRoutes],
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
         theme: themeFor(_style, _preferences.appFont),
+        locale: LocaleController.instance.locale,
+        supportedLocales: ParallaxLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          ParallaxLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         builder: (context, child) {
           final content = _AppTextScale(
             factor: _preferences.textScale,

@@ -5,6 +5,8 @@ import 'appearance_preferences.dart';
 import 'features/app_fonts/app_font_picker.dart';
 import 'features/home/settings_widgets.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
+import 'l10n/app_localizations.dart';
+import 'l10n/locale_controller.dart';
 import 'widgets.dart';
 
 /// Settings rows bound to the app-owned [AppearancePreferences], shared by
@@ -123,6 +125,23 @@ class PreferenceRows {
 
   /// Appearance → Reading: font, text size and compact layout.
   List<Widget> reading() => [
+    ListTile(
+      key: const ValueKey('appearance.language'),
+      leading: const Icon(Icons.translate_rounded),
+      title: Text(ParallaxLocalizations.of(context).language),
+      subtitle: Text(
+        LocaleController.instance.languageCode == null
+            ? ParallaxLocalizations.of(context).systemDefault
+            : ParallaxLocalizations.languageNames[LocaleController
+                      .instance
+                      .languageCode] ??
+                  LocaleController.instance.languageCode!,
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(builder: (_) => const LanguagePickerScreen()),
+      ),
+    ),
     ListTile(
       key: const ValueKey('appearance.app_font'),
       leading: const Icon(Icons.font_download_outlined),
