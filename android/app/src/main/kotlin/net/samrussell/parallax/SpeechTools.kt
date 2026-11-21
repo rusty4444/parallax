@@ -117,9 +117,8 @@ object SpeechTools {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.EXTRA_FORMATTING_TYPE_NONE)
-                    }
+                    // Omit EXTRA_ENABLE_FORMATTING. It is a string ("quality" or
+                    // "latency") that turns punctuation on; there is no "none" value.
                 }
                 recognizer.startListening(intent)
                 player.start()

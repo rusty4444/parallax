@@ -213,7 +213,8 @@ object CallIntegration {
     }
 
     private fun registerTelecom(context: Context) {
-        if (telecomRegistered || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        // Self-managed phone accounts exist from API 26.
+        if (telecomRegistered || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         try {
             val telecom = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
                 ?: return
@@ -259,7 +260,10 @@ class ParallaxConnectionService : android.telecom.ConnectionService() {
                 destroy()
             }
         }
-        connection.setConnectionCapabilities(android.telecom.Connection.CAPABILITY_SELF_MANAGED)
+        // Self-managed is a connection property, not a capability.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            connection.setConnectionProperties(android.telecom.Connection.PROPERTY_SELF_MANAGED)
+        }
         connection.setInitializing()
         return connection
     }
@@ -274,7 +278,9 @@ class ParallaxConnectionService : android.telecom.ConnectionService() {
                 destroy()
             }
         }
-        connection.setConnectionCapabilities(android.telecom.Connection.CAPABILITY_SELF_MANAGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            connection.setConnectionProperties(android.telecom.Connection.PROPERTY_SELF_MANAGED)
+        }
         connection.setActive()
         return connection
     }
