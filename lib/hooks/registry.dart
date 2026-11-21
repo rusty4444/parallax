@@ -22,6 +22,7 @@ import '../features/scheduled/scheduled_hooks.dart';
 import '../features/security/security_hooks.dart';
 import '../features/spaces_admin/spaces_admin_hooks.dart';
 import '../features/threads/thread_hooks.dart';
+import '../features/user_status/user_status_hooks.dart';
 import 'hook_types.dart';
 
 export 'hook_types.dart';
@@ -104,6 +105,7 @@ List<Widget> roomBannersFor(BuildContext context, RoomHookContext ctx) => [
   ...scheduledRoomBanners(context, ctx),
   ...reactionRoomBanners(context, ctx),
   ...retentionRoomBanners(context, ctx),
+  ...userStatusRoomBanners(context, ctx),
 ];
 
 List<Widget> roomDetailsSectionsFor(
@@ -134,7 +136,10 @@ List<Widget> notificationSettingsRowsFor(
 List<Widget> accountDeviceSettingsRowsFor(
   BuildContext context,
   SettingsHookContext ctx,
-) => [...qrLoginSettingsRows(context, ctx)];
+) => [
+  ...qrLoginSettingsRows(context, ctx),
+  ...userStatusAccountRows(context, ctx),
+];
 
 /// Settings → Chats: sending, effects, emoji and saved messages.
 List<Widget> chatSettingsSectionsFor(
@@ -209,7 +214,11 @@ Widget wrapSignedInApp(
             wrapWithChatLock(
               context,
               ctx,
-              wrapWithMessageRequests(context, ctx, child),
+              wrapWithMessageRequests(
+                context,
+                ctx,
+                wrapWithUserStatus(context, ctx, child),
+              ),
             ),
           ),
         ),
