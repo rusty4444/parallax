@@ -941,6 +941,12 @@ void main() {
   testWidgets('message actions stay compact until More expands them', (
     tester,
   ) async {
+    // Tall surface so the full expanded action sheet fits without scrolling
+    // (the sheet grew with reminders, translation and transcription actions).
+    tester.view.physicalSize = const Size(800, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final clipboard = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,

@@ -154,7 +154,9 @@ void main() {
         ),
       ),
     );
-    expect(sections.single, isA<NotificationContentSection>());
+    expect(sections.first, isA<NotificationContentSection>());
+    // The troubleshooting row follows the content section.
+    expect(sections.length, 2);
   });
 
   test('preferences JSON tolerates junk', () {
