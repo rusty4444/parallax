@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart' show StringCharacters;
 
+import 'features/app_fonts/app_fonts.dart';
 import 'features/message_fonts/message_fonts.dart' show messageFontById;
 
 /// Element X "Show media in timeline" (TimelineProtection) choices.
@@ -76,6 +77,7 @@ class AppearancePreferences extends ChangeNotifier {
   static const _linkPreviewsEncryptedKey =
       'parallax.appearance.v1.link_previews_encrypted';
   static const _messageFontKey = 'parallax.appearance.v1.message_font';
+  static const _appFontKey = 'parallax.appearance.v1.app_font';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -98,8 +100,12 @@ class AppearancePreferences extends ChangeNotifier {
   bool _linkPreviews = true;
   bool _linkPreviewsEncrypted = false;
   String? _messageFont;
+  AppFont _appFont = defaultAppFont;
 
   double get textScale => _textScale;
+
+  /// The font every screen is drawn in (Space Grotesk by default).
+  AppFont get appFont => _appFont;
 
   /// Look of the home room list rows (cards by default).
   HomeRowStyle get homeRowStyle => _homeRowStyle;
@@ -200,7 +206,14 @@ class AppearancePreferences extends ChangeNotifier {
     );
     final rawFont = prefs.get(_messageFontKey);
     final messageFont = rawFont is String ? messageFontById(rawFont)?.id : null;
+    final rawAppFont = prefs.get(_appFontKey);
+    // A font this version does not know (saved by a newer one) loads as
+    // the default.
+    final appFont =
+        (rawAppFont is String ? appFontById(rawAppFont) : null) ??
+        defaultAppFont;
     final changed =
+        appFont != _appFont ||
         messageFont != _messageFont ||
         linkPreviews != _linkPreviews ||
         linkPreviewsEncrypted != _linkPreviewsEncrypted ||
@@ -231,7 +244,21 @@ class AppearancePreferences extends ChangeNotifier {
     _linkPreviews = linkPreviews;
     _linkPreviewsEncrypted = linkPreviewsEncrypted;
     _messageFont = messageFont;
+    _appFont = appFont;
     if (changed) _notifyIfActive();
+  });
+
+  /// Chooses the app font by catalogue ID (see `app_fonts.dart`).
+  Future<void> setAppFont(String id) => _ordered(() async {
+    final font = appFontById(id);
+    if (font == null) {
+      throw ArgumentError.value(id, 'id', 'Unknown app font');
+    }
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setString(_appFontKey, font.id));
+    if (_appFont == font) return;
+    _appFont = font;
+    _notifyIfActive();
   });
 
   Future<void> setHomeRowStyle(HomeRowStyle value) => _ordered(() async {

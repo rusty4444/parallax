@@ -22,6 +22,7 @@ import 'push_notifications.dart';
 import 'security_overlay.dart';
 import 'two_pane.dart';
 import 'widgets.dart';
+import 'features/app_fonts/app_fonts.dart' show registerAppFontLicences;
 import 'features/live_location/live_location_hooks.dart'
     show liveLocationBeforeLogout;
 import 'features/message_fonts/message_fonts.dart'
@@ -44,6 +45,7 @@ Future<void> main() async {
   // Only registers a callback: the licence files load when the licence page
   // opens.
   registerMessageFontLicences();
+  registerAppFontLicences();
   if (Platform.isWindows || Platform.isMacOS) {
     // Replace the native caption with the blended desktop header. On macOS
     // TitleBarStyle.hidden keeps the traffic lights; on Windows the
@@ -658,7 +660,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         navigatorObservers: [_roomRoutes],
         title: 'Parallax',
         debugShowCheckedModeBanner: false,
-        theme: themeFor(_style),
+        theme: themeFor(_style, _preferences.appFont),
         builder: (context, child) {
           final content = _AppTextScale(
             factor: _preferences.textScale,

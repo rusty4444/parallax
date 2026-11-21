@@ -138,6 +138,8 @@ flutter:
     - family: ComicNeue
       fonts:
         - asset: assets/fonts/ComicNeue-Regular.ttf
+        - asset: assets/fonts/ComicNeue-Bold.ttf
+          weight: 700
     - family: SpaceMono
       fonts:
         - asset: assets/fonts/SpaceMono-Regular.ttf
@@ -147,6 +149,52 @@ flutter:
     - family: Bangers
       fonts:
         - asset: assets/fonts/Bangers-Regular.ttf
+    # App fonts (lib/features/app_fonts/), SIL Open Font License 1.1,
+    # variable (wght) fonts from https://github.com/google/fonts (ofl/).
+    # Flutter sets the wght axis from each style's fontWeight, so one file
+    # covers every weight.
+    - family: Figtree
+      fonts:
+        - asset: assets/fonts/Figtree.ttf
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit.ttf
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope.ttf
+    - family: Karla
+      fonts:
+        - asset: assets/fonts/Karla.ttf
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito.ttf
+    - family: Quicksand
+      fonts:
+        - asset: assets/fonts/Quicksand.ttf
+    - family: JosefinSans
+      fonts:
+        - asset: assets/fonts/JosefinSans.ttf
+    - family: AtkinsonHyperlegibleNext
+      fonts:
+        - asset: assets/fonts/AtkinsonHyperlegibleNext.ttf
+    - family: Lexend
+      fonts:
+        - asset: assets/fonts/Lexend.ttf
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/Lora.ttf
+    - family: LibreBaskerville
+      fonts:
+        - asset: assets/fonts/LibreBaskerville.ttf
+    - family: Bitter
+      fonts:
+        - asset: assets/fonts/Bitter.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono.ttf
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat.ttf
 
 # MSIX package for the Microsoft Store / sideloading. Build on Windows after
 # `flutter build windows --release`:

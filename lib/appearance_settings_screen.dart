@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
+import 'features/app_fonts/app_font_picker.dart';
 import 'features/home/settings_widgets.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
 import 'widgets.dart';
@@ -111,8 +112,25 @@ class PreferenceRows {
     await _save(() => preferences.setQuickReaction(chosen));
   }
 
-  /// Appearance → Reading: text size and compact layout.
+  Future<void> _chooseAppFont() async {
+    final chosen = await showAppFontPicker(
+      context,
+      current: preferences.appFont.id,
+    );
+    if (chosen == null || !context.mounted) return;
+    await _save(() => preferences.setAppFont(chosen));
+  }
+
+  /// Appearance → Reading: font, text size and compact layout.
   List<Widget> reading() => [
+    ListTile(
+      key: const ValueKey('appearance.app_font'),
+      leading: const Icon(Icons.font_download_outlined),
+      title: const Text('Font'),
+      subtitle: Text(preferences.appFont.label),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: _chooseAppFont,
+    ),
     Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

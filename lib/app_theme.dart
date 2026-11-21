@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'features/app_fonts/app_fonts.dart';
+
 /// Visual themes. [parallax] is the brand default; the others are alternatives.
 enum VisualTheme { parallax, parallaxDay, ultraviolet, ember, daylight }
 
@@ -272,15 +274,36 @@ AppPalette paletteFor(VisualTheme style) => switch (style) {
   ),
 };
 
-final _themes = <VisualTheme, ThemeData>{};
+final _themes = <(VisualTheme, String, TargetPlatform?), ThemeData>{};
 
-/// The app theme for [style], built once: `ColorScheme.fromSeed` is costly,
-/// and a new (equal) theme on each app rebuild made every route compare
-/// whole themes.
-ThemeData themeFor(VisualTheme style) => _themes[style] ??= _buildTheme(style);
+/// The app theme for [style] drawn in [font], built once per pair:
+/// `ColorScheme.fromSeed` is costly, and a new (equal) theme on each app
+/// rebuild made every route compare whole themes. The system font also
+/// depends on the platform.
+ThemeData themeFor(VisualTheme style, [AppFont font = defaultAppFont]) {
+  final platform = font.isSystem ? defaultTargetPlatform : null;
+  return _themes[(style, font.id, platform)] ??= _buildTheme(
+    style,
+    font,
+    platform ?? TargetPlatform.android,
+  );
+}
 
-ThemeData _buildTheme(VisualTheme style) {
+ThemeData _buildTheme(
+  VisualTheme style,
+  AppFont font,
+  TargetPlatform platform,
+) {
   final palette = paletteFor(style);
+  final family = font.family;
+  // A bundled font replaces the family throughout the text theme; the
+  // system font keeps the platform's own (Roboto on Android, San Francisco
+  // on Apple devices, Segoe UI on Windows).
+  final textTheme = platformTextTheme(platform).apply(
+    fontFamily: family,
+    bodyColor: palette.foreground,
+    displayColor: palette.foreground,
+  );
   final brightness = palette.isDark ? Brightness.dark : Brightness.light;
   final scheme =
       ColorScheme.fromSeed(
@@ -298,7 +321,7 @@ ThemeData _buildTheme(VisualTheme style) {
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
-    fontFamily: 'SpaceGrotesk',
+    fontFamily: family,
     scaffoldBackgroundColor: palette.background,
     colorScheme: scheme,
     inputDecorationTheme: InputDecorationTheme(
@@ -315,12 +338,7 @@ ThemeData _buildTheme(VisualTheme style) {
         borderSide: BorderSide(color: palette.stroke),
       ),
     ),
-    textTheme: Typography.material2021(platform: TargetPlatform.android).white
-        .apply(
-          fontFamily: 'SpaceGrotesk',
-          bodyColor: palette.foreground,
-          displayColor: palette.foreground,
-        ),
+    textTheme: textTheme,
     appBarTheme: AppBarTheme(
       backgroundColor: palette.background,
       foregroundColor: palette.foreground,
@@ -359,7 +377,8 @@ ThemeData _buildTheme(VisualTheme style) {
       side: BorderSide(color: palette.stroke),
       labelStyle: TextStyle(
         color: palette.foreground,
-        fontFamily: 'SpaceGrotesk',
+        fontFamily: textTheme.labelLarge?.fontFamily,
+        fontFamilyFallback: textTheme.labelLarge?.fontFamilyFallback,
       ),
     ),
     dividerTheme: DividerThemeData(color: palette.stroke),

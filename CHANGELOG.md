@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### App font
+
+- Settings → Appearance → Font changes the font on every screen: the chat list, chats, the compose box, settings, sheets and menus. There are 17 choices, each shown in its own face in the picker: Space Grotesk (the default), your device's own font, Figtree, Outfit, Manrope, Karla, Nunito, Quicksand, Josefin Sans, Atkinson Hyperlegible, Lexend, Lora, Libre Baskerville, Bitter, JetBrains Mono, Comic Neue and Caveat.
+- The fonts ship with the app, so nothing is downloaded and the choice works offline. Messages sent in a message font keep that font, and code stays monospaced.
+- Comic Neue now has a real bold weight, which also improves bold text in Comic Neue messages.
+
 ### About
 
 - About has a Source code link to github.com/rusty4444/parallax and shows the AGPL licence notice.
