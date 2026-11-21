@@ -21,6 +21,7 @@ import '../features/saved/saved_hooks.dart';
 import '../features/scheduled/scheduled_hooks.dart';
 import '../features/security/security_hooks.dart';
 import '../features/spaces_admin/spaces_admin_hooks.dart';
+import '../features/stories/stories_hooks.dart';
 import '../features/threads/thread_hooks.dart';
 import '../features/user_status/user_status_hooks.dart';
 import 'hook_types.dart';
@@ -151,6 +152,7 @@ List<Widget> chatSettingsSectionsFor(
   ...quickReactionSettingsSections(context, ctx),
   ...packsSettingsSections(context, ctx),
   ...savedSettingsSections(context, ctx),
+  ...storiesChatsSections(context, ctx),
 ];
 
 /// Settings → Media: upload quality.
@@ -217,7 +219,11 @@ Widget wrapSignedInApp(
               wrapWithMessageRequests(
                 context,
                 ctx,
-                wrapWithUserStatus(context, ctx, child),
+                wrapWithUserStatus(
+                  context,
+                  ctx,
+                  wrapWithStories(context, ctx, child),
+                ),
               ),
             ),
           ),

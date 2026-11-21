@@ -16,6 +16,8 @@ import 'features/home/room_list_tile.dart';
 import 'features/chat_lock/chat_lock_gate.dart';
 import 'features/message_requests/message_requests.dart';
 import 'features/message_requests/message_requests_screen.dart';
+import 'features/stories/stories.dart';
+import 'features/stories/stories_bar.dart';
 import 'features/home/space_switcher.dart';
 import 'features/rooms_admin/rooms_admin_hooks.dart';
 import 'features/saved/folder_tabs.dart';
@@ -1663,6 +1665,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         final source = widget.backend.rooms;
         final requestsCtrl = MessageRequestsScope.maybeOf(context);
         final separateRequests = requestsCtrl?.separate ?? false;
+        final storiesCtrl = StoriesScope.maybeOf(context);
+        final showStories = storiesCtrl?.enabled ?? false;
         final chatCount = _memo(
           #chatCount,
           source,
@@ -2147,6 +2151,12 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                           : const SizedBox(width: double.infinity, height: 14),
                     ),
                   ],
+                  if (showStories && !_searchOpen)
+                    StoriesBar(
+                      backend: widget.backend,
+                      controller: storiesCtrl!,
+                      palette: p,
+                    ),
                   if (requestRooms.isNotEmpty && !_searchOpen)
                     _MessageRequestsBanner(
                       palette: p,
