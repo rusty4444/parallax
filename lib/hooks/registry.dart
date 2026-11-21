@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/call/call_hooks.dart';
+import '../features/chat_lock/chat_lock_hooks.dart';
 import '../features/composer/composer_hooks.dart';
 import '../features/home/home_hooks.dart';
 import '../features/link_previews/link_preview_hooks.dart';
@@ -115,6 +116,7 @@ List<Widget> roomDetailsSectionsFor(
   ...spacesAdminRoomDetailsSections(context, ctx),
   ...packsRoomDetailsSections(context, ctx),
   ...retentionRoomDetailsSections(context, ctx),
+  ...chatLockRoomDetailsSections(context, ctx),
 ];
 
 // Settings is a menu of category pages (lib/settings_screen.dart). Each
@@ -197,7 +199,11 @@ Widget wrapSignedInApp(
         wrapWithLiveLocation(
           context,
           ctx,
-          wrapWithPlatformIntents(context, ctx, child),
+          wrapWithPlatformIntents(
+            context,
+            ctx,
+            wrapWithChatLock(context, ctx, child),
+          ),
         ),
       ),
     ),

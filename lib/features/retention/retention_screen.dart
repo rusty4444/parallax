@@ -63,8 +63,9 @@ class _RetentionScreenState extends State<RetentionScreen> {
         }
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'Couldn’t read the current setting.');
+      }
     }
   }
 

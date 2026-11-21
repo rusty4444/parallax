@@ -5,6 +5,7 @@ import '../../appearance_preferences.dart';
 import '../../chat_backend.dart';
 import '../../room_avatar.dart';
 import '../../widgets.dart';
+import '../chat_lock/chat_lock_gate.dart';
 
 /// One row of the home room list (Element X RoomSummaryRow): avatar, name,
 /// last message with sender, timestamp, unread/mention badges, muted state and
@@ -90,6 +91,9 @@ class RoomListTile extends StatelessWidget {
     // The people named in this row are checked with the server once.
     if (!room.invited) backend.roomShown(room.id);
     final p = palette;
+    final chatLocked =
+        (ChatLockScope.maybeOf(context)?.isLocked(room.id) ?? false) &&
+        !room.invited;
     final unread = room.unread > 0 || room.manuallyUnread || failedSend;
     final mentioned = room.highlightCount > 0;
     final emphasised = !room.invited && (unread || mentioned);
@@ -103,10 +107,13 @@ class RoomListTile extends StatelessWidget {
     final code =
         onCopyCode != null &&
             !room.invited &&
+            !chatLocked &&
             (room.unread > 0 || room.manuallyUnread)
         ? room.previewCode
         : null;
-    final previewText = room.invited
+    final previewText = chatLocked
+        ? 'Locked chat'
+        : room.invited
         ? (room.isDirect ? 'Invited you to chat' : 'Invited you to join')
         : room.preview.isEmpty
         ? 'No messages yet'
@@ -115,7 +122,12 @@ class RoomListTile extends StatelessWidget {
         : room.previewSender == null
         ? room.preview
         : '${room.previewSender}: ${room.preview}';
-    final lock = room.encrypted
+    final lock = chatLocked
+        ? [
+            Icon(Icons.lock_rounded, size: 13, color: p.secondary),
+            const SizedBox(width: 4),
+          ]
+        : room.encrypted
         ? [
             Icon(Icons.lock_outline, size: 13, color: p.secondary),
             const SizedBox(width: 4),

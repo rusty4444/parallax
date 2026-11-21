@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../chat_backend.dart';
+import '../chat_lock/chat_lock_gate.dart';
 import 'room_list_filters.dart';
 
 /// Choices in the room list long-press menu (Element X RoomListContextMenu).
@@ -22,6 +23,8 @@ enum RoomMenuAction {
 
   /// Opens the chat picture sheet (a picture only this phone shows).
   chatPicture,
+  lockChat,
+  unlockChat,
   copyLink,
   leave,
 }
@@ -62,6 +65,8 @@ Future<RoomMenuAction?> showRoomListMenu(
     showDragHandle: true,
     isScrollControlled: true,
     builder: (sheetContext) {
+      final chatLock = ChatLockScope.maybeOf(sheetContext);
+      final chatLocked = chatLock?.isLocked(room.id) ?? false;
       Widget item(
         RoomMenuAction action,
         IconData icon,
@@ -155,6 +160,14 @@ Future<RoomMenuAction?> showRoomListMenu(
                 Icons.add_photo_alternate_outlined,
                 'Chat picture…',
               ),
+              if (chatLock != null && !room.invited)
+                item(
+                  chatLocked
+                      ? RoomMenuAction.unlockChat
+                      : RoomMenuAction.lockChat,
+                  chatLocked ? Icons.lock_open_rounded : Icons.lock_rounded,
+                  chatLocked ? 'Unlock chat' : 'Lock chat',
+                ),
               item(
                 RoomMenuAction.copyLink,
                 Icons.link_rounded,

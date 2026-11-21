@@ -36,6 +36,7 @@ import 'timeline/message_lift.dart';
 import 'features/appearance/bubble_colours.dart';
 import 'features/appearance/bubble_colours_screen.dart';
 import 'features/appearance/room_theme_sync.dart';
+import 'features/chat_lock/chat_lock_gate.dart';
 import 'pending_failure.dart';
 import 'package:flutter/services.dart';
 
@@ -64,21 +65,35 @@ class RoomScreen extends StatelessWidget {
   final bool embedded;
 
   @override
-  Widget build(BuildContext context) => _OwnedRoomScreen(
-    key: ValueKey((
-      backend,
-      BackendSessionOwner.keyFor(backend),
-      backend.userId,
-      roomId,
-    )),
-    backend: backend,
-    palette: palette,
-    roomId: roomId,
-    backgroundStore: backgroundStore,
-    draftStore: draftStore,
-    bubbleColourStore: bubbleColourStore,
-    embedded: embedded,
-  );
+  Widget build(BuildContext context) {
+    var roomName = 'Chat';
+    for (final room in backend.rooms) {
+      if (room.id == roomId) {
+        roomName = room.name;
+        break;
+      }
+    }
+    return ChatLockGate(
+      roomId: roomId,
+      roomName: roomName,
+      palette: palette,
+      child: _OwnedRoomScreen(
+        key: ValueKey((
+          backend,
+          BackendSessionOwner.keyFor(backend),
+          backend.userId,
+          roomId,
+        )),
+        backend: backend,
+        palette: palette,
+        roomId: roomId,
+        backgroundStore: backgroundStore,
+        draftStore: draftStore,
+        bubbleColourStore: bubbleColourStore,
+        embedded: embedded,
+      ),
+    );
+  }
 }
 
 /// Changing the room/backend replaces the entire owner, including pending

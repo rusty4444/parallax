@@ -13,6 +13,7 @@ import 'features/home/home_features.dart';
 import 'features/home/room_list_filters.dart';
 import 'features/home/room_list_menu.dart';
 import 'features/home/room_list_tile.dart';
+import 'features/chat_lock/chat_lock_gate.dart';
 import 'features/home/space_switcher.dart';
 import 'features/rooms_admin/rooms_admin_hooks.dart';
 import 'features/saved/folder_tabs.dart';
@@ -428,6 +429,26 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       await showRoomPictureSheet(context, room: room, palette: widget.palette);
       return;
     }
+    if (choice == RoomMenuAction.lockChat ||
+        choice == RoomMenuAction.unlockChat) {
+      final store = ChatLockScope.maybeOf(context);
+      if (store != null) {
+        final lock = choice == RoomMenuAction.lockChat;
+        if (lock && !store.canLock) {
+          await store.refreshCredential();
+          if (!store.canLock) {
+            if (mounted && _owner.isCurrent) {
+              _showError(
+                'Set up an app lock PIN in Settings → Security first.',
+              );
+            }
+            return;
+          }
+        }
+        await store.setLocked(room.id, lock);
+      }
+      return;
+    }
     if (choice == RoomMenuAction.copyLink) {
       try {
         final link =
@@ -480,7 +501,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           );
         case RoomMenuAction.copyLink ||
             RoomMenuAction.addToFolder ||
-            RoomMenuAction.chatPicture:
+            RoomMenuAction.chatPicture ||
+            RoomMenuAction.lockChat ||
+            RoomMenuAction.unlockChat:
           break;
       }
     } catch (_) {

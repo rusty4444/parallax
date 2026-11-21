@@ -13,6 +13,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../message_copy_targets.dart';
 import '../../push_notifications.dart';
+import '../chat_lock/chat_lock_store.dart';
 import 'notification_model.dart';
 
 /// Notification group for message notifications (Element X: one group per
@@ -246,6 +247,46 @@ RenderedNotification renderRoomThread(
   String? statusLine,
   FileExists fileExists = _fileExists,
 }) {
+  // Locked chats never reveal sender, body or media in a notification.
+  if (ChatLockStore.shared.isLocked(thread.roomId)) {
+    return RenderedNotification(
+      id: roomNotificationId(thread.roomId),
+      title: thread.roomName,
+      body: 'Locked chat',
+      details: NotificationDetails(
+        android: AndroidNotificationDetails(
+          messageChannelId,
+          messageChannelName,
+          channelDescription: 'Messages and mentions',
+          importance: Importance.high,
+          priority: Priority.high,
+          visibility: NotificationVisibility.secret,
+          category: AndroidNotificationCategory.message,
+          color: _accent,
+          groupKey: notificationGroupKey,
+          onlyAlertOnce: !alert,
+          silent: !alert,
+        ),
+        iOS: DarwinNotificationDetails(
+          threadIdentifier: thread.roomId,
+          presentSound: alert,
+        ),
+        macOS: DarwinNotificationDetails(
+          threadIdentifier: thread.roomId,
+          presentSound: alert,
+        ),
+      ),
+      payload: jsonEncode(
+        notificationPayload(
+          registrationId: registrationId,
+          roomId: thread.roomId,
+          eventId: thread.latestEventId,
+          userId: myUserId,
+          deviceId: myDeviceId,
+        ),
+      ),
+    );
+  }
   final me = Person(name: 'Me', key: myUserId);
   final people = <String, Person>{};
   Person personFor(NotificationLine line) => line.fromMe
