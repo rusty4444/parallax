@@ -14,6 +14,7 @@ import '../features/platform/platform_hooks.dart';
 import '../features/polls/poll_hooks.dart';
 import '../features/qr_login/qr_login_hooks.dart';
 import '../features/reactions/reaction_hooks.dart';
+import '../features/reminders/reminders_hooks.dart';
 import '../features/retention/retention_hooks.dart';
 import '../features/rich_timeline/rich_timeline_hooks.dart';
 import '../features/rooms_admin/rooms_admin_hooks.dart';
@@ -52,6 +53,7 @@ List<MessageActionItem> messageActionsFor(
   ...pollMessageActions(context, ctx),
   ...mediaMessageActions(context, ctx),
   ...savedMessageActions(context, ctx),
+  ...reminderMessageActions(context, ctx),
   ...richTimelineMessageActions(context, ctx),
   // Moderator removal comes from the reactions module (live power levels);
   // roomsAdminMessageActions duplicates it once room details were cached.
@@ -153,6 +155,7 @@ List<Widget> chatSettingsSectionsFor(
   ...packsSettingsSections(context, ctx),
   ...savedSettingsSections(context, ctx),
   ...storiesChatsSections(context, ctx),
+  ...remindersChatsSections(context, ctx),
 ];
 
 /// Settings → Media: upload quality.
@@ -222,7 +225,11 @@ Widget wrapSignedInApp(
                 wrapWithUserStatus(
                   context,
                   ctx,
-                  wrapWithStories(context, ctx, child),
+                  wrapWithStories(
+                    context,
+                    ctx,
+                    wrapWithReminders(context, ctx, child),
+                  ),
                 ),
               ),
             ),
