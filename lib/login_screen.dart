@@ -9,9 +9,17 @@ import 'messaging_features.dart';
 import 'widgets.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.backend, required this.palette});
+  const LoginScreen({
+    super.key,
+    required this.backend,
+    required this.palette,
+    this.onCancelAddAccount,
+  });
   final ChatBackend backend;
   final AppPalette palette;
+
+  /// Shown while adding a new account: returns to the previous account.
+  final VoidCallback? onCancelAddAccount;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -223,6 +231,19 @@ class _LoginScreenState extends State<LoginScreen> {
     final features = widget.backend is MessagingFeatures;
     final password = _provider?.password ?? true;
     return Scaffold(
+      appBar: widget.onCancelAddAccount == null
+          ? null
+          : AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leadingWidth: 120,
+              leading: TextButton.icon(
+                key: const ValueKey('login-cancel-add'),
+                onPressed: widget.onCancelAddAccount,
+                icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                label: const Text('Back'),
+              ),
+            ),
       body: GlowBackdrop(
         palette: p,
         child: SafeArea(

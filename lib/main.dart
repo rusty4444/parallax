@@ -36,9 +36,11 @@ import 'features/platform/windows_bootstrap.dart';
 import 'haptics.dart';
 import 'l10n/app_localizations.dart';
 import 'l10n/locale_controller.dart';
+import 'features/accounts/account_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AccountStore.instance.load();
   initializeApplePlatform();
   assert(() {
     _installDebugLog();
@@ -56,8 +58,26 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
   }
-  runApp(const ParallaxApp());
+  runApp(const _AccountRoot());
   _installFrameDump();
+}
+
+/// Rebuilds the whole session when the active account slot changes, so each
+/// account gets an isolated backend, database and notification session.
+class _AccountRoot extends StatelessWidget {
+  const _AccountRoot();
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: AccountStore.instance,
+    builder: (context, _) {
+      final slot = AccountStore.instance.activeSlot;
+      return ParallaxApp(
+        key: ValueKey('account-${slot.id}'),
+        accountSlot: slot,
+      );
+    },
+  );
 }
 
 final GlobalKey _frameDumpKey = GlobalKey();
@@ -125,11 +145,15 @@ class ParallaxApp extends StatefulWidget {
     this.notifications,
     this.backendFactory,
     this.notificationsFactory,
+    this.accountSlot = const AccountSlot(id: AccountStore.defaultSlotId),
   }) : assert(backend == null || backendFactory == null),
        assert(notifications == null || notificationsFactory == null);
   final ChatBackend? backend;
   final AppearancePreferences? preferences;
   final MessageDraftStore? draftStore;
+
+  /// The account slot this app instance serves (isolated storage per slot).
+  final AccountSlot accountSlot;
 
   /// Borrowed resources are detached, never disposed by this widget.
   final PushNotifications? notifications;
@@ -211,6 +235,8 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
                 sendReadReceipts: () => _preferences.sendReadReceipts,
                 sendTypingNotifications: () =>
                     _preferences.sendTypingNotifications,
+                databaseFileName: widget.accountSlot.databaseFileName,
+                clientName: widget.accountSlot.clientName,
               ));
     _accountKey = BackendSessionOwner.keyFor(_backend);
     _userId = _backend.userId;
@@ -247,6 +273,21 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       _authenticated = true;
       // Signed-in wrappers (app lock, calls, share intents) attach now.
       _scheduleRebuild();
+      // A pending new account slot becomes a registered account once signed in.
+      if (widget.accountSlot.pending) {
+        final userId = _backend.userId;
+        final homeserver = _backend is MatrixBackend
+            ? _backend.sdkClient?.homeserver?.toString()
+            : null;
+        if (userId != null && homeserver != null) {
+          unawaited(
+            AccountStore.instance.registerActive(
+              userId: userId,
+              homeserver: homeserver,
+            ),
+          );
+        }
+      }
     }
     _bindPushSession();
   }
@@ -767,6 +808,9 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
             SessionStatus.signedOut => LoginScreen(
               backend: _backend,
               palette: p,
+              onCancelAddAccount: widget.accountSlot.pending
+                  ? () => unawaited(AccountStore.instance.cancelAddAccount())
+                  : null,
             ),
             SessionStatus.ready => InboxScreen(
               backend: _backend,

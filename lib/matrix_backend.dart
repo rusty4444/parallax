@@ -80,12 +80,20 @@ class MatrixBackend extends ChatBackend
     Future<Duration> Function()? undoSendDelay,
     bool Function()? isAppVisible,
     Future<MediaDiskCache> Function(String account)? openMediaCache,
+    this.databaseFileName = 'parallax.db',
+    this.clientName = 'Parallax',
   }) : _isAppVisible = isAppVisible ?? _appResumed,
        _openMediaCache = openMediaCache ?? MediaDiskCache.open,
        _sendReadReceipts = sendReadReceipts ?? (() => true),
        _sendTypingNotifications = sendTypingNotifications ?? (() => true),
        _undoSendDelay =
            undoSendDelay ?? UndoSendPreferences.shared.resolveDelay;
+
+  /// The SQLite file and SDK client name for this account slot. The default
+  /// slot keeps the original names so existing sessions are untouched; added
+  /// accounts get isolated storage (see lib/features/accounts).
+  final String databaseFileName;
+  final String clientName;
 
   @visibleForTesting
   factory MatrixBackend.withClient(
@@ -959,17 +967,17 @@ class MatrixBackend extends ChatBackend
       await waitForBackgroundPushClient(directory.path);
       checkStartup();
       openedDatabase = await sqlite.openDatabase(
-        path.join(directory.path, 'parallax.db'),
+        path.join(directory.path, databaseFileName),
       );
       checkStartup();
       final sdkDatabase = SafeMatrixDatabase(
-        'parallax',
+        clientName,
         database: openedDatabase,
       );
       await sdkDatabase.open();
       await sdkDatabase.dropLegacyEncryptedQueue();
       final storedUrl = (await sdkDatabase.getClient(
-        'Parallax',
+        clientName,
       ))?['homeserver_url'];
       checkStartup();
       if (storedUrl != null &&
@@ -986,7 +994,7 @@ class MatrixBackend extends ChatBackend
       // Caches m.direct and push rules, which the SDK re-parses on every
       // read (several times per room while projecting the room list).
       openedClient = ParallaxClient(
-        'Parallax',
+        clientName,
         database: sdkDatabase,
         httpClient: sendGuard,
         supportedLoginTypes: {

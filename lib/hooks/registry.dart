@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/call/call_hooks.dart';
+import '../features/accounts/accounts_hooks.dart';
 import '../features/bug_report/bug_report_hooks.dart';
 import '../features/catch_up/catch_up_hooks.dart';
 import '../features/chat_export/chat_export_hooks.dart';
@@ -155,6 +156,7 @@ List<Widget> accountDeviceSettingsRowsFor(
 ) => [
   ...qrLoginSettingsRows(context, ctx),
   ...userStatusAccountRows(context, ctx),
+  ...accountsSettingsRows(context, ctx),
 ];
 
 /// Settings → Chats: sending, effects, emoji and saved messages.
