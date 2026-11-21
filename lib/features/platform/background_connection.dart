@@ -65,6 +65,9 @@ class MethodChannelBackgroundConnection
   @override
   Future<bool> start() => _bool('start');
 
+  /// Whether the background connection service is currently running.
+  Future<bool> isRunning() => _bool('isRunning');
+
   @override
   Future<void> stop() async {
     if (!_android && !_windows) return;

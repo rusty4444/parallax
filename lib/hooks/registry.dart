@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/call/call_hooks.dart';
+import '../features/bug_report/bug_report_hooks.dart';
 import '../features/catch_up/catch_up_hooks.dart';
 import '../features/chat_export/chat_export_hooks.dart';
 import '../features/chat_lock/chat_lock_hooks.dart';
@@ -199,6 +200,7 @@ List<Widget> advancedSettingsSectionsFor(
 ) => [
   ...callSettingsSections(context, ctx),
   ...platformSettingsSections(context, ctx),
+  ...bugReportAdvancedSections(context, ctx),
 ];
 
 /// Wraps the signed-in app (inside the verification overlay). The app lock
@@ -238,7 +240,11 @@ Widget wrapSignedInApp(
                   wrapWithStories(
                     context,
                     ctx,
-                    wrapWithReminders(context, ctx, child),
+                    wrapWithReminders(
+                      context,
+                      ctx,
+                      wrapWithBugReport(context, ctx, child),
+                    ),
                   ),
                 ),
               ),

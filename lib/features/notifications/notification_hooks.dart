@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
 import 'notification_settings_section.dart';
+import 'notification_troubleshoot_screen.dart';
 import 'notifications_host.dart';
 
 /// Wraps the signed-in app: receives pushes handed over from background
@@ -24,4 +25,21 @@ Widget wrapWithNotifications(
 List<Widget> notificationSettingsRows(
   BuildContext context,
   SettingsHookContext ctx,
-) => [NotificationContentSection(palette: ctx.palette, backend: ctx.backend)];
+) => [
+  NotificationContentSection(palette: ctx.palette, backend: ctx.backend),
+  ListTile(
+    key: const ValueKey('notif-troubleshoot-row'),
+    leading: const Icon(Icons.build_circle_outlined),
+    title: const Text('Troubleshoot notifications'),
+    subtitle: const Text('Check permissions, background sync and pushers'),
+    trailing: const Icon(Icons.chevron_right_rounded),
+    onTap: () => Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationTroubleshootScreen(
+          backend: ctx.backend,
+          palette: ctx.palette,
+        ),
+      ),
+    ),
+  ),
+];
