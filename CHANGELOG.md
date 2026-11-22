@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.5.0
+
+### Several accounts
+
+- Settings → Account → Switch or add account signs in to another Matrix account. Each account has its own chats, encryption and database. The account you already use stays on its original storage. Back on the add-account screen returns to the previous account, and the original account cannot be removed.
+
+### A chat of your own
+
+- Two or more messages removed in a row fold into one line: "You removed N messages", or the name of the person who removed them.
+- A new room can be a broadcast channel. A badge marks it in the list, and only admins can post.
+- Bubble colours sync to your other devices. A photo wallpaper stays on the phone that chose it.
+- Room details → Disappearing messages offers 1 hour, 24 hours, 7 days or a custom lifetime. Other clients can still keep a copy.
+
+### Privacy in the inbox
+
+- Lock one chat with the app PIN or biometrics. Until you open it, the inbox and its notifications say "Locked chat". Set up an app lock PIN in Settings → Security first.
+- Invitations from people you share no room with wait under Message requests. Their name stays hidden until you choose to look, then you can accept, decline, or decline and block.
+- Settings → Account → Status sets a note, an emoji and an expiry.
+- Settings → Chats → Stories posts text or a photo to an encrypted story room that keeps it for 24 hours.
+
+### On this phone
+
+- Long-press a message → Remind me. Pending reminders are listed in Settings → Chats.
+- Room details → Export chat saves text, HTML or a ZIP with media, and warns that the file is unencrypted plain text.
+- A room with 10 or more unread messages offers a catch-up summary made on the phone: mentions, questions, threads, polls, media and who has been talking.
+- On Android, long-press a message to translate it on the device, or transcribe a voice message with the phone's speech recognizer. The first translation downloads a language model. Transcription depends on a recognizer being installed.
+- The composer can record a round video note, up to 60 seconds. Other Matrix apps show it as a normal video.
+
+### When something is wrong
+
+- Settings → Notifications → Troubleshoot notifications checks permission, background sync, battery optimisation and homeserver pushers, and can send a test notification.
+- Settings → Advanced → Report a problem shares a description plus a log with tokens, passwords and keys removed. Shake to report is optional.
+- Settings → Appearance → Language switches the settings menus among English, Spanish, French, German, Portuguese, Italian, Dutch, Japanese, Simplified Chinese and Russian. System default follows the phone. Message text is not translated by this setting.
+
+### Calls and widgets
+
+- A call can move the audio output, shrink to picture-in-picture, and share a link. On Android 12 and later, leaving the app during a call enters picture-in-picture, and an incoming call can ring on the lock screen.
+- A new room can be a voice room, with a Drop in button for an audio call.
+- Room details → Apps & widgets opens an HTTPS page in a sandbox. It starts with no access, and asks before it uses capabilities or an OpenID token. Addresses that are not plain HTTPS are refused.
+
 ## 1.4.0
 
 ### App font
