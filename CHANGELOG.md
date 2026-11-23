@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1
+
+### Message search, back in the inbox
+
+- Typing in the inbox search bar now returns message matches inline, alongside matching chats — no extra tap into a separate search screen.
+- Encrypted rooms are searched in the on-device index in parallel with unencrypted rooms on the homeserver, with a searching animation while results load. Matching chats cap at three (expand with "Show all chats") so message hits stay in view.
+- "Load more messages" pages older results, and errors offer retry. Device-search setting changes in Settings → Privacy take effect immediately.
+
 ## 1.5.0
 
 ### Several accounts
