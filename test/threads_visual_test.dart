@@ -17,7 +17,7 @@ import 'package:parallax/features/threads/thread_features.dart';
 import 'package:parallax/features/threads/thread_list_screen.dart';
 import 'package:parallax/features/threads/thread_models.dart';
 import 'package:parallax/features/threads/timeline_navigation.dart';
-import 'package:parallax/message_search_screen.dart';
+import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/messaging_features.dart';
 import 'package:parallax/room_screen.dart';
 import 'package:parallax/thread_screen.dart';
@@ -286,10 +286,22 @@ void main() {
       await _shoot(
         tester,
         'message_search_${style.name}',
-        app(MessageSearchScreen(backend: _backend(), palette: p)),
+        app(
+          InboxScreen(
+            backend: _backend(),
+            palette: p,
+            style: style,
+            onThemeChanged: (_) {},
+          ),
+        ),
         before: () async {
           await tester.pump();
-          await tester.enterText(find.byType(TextField), 'pier');
+          await tester.tap(find.byKey(const ValueKey('home.search_toggle')));
+          await tester.pumpAndSettle();
+          await tester.enterText(
+            find.byKey(const ValueKey('home.conversation_search')),
+            'pier',
+          );
           await tester.pump(const Duration(milliseconds: 400));
           await tester.pump();
           unawaited(Future<void>.value());

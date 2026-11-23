@@ -244,7 +244,7 @@ class PreferenceRows {
       secondary: const Icon(Icons.dashboard_customize_outlined),
       title: const Text('Show all home options'),
       subtitle: const Text(
-        'Keep search, filters, Spaces and folders above your '
+        'Keep filters, Spaces and folders above your '
         'chats. When off, they’re in the options menu at the top.',
       ),
       value: preferences.expandedHome,

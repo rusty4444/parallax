@@ -14,7 +14,6 @@ import 'package:parallax/gallery_bubble.dart';
 import 'package:parallax/inbox_screen.dart';
 import 'package:parallax/login_screen.dart';
 import 'package:parallax/main.dart';
-import 'package:parallax/message_search_screen.dart';
 import 'package:parallax/room_screen.dart';
 import 'package:parallax/room_background_store.dart';
 import 'package:parallax/room_details.dart';
@@ -386,28 +385,42 @@ void main() {
     expect(find.text('First room'), findsNothing);
   });
 
-  testWidgets('message search waits for a query and shows joined-room hits', (
-    tester,
-  ) async {
-    final backend = FakeBackend();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: themeFor(VisualTheme.parallax),
-        home: MessageSearchScreen(
-          backend: backend,
-          palette: paletteFor(VisualTheme.parallax),
+  testWidgets(
+    'inbox message search waits for a query and shows joined-room hits',
+    (tester) async {
+      final backend = FakeBackend();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: themeFor(VisualTheme.parallax),
+          home: InboxScreen(
+            backend: backend,
+            palette: paletteFor(VisualTheme.parallax),
+            style: VisualTheme.parallax,
+            onThemeChanged: (_) {},
+          ),
         ),
-      ),
-    );
-    expect(
-      find.text('Type at least two characters to search.'),
-      findsOneWidget,
-    );
-    await tester.enterText(find.byType(TextField), 'hello');
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pumpAndSettle();
-    expect(find.text('Found it in a room'), findsOneWidget);
-  });
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home.search_toggle')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('home.conversation_search')),
+        'h',
+      );
+      await tester.pump();
+      expect(
+        find.text('Type at least two characters to search messages.'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('home.conversation_search')),
+        'hello',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.text('Found it in a room'), findsOneWidget);
+    },
+  );
 
   testWidgets('room sends text and shows an unavailable image fallback', (
     tester,

@@ -628,31 +628,55 @@ void main() {
       expect(exitHandled, isFalse);
     });
 
-    testWidgets('home search lists message matches from the visible rooms', (
-      tester,
-    ) async {
-      // FakeBackend.searchMessages returns "Found it in a room" in
-      // !r:example.org; make that room visible so the hit is in scope.
-      backend.roomList = [
-        ...backend.roomList,
-        _room('!r:example.org', name: 'General'),
-      ];
-      await pump(tester);
-      await tester.tap(find.byTooltip('Search conversations'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('home.conversation_search')),
-        'zzz',
-      );
-      await tester.pump(const Duration(milliseconds: 400));
-      await tester.pumpAndSettle();
-      expect(find.text('Found it in a room'), findsOneWidget);
-      expect(find.text('MESSAGE MATCHES'), findsOneWidget);
-      expect(find.text('See all message results'), findsOneWidget);
-      // No room name matches "zzz": the room list is empty, only messages.
-      expect(find.text('Team'), findsNothing);
-      expect(find.text('Alex'), findsNothing);
-    });
+    testWidgets(
+      'home search lists message matches inline without a second screen',
+      (tester) async {
+        // FakeBackend.searchMessages returns "Found it in a room" in
+        // !r:example.org; make that room visible so the hit is in scope.
+        backend.roomList = [
+          ...backend.roomList,
+          _room('!r:example.org', name: 'General'),
+        ];
+        await pump(tester);
+        await tester.tap(find.byTooltip('Search conversations'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Search messages'), findsNothing);
+        await tester.enterText(
+          find.byKey(const ValueKey('home.conversation_search')),
+          'zzz',
+        );
+        await tester.pump();
+        // While the search is pending, show the searching animation instead of a
+        // premature empty state.
+        expect(
+          find.byKey(const ValueKey('home.message_search_spinner')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('home.message_search_shimmer')),
+          findsOneWidget,
+        );
+        expect(find.text('Searching…'), findsOneWidget);
+        expect(find.text('No matches yet'), findsNothing);
+
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pumpAndSettle();
+        expect(find.text('Found it in a room'), findsOneWidget);
+        expect(find.text('MESSAGE MATCHES'), findsOneWidget);
+        expect(find.text('See all message results'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('home.message_search_spinner')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('home.message_search_shimmer')),
+          findsNothing,
+        );
+        // No room name matches "zzz": the room list is empty, only messages.
+        expect(find.text('Team'), findsNothing);
+        expect(find.text('Alex'), findsNothing);
+      },
+    );
 
     testWidgets('a collapsed menu says what narrows the list and can clear', (
       tester,

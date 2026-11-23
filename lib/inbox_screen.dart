@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -37,7 +38,6 @@ import 'room_picture_sheet.dart';
 import 'room_background_store.dart';
 import 'space_browser_screen.dart';
 import 'user_directory_screen.dart';
-import 'message_search_screen.dart';
 import 'room_screen.dart';
 import 'room_sync_panel.dart';
 import 'settings_screen.dart';
@@ -129,13 +129,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     _creation.addListener(_creationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _creationChanged());
     _messageIndex = localMessageSearchOf(widget.backend);
-    final index = _messageIndex;
-    if (index != null) {
-      try {
-        index.ensureStarted();
-      } catch (_) {}
-      unawaited(_loadDeviceSearch(index));
-    }
+    try {
+      _messageIndex?.ensureStarted();
+    } catch (_) {}
   }
 
   void _creationChanged() {
@@ -179,7 +175,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _messageDebounce?.cancel();
     _messageGeneration++;
-    _deviceSetup++;
     _changes.dispose();
     _createdRoomWait?.cancel();
     _creation.detach(_creationChanged);
@@ -276,15 +271,25 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   bool _searchOpen = false;
 
   // Inline message search. Room/people name filtering above stays
-  // synchronous; these results arrive asynchronously (debounced, off the UI
-  // thread) and are scoped to the rooms the current Space/folder/filters show.
+  // synchronous; message results arrive asynchronously (debounced, off the UI
+  // thread) with encrypted local-index search and server search in parallel.
   LocalMessageSearch? _messageIndex;
-  bool _deviceSearch = false;
-  int _deviceSetup = 0;
   Timer? _messageDebounce;
   int _messageGeneration = 0;
+  bool _messageSearchPending = false;
+  bool _localSearching = false;
+  bool _serverSearching = false;
+  bool _localLoadingMore = false;
+  bool _serverLoadingMore = false;
+  List<LocalMessageHit> _localMessageHits = const [];
+  List<MessageHit> _serverMessageHits = const [];
+  int? _localNextOffset;
+  String? _serverNextBatch;
+  String? _localSearchError;
+  String? _serverSearchError;
   List<MessageHit> _messageHits = const [];
   String? _openingMessage;
+  bool _showAllMatchingRooms = false;
   Set<String> _messageScopeIds = const {};
   Set<RoomListFilter> _filters = const {};
   String? _spaceId;
@@ -883,19 +888,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
   }
 
-  Future<void> _searchMessages() async {
-    final roomId = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => MessageSearchScreen(
-          backend: widget.backend,
-          palette: widget.palette,
-          initialQuery: _query,
-        ),
-      ),
-    );
-    if (mounted && _owner.isCurrent && roomId != null) _open(roomId);
-  }
-
   void _openSettings() => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => SettingsScreen(
@@ -968,12 +960,25 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     Haptics.selection();
     setState(() {
       _searchOpen = !_searchOpen;
-      if (!_searchOpen) {
+      if (_searchOpen) {
+        try {
+          _messageIndex?.ensureStarted();
+        } catch (_) {}
+      } else {
         // Never leave an invisible query narrowing the room list.
         _search.clear();
         _query = '';
         _resetMessageSearch();
       }
+    });
+  }
+
+  void _clearSearchQuery() {
+    Haptics.selection();
+    _search.clear();
+    setState(() {
+      _query = '';
+      _resetMessageSearch();
     });
   }
 
@@ -991,14 +996,40 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   // ---- Inline message search -------------------------------------------
 
-  /// Most message matches shown under the room list before "See all".
-  static const _messageResultLimit = 20;
+  /// Room results shown above Message matches before "Show all N chats".
+  static const _collapsedRoomResultLimit = 3;
+
+  /// Number of local message hits fetched per page.
+  static const _messagePageSize = 20;
+
+  bool get _searchingMessages =>
+      _messageSearchPending || _localSearching || _serverSearching;
+
+  bool get _loadingMoreMessages => _localLoadingMore || _serverLoadingMore;
+
+  bool get _hasMoreMessages =>
+      _localNextOffset != null || _serverNextBatch != null;
+
+  bool get _hasActiveScopeFilter =>
+      _spaceId != null || _folderId != null || _filters.isNotEmpty;
 
   void _resetMessageSearch() {
     _messageDebounce?.cancel();
     _messageGeneration++;
+    _messageSearchPending = false;
+    _localSearching = false;
+    _serverSearching = false;
+    _localLoadingMore = false;
+    _serverLoadingMore = false;
+    _localMessageHits = const [];
+    _serverMessageHits = const [];
+    _localNextOffset = null;
+    _serverNextBatch = null;
+    _localSearchError = null;
+    _serverSearchError = null;
     _messageHits = const [];
     _openingMessage = null;
+    _showAllMatchingRooms = false;
   }
 
   void _onSearchChanged(String value) {
@@ -1008,35 +1039,58 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final active = _searchOpen && query.length >= 2;
     setState(() {
       _query = value;
+      _messageSearchPending = active;
+      _localSearching = false;
+      _serverSearching = false;
+      _localLoadingMore = false;
+      _serverLoadingMore = false;
+      _localMessageHits = const [];
+      _serverMessageHits = const [];
+      _localNextOffset = null;
+      _serverNextBatch = null;
+      _localSearchError = null;
+      _serverSearchError = null;
       _messageHits = const [];
       _openingMessage = null;
+      _showAllMatchingRooms = false;
     });
     if (!active) return;
     // Debounced so a burst of keystrokes costs one search, not one per key.
     _messageDebounce = Timer(const Duration(milliseconds: 350), () {
-      unawaited(_runMessageSearch(query, generation));
+      _dispatchMessageSearch(query, generation);
     });
   }
 
-  Future<void> _loadDeviceSearch(LocalMessageSearch index) async {
-    final setup = ++_deviceSetup;
-    bool enabled;
-    try {
-      enabled = await index.isEnabled();
-    } catch (_) {
-      enabled = false;
+  void _submitSearch(String value) {
+    final query = value.trim();
+    if (!_searchOpen || query.length < 2) return;
+    if (_messageSearchPending) {
+      _messageDebounce?.cancel();
+      _dispatchMessageSearch(query, _messageGeneration);
+    } else if (!_searchingMessages &&
+        (_localSearchError != null || _serverSearchError != null)) {
+      _retryMessageSearch();
     }
-    if (!mounted ||
-        setup != _deviceSetup ||
-        !identical(index, _messageIndex) ||
-        !_owner.isCurrent) {
-      return;
-    }
-    if (enabled == _deviceSearch) return;
-    setState(() => _deviceSearch = enabled);
-    if (_searchOpen && _query.trim().length >= 2) {
-      _onSearchChanged(_search.text);
-    }
+  }
+
+  void _retryMessageSearch() {
+    final query = _query.trim();
+    if (!_searchOpen || query.length < 2) return;
+    _messageDebounce?.cancel();
+    final generation = ++_messageGeneration;
+    setState(() {
+      _localLoadingMore = false;
+      _serverLoadingMore = false;
+      _localMessageHits = const [];
+      _serverMessageHits = const [];
+      _localNextOffset = null;
+      _serverNextBatch = null;
+      _localSearchError = null;
+      _serverSearchError = null;
+      _messageHits = const [];
+      _openingMessage = null;
+    });
+    _dispatchMessageSearch(query, generation);
   }
 
   bool _messageSearchCurrent(int generation) =>
@@ -1045,43 +1099,162 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       _searchOpen &&
       _owner.isCurrent;
 
-  Future<void> _runMessageSearch(String query, int generation) async {
+  void _dispatchMessageSearch(String query, int generation) {
     if (!_messageSearchCurrent(generation)) return;
     final index = _messageIndex;
-    var localHits = const <MessageHit>[];
-    // Encrypted rooms: the on-device index (off the UI thread). Show these
-    // as soon as they are ready, without waiting for the server.
-    if (_deviceSearch && index != null) {
-      try {
-        final page = await index.search(query, limit: _messageResultLimit);
-        if (!_messageSearchCurrent(generation)) return;
-        localHits = page.hits;
-        _publishMessageHits(localHits, const []);
-      } catch (_) {
-        if (!_messageSearchCurrent(generation)) return;
-      }
+    setState(() {
+      _messageSearchPending = false;
+      _localSearching = index != null;
+      _serverSearching = true;
+    });
+    // Run encrypted local-index search and homeserver search in parallel so
+    // neither waits on the other.
+    if (index != null) {
+      unawaited(_searchLocalMessages(index, query, generation));
     }
-    // Unencrypted rooms: the homeserver. Best-effort — a failure keeps the
-    // local matches already shown.
+    unawaited(_searchServerMessages(query, generation));
+  }
+
+  Future<void> _searchLocalMessages(
+    LocalMessageSearch index,
+    String query,
+    int generation,
+  ) async {
+    if (!_messageSearchCurrent(generation)) return;
+    bool enabled;
+    try {
+      enabled = await index.isEnabled();
+    } catch (_) {
+      enabled = false;
+    }
+    if (!_messageSearchCurrent(generation)) return;
+    if (!enabled) {
+      setState(() => _localSearching = false);
+      return;
+    }
+    try {
+      final page = await index.search(query, limit: _messagePageSize);
+      if (!_messageSearchCurrent(generation)) return;
+      _localMessageHits = page.hits;
+      _localNextOffset = page.nextOffset;
+      _localSearchError = null;
+      _localSearching = false;
+      _publishMessageHits();
+    } catch (_) {
+      if (!_messageSearchCurrent(generation)) return;
+      setState(() {
+        _localSearching = false;
+        _localSearchError = 'Couldn’t search this device’s history.';
+      });
+    }
+  }
+
+  Future<void> _searchServerMessages(String query, int generation) async {
+    if (!_messageSearchCurrent(generation)) return;
     try {
       final page = await widget.backend.searchMessages(query);
       if (!_messageSearchCurrent(generation)) return;
-      _publishMessageHits(localHits, page.hits);
-    } catch (_) {}
+      _serverMessageHits = page.hits;
+      _serverNextBatch = page.nextBatch;
+      _serverSearchError = null;
+      _serverSearching = false;
+      _publishMessageHits();
+    } catch (_) {
+      if (!_messageSearchCurrent(generation)) return;
+      setState(() {
+        _serverSearching = false;
+        _serverSearchError = 'Couldn’t search messages on this server.';
+      });
+    }
   }
 
-  void _publishMessageHits(List<MessageHit> local, List<MessageHit> server) {
-    final scope = _messageScopeIds;
+  void _loadMoreMessages() {
+    if (_searchingMessages || _loadingMoreMessages || !_owner.isCurrent) return;
+    final query = _query.trim();
+    if (!_searchOpen || query.length < 2) return;
+    final generation = _messageGeneration;
+    final index = _messageIndex;
+    final localOffset = _localNextOffset;
+    final serverToken = _serverNextBatch;
+    if ((index == null || localOffset == null) && serverToken == null) return;
+    Haptics.selection();
+    setState(() {
+      if (index != null && localOffset != null) _localLoadingMore = true;
+      if (serverToken != null) _serverLoadingMore = true;
+    });
+    if (index != null && localOffset != null) {
+      unawaited(_loadMoreLocalMessages(index, query, localOffset, generation));
+    }
+    if (serverToken != null) {
+      unawaited(_loadMoreServerMessages(query, serverToken, generation));
+    }
+  }
+
+  Future<void> _loadMoreLocalMessages(
+    LocalMessageSearch index,
+    String query,
+    int offset,
+    int generation,
+  ) async {
+    try {
+      final page = await index.search(
+        query,
+        offset: offset,
+        limit: _messagePageSize,
+      );
+      if (!_messageSearchCurrent(generation)) return;
+      final known = {for (final hit in _localMessageHits) hit.id};
+      _localMessageHits = [
+        ..._localMessageHits,
+        for (final hit in page.hits)
+          if (known.add(hit.id)) hit,
+      ];
+      _localNextOffset = (page.nextOffset != null && page.nextOffset! > offset)
+          ? page.nextOffset
+          : null;
+      _localLoadingMore = false;
+      _publishMessageHits();
+    } catch (_) {
+      if (!_messageSearchCurrent(generation)) return;
+      setState(() => _localLoadingMore = false);
+      _showError('Couldn’t load more matches.');
+    }
+  }
+
+  Future<void> _loadMoreServerMessages(
+    String query,
+    String token,
+    int generation,
+  ) async {
+    try {
+      final page = await widget.backend.searchMessages(query, nextBatch: token);
+      if (!_messageSearchCurrent(generation)) return;
+      final known = {for (final hit in _serverMessageHits) hit.id};
+      _serverMessageHits = [
+        ..._serverMessageHits,
+        for (final hit in page.hits)
+          if (known.add(hit.id)) hit,
+      ];
+      _serverNextBatch = page.nextBatch == token ? null : page.nextBatch;
+      _serverLoadingMore = false;
+      _publishMessageHits();
+    } catch (_) {
+      if (!_messageSearchCurrent(generation)) return;
+      setState(() => _serverLoadingMore = false);
+      _showError('Couldn’t load more matches.');
+    }
+  }
+
+  void _publishMessageHits() {
     final seen = <String>{};
     final combined = <MessageHit>[];
-    for (final hit in [...local, ...server]) {
-      if (!scope.contains(hit.roomId) || !seen.add(hit.id)) continue;
+    for (final hit in [..._localMessageHits, ..._serverMessageHits]) {
+      if (!seen.add(hit.id)) continue;
       combined.add(hit);
     }
     combined.sort((a, b) => b.time.compareTo(a.time));
     setState(() {
-      _messageHits = combined.take(_messageResultLimit).toList();
-      _openingMessage = null;
+      _messageHits = combined;
     });
   }
 
@@ -1120,9 +1293,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     return {for (final room in filtered) room.id};
   }
 
-  Future<void> _openMessageHit(MessageHit hit) async {
-    if (_openingMessage != null || !_owner.isCurrent) return;
-    final generation = _messageGeneration;
+  Future<void> _openMessageHit(int generation, MessageHit hit) async {
+    if (_openingMessage != null || !_messageSearchCurrent(generation)) return;
     final jumpId = hit is LocalMessageHit ? hit.jumpEventId : hit.id;
     final navigation = timelineNavigationOf(widget.backend);
     if (navigation == null || !jumpId.startsWith(r'$')) {
@@ -1137,9 +1309,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     } catch (_) {
       focused = false;
     }
-    if (!mounted || generation != _messageGeneration || !_owner.isCurrent) {
-      return;
-    }
+    if (!mounted || !_messageSearchCurrent(generation)) return;
     setState(() => _openingMessage = null);
     if (!focused) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1151,11 +1321,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       );
     }
     _open(hit.roomId);
-  }
-
-  void _seeAllMessages() {
-    Haptics.selection();
-    unawaited(_searchMessages());
   }
 
   Widget _roomTileFor(
@@ -1206,8 +1371,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// Search mode: matching rooms first, then message matches from the rooms
-  /// the current Space/folder/filters show.
+  /// Search mode: matching chats (capped so message hits stay in view), then
+  /// inline message matches with live searching animation and pagination.
   Widget _searchResultsArea({
     required AppPalette p,
     required List<ChatRoom> rooms,
@@ -1219,7 +1384,22 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     required bool hideInviteAvatars,
     required String? noteId,
   }) {
-    if (rooms.isEmpty && _messageHits.isEmpty) {
+    final trimmed = _query.trim();
+    final generation = _messageGeneration;
+    final hits = _hasActiveScopeFilter
+        ? [
+            for (final hit in _messageHits)
+              if (_messageScopeIds.contains(hit.roomId)) hit,
+          ]
+        : _messageHits;
+    final searching = _searchingMessages;
+    final canSearchMessages = trimmed.length >= 2;
+    final hasErrors = _localSearchError != null || _serverSearchError != null;
+    if (rooms.isEmpty &&
+        hits.isEmpty &&
+        !searching &&
+        !hasErrors &&
+        canSearchMessages) {
       return _EmptyRoomList(
         palette: p,
         icon: Icons.search_off_rounded,
@@ -1227,41 +1407,131 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         subtitle: 'Try another search.',
       );
     }
+    final showAllRooms =
+        _showAllMatchingRooms || rooms.length <= _collapsedRoomResultLimit;
+    final visibleRooms = showAllRooms
+        ? rooms
+        : rooms.take(_collapsedRoomResultLimit).toList();
+    final hiddenRoomCount = rooms.length - visibleRooms.length;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
       children: [
-        for (final room in rooms)
-          _roomTileFor(
-            room,
-            p: p,
-            compact: compact,
-            rowStyle: rowStyle,
-            homePreview: homePreview,
-            favourites: favourites,
-            failedRooms: failedRooms,
-            hideInviteAvatars: hideInviteAvatars,
-            noteId: noteId,
-          ),
-        if (_messageHits.isNotEmpty) ...[
-          const SizedBox(height: 12),
+        if (visibleRooms.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-            child: Eyebrow('Message matches', palette: p),
+            child: Eyebrow('Chats', palette: p),
           ),
-          for (final hit in _messageHits) _messageHitCard(p, hit),
-          Center(
-            child: TextButton.icon(
-              onPressed: _seeAllMessages,
-              icon: const Icon(Icons.manage_search_rounded),
-              label: const Text('See all message results'),
+          for (final room in visibleRooms)
+            _roomTileFor(
+              room,
+              p: p,
+              compact: compact,
+              rowStyle: rowStyle,
+              homePreview: homePreview,
+              favourites: favourites,
+              failedRooms: failedRooms,
+              hideInviteAvatars: hideInviteAvatars,
+              noteId: noteId,
             ),
+          if (hiddenRoomCount > 0)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('home.search_show_all_chats'),
+                onPressed: () {
+                  Haptics.selection();
+                  setState(() => _showAllMatchingRooms = true);
+                },
+                icon: const Icon(Icons.expand_more_rounded, size: 18),
+                label: Text('Show all ${rooms.length} chats'),
+              ),
+            ),
+          const SizedBox(height: 12),
+        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Eyebrow('Message matches', palette: p),
+              if (searching)
+                _SearchingDots(
+                  key: const ValueKey('home.message_search_spinner'),
+                  palette: p,
+                ),
+            ],
           ),
+        ),
+        if (!canSearchMessages)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 2, 4, 12),
+            child: Text(
+              'Type at least two characters to search messages.',
+              style: TextStyle(color: p.muted, fontSize: 13),
+            ),
+          )
+        else ...[
+          if (searching && hits.isEmpty)
+            _MessageSearchShimmer(
+              key: const ValueKey('home.message_search_shimmer'),
+              palette: p,
+            ),
+          for (final hit in hits) _messageHitCard(p, generation, hit),
+          if (!searching && hits.isEmpty && !hasErrors)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 12),
+              child: Text(
+                'No matching messages.',
+                style: TextStyle(color: p.muted, fontSize: 13),
+              ),
+            ),
+          if (_localSearchError != null)
+            _messageSearchNotice(p, _localSearchError!),
+          if (_serverSearchError != null)
+            _messageSearchNotice(p, _serverSearchError!),
+          if (!searching && hasErrors)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('home.search_retry'),
+                onPressed: _retryMessageSearch,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Try again'),
+              ),
+            ),
+          if (!searching && _hasMoreMessages)
+            Center(
+              child: TextButton.icon(
+                key: const ValueKey('home.search_load_more'),
+                onPressed: _loadingMoreMessages ? null : _loadMoreMessages,
+                icon: _loadingMoreMessages
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: p.accent,
+                        ),
+                      )
+                    : const Icon(Icons.expand_more_rounded),
+                label: Text(
+                  _loadingMoreMessages ? 'Loading…' : 'Load more messages',
+                ),
+              ),
+            ),
         ],
       ],
     );
   }
 
-  Widget _messageHitCard(AppPalette p, MessageHit hit) {
+  Widget _messageSearchNotice(AppPalette p, String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+    child: Text(text, style: TextStyle(color: p.muted, fontSize: 13)),
+  );
+
+  Widget _messageHitCard(AppPalette p, int generation, MessageHit hit) {
     final opening = _openingMessage == hit.id;
     final inThread = hit is LocalMessageHit && hit.threadRootId != null;
     return Card(
@@ -1270,7 +1540,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.only(bottom: 9),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => _openMessageHit(hit),
+        onTap: () => _openMessageHit(generation, hit),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -1902,15 +2172,20 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           key: const ValueKey('home.conversation_search'),
           controller: _search,
           autofocus: true,
+          textInputAction: TextInputAction.search,
           onChanged: _onSearchChanged,
+          onSubmitted: _submitSearch,
           decoration: InputDecoration(
             hintText: 'Search people, rooms and messages',
             prefixIcon: const Icon(Icons.search_rounded),
-            suffixIcon: IconButton(
-              tooltip: 'Search messages',
-              onPressed: _searchMessages,
-              icon: const Icon(Icons.manage_search_rounded),
-            ),
+            suffixIcon: _query.isNotEmpty
+                ? IconButton(
+                    key: const ValueKey('home.search_clear'),
+                    tooltip: 'Clear search',
+                    onPressed: _clearSearchQuery,
+                    icon: const Icon(Icons.close_rounded),
+                  )
+                : null,
           ),
         );
         final quickLinks = <Widget>[
@@ -2494,6 +2769,170 @@ class _MessageRequestsBanner extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Animated three-dot wave shown next to "Message matches" while local or
+/// server message searches are running.
+class _SearchingDots extends StatefulWidget {
+  const _SearchingDots({super.key, required this.palette});
+  final AppPalette palette;
+
+  @override
+  State<_SearchingDots> createState() => _SearchingDotsState();
+}
+
+class _SearchingDotsState extends State<_SearchingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.palette;
+    final colors = [
+      p.accent,
+      Color.lerp(p.accent, p.secondary, 0.5) ?? p.secondary,
+      p.secondary,
+    ];
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 3; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Builder(
+              builder: (_) {
+                final phase =
+                    (_controller.value * 2 * math.pi) - (i * math.pi / 2.2);
+                final wave = (math.sin(phase) + 1) / 2;
+                return Transform.translate(
+                  offset: Offset(0, -2.5 * wave),
+                  child: Opacity(
+                    opacity: 0.35 + (0.65 * wave),
+                    child: Container(
+                      width: 5.5,
+                      height: 5.5,
+                      decoration: BoxDecoration(
+                        color: colors[i],
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          const SizedBox(width: 7),
+          Text(
+            'Searching…',
+            style: TextStyle(
+              color: p.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pulsing placeholder cards shown while inline message search is running and
+/// no hits have arrived yet.
+class _MessageSearchShimmer extends StatefulWidget {
+  const _MessageSearchShimmer({super.key, required this.palette});
+  final AppPalette palette;
+
+  @override
+  State<_MessageSearchShimmer> createState() => _MessageSearchShimmerState();
+}
+
+class _MessageSearchShimmerState extends State<_MessageSearchShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1050),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.palette;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = Curves.easeInOut.transform(_controller.value);
+        final bar = Color.lerp(p.raised, p.accent.withValues(alpha: 0.16), t)!;
+        final faint = Color.lerp(
+          p.raised.withValues(alpha: 0.7),
+          p.secondary.withValues(alpha: 0.12),
+          t,
+        )!;
+        Widget card(double titleWidth, double lineWidth) => Card(
+          color: p.surface,
+          margin: const EdgeInsets.only(bottom: 9),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: titleWidth,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: faint,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: bar,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Container(
+                  width: lineWidth,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: bar,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: 72,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: faint,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        return Column(children: [card(110, 210), card(88, 165)]);
+      },
     );
   }
 }
