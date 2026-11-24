@@ -351,7 +351,7 @@ void main() {
       expect(find.text('3'), findsOneWidget);
     });
 
-    testWidgets('an unread code is copied from its row without opening it', (
+    testWidgets('copying an unread code marks its chat read without opening', (
       tester,
     ) async {
       const sms = 'Your verification code is 671152. Don’t share it.';
@@ -389,18 +389,113 @@ void main() {
       expect(clipboard, ['671152']);
       expect(find.text('Code copied'), findsOneWidget);
       expect(haptics, ['HapticFeedbackType.lightImpact']);
-      // Only the button was pressed: the chat is not opened or marked read.
+      // The chat is marked read, and only that chat, without being opened.
       expect(find.byType(RoomScreen), findsNothing);
       expect(backend.activeRoomId, isNull);
-      expect(backend.calls, isEmpty);
-      expect(copy, findsOneWidget);
-
-      // Once the chat is read the button goes.
-      await tester.longPress(find.text('Google'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Mark as read'));
-      await tester.pumpAndSettle();
+      expect(backend.calls, ['read:!google:x.org']);
+      expect(backend.lastPublicReceipt, isTrue);
+      expect(backend.lastRoomUnread, isNull);
+      // Read now, so the button goes and the row stays.
       expect(copy, findsNothing);
+      expect(find.text('Google'), findsOneWidget);
+      expect(
+        backend.roomList.singleWhere((r) => r.id == '!google:x.org').unread,
+        0,
+      );
+    });
+
+    testWidgets('copying a code clears a manual unread mark as well', (
+      tester,
+    ) async {
+      backend.roomList = [
+        _room(
+          '!bank:x.org',
+          name: 'Bank',
+          direct: true,
+          manual: true,
+          preview: 'Use 4821 to sign in.',
+          code: '4821',
+        ),
+      ];
+      await pump(tester);
+      await tester.tap(find.byKey(const ValueKey('copy-code-!bank:x.org')));
+      await tester.pumpAndSettle();
+      expect(clipboard, ['4821']);
+      expect(backend.lastRoomUnread, isFalse);
+      expect(backend.calls, ['read:!bank:x.org']);
+      expect(
+        backend.roomList.single.manuallyUnread,
+        isFalse,
+        reason: 'the manual unread mark is cleared',
+      );
+      expect(find.byKey(const ValueKey('copy-code-!bank:x.org')), findsNothing);
+    });
+
+    testWidgets('copying a code respects the private receipt preference', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = AppearancePreferences();
+      addTearDown(prefs.dispose);
+      await prefs.setSendReadReceipts(false);
+      backend.roomList = [
+        _room('!google:x.org', name: 'Google', unread: 1, code: '671152'),
+      ];
+      await pump(tester, prefs: prefs);
+      await tester.tap(find.byKey(const ValueKey('copy-code-!google:x.org')));
+      await tester.pumpAndSettle();
+      expect(clipboard, ['671152']);
+      expect(backend.calls, ['read:!google:x.org']);
+      expect(backend.lastPublicReceipt, isFalse);
+    });
+
+    testWidgets('a code that could not be copied leaves its chat unread', (
+      tester,
+    ) async {
+      backend.roomList = [
+        _room('!google:x.org', name: 'Google', unread: 1, code: '671152'),
+      ];
+      await pump(tester);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            throw PlatformException(code: 'clipboard');
+          }
+          return null;
+        },
+      );
+      final button = find.byKey(const ValueKey('copy-code-!google:x.org'));
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.text('Couldn’t copy the code.'), findsOneWidget);
+      expect(find.text('Code copied'), findsNothing);
+      expect(backend.calls, isEmpty);
+      expect(button, findsOneWidget);
+      expect(backend.roomList.single.unread, 1);
+    });
+
+    testWidgets('a failed mark as read still copies and keeps the button', (
+      tester,
+    ) async {
+      backend
+        ..markAsReadError = StateError('offline')
+        ..roomList = [
+          _room('!google:x.org', name: 'Google', unread: 1, code: '671152'),
+        ];
+      await pump(tester);
+      final button = find.byKey(const ValueKey('copy-code-!google:x.org'));
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(clipboard, ['671152']);
+      expect(find.text('Code copied'), findsOneWidget);
+      expect(backend.calls, ['read:!google:x.org']);
+      expect(tester.takeException(), isNull);
+      // Still unread, so the code can be copied again.
+      expect(button, findsOneWidget);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(clipboard, ['671152', '671152']);
     });
 
     testWidgets('the copy button fits every row style on a narrow phone', (

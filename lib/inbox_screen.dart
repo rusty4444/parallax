@@ -496,18 +496,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         case RoomMenuAction.markUnread:
           await widget.backend.setRoomUnread(room.id, true);
         case RoomMenuAction.markRead:
-          if (room.manuallyUnread) {
-            await widget.backend.setRoomUnread(room.id, false);
-          }
-          if (!mounted || !_owner.isCurrent) return;
-          await roomList?.markAsRead(
-            room.id,
-            publicReceipt:
-                FeatureSettingsScope.maybeOf(
-                  context,
-                )?.preferences.sendReadReceipts ??
-                true,
-          );
+          await _markRoomRead(room);
         case RoomMenuAction.copyLink ||
             RoomMenuAction.addToFolder ||
             RoomMenuAction.chatPicture ||
@@ -854,15 +843,37 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
 
-  /// Copies the one-time code offered on an unread row. The chat stays
-  /// unread: nothing was opened.
-  Future<void> _copyCode(String code) async {
+  /// Clears a manual unread mark and sends the read receipt for the room's
+  /// latest message, without opening it.
+  Future<void> _markRoomRead(ChatRoom room) async {
+    final publicReceipt =
+        FeatureSettingsScope.maybeOf(context)?.preferences.sendReadReceipts ??
+        true;
+    if (room.manuallyUnread) {
+      await widget.backend.setRoomUnread(room.id, false);
+    }
+    if (!mounted || !_owner.isCurrent) return;
+    await _roomList?.markAsRead(room.id, publicReceipt: publicReceipt);
+  }
+
+  /// Copies the one-time code offered on an unread row and marks the chat
+  /// read: the code was the message. The chat is not opened. A code that
+  /// could not be copied leaves the chat unread, with its button.
+  Future<void> _copyCode(ChatRoom room, String code) async {
     Haptics.selection();
     try {
       await Clipboard.setData(ClipboardData(text: code));
-      if (mounted && _owner.isCurrent) _showError('Code copied');
     } catch (_) {
       if (mounted && _owner.isCurrent) _showError('Couldn’t copy the code.');
+      return;
+    }
+    if (!mounted || !_owner.isCurrent) return;
+    _showError('Code copied');
+    try {
+      await _markRoomRead(room);
+    } catch (_) {
+      // The code is on the clipboard. The chat stays unread and keeps its
+      // button; opening it or "Mark as read" still works.
     }
   }
 
@@ -1367,7 +1378,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
       onLongPress: room.invited ? null : () => _showRoomActions(room),
       onAccept: () => _acceptInvite(room),
       onDecline: () => _declineInvite(room),
-      onCopyCode: _copyCode,
+      onCopyCode: (code) => _copyCode(room, code),
     );
   }
 

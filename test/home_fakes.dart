@@ -19,6 +19,9 @@ class HomeFakeBackend extends FakeBackend
   Map<String, Set<String>> spaceChildren = const {};
   bool? lastPublicReceipt;
 
+  /// When set, [markAsRead] is recorded and then fails with this.
+  Object? markAsReadError;
+
   void _replace(String roomId, ChatRoom Function(ChatRoom) change) {
     roomList = [
       for (final room in roomList)
@@ -31,6 +34,8 @@ class HomeFakeBackend extends FakeBackend
   Future<void> markAsRead(String roomId, {required bool publicReceipt}) async {
     calls.add('read:$roomId');
     lastPublicReceipt = publicReceipt;
+    final error = markAsReadError;
+    if (error != null) throw error;
     _replace(roomId, (r) => r.copyWith(unread: 0, highlightCount: 0));
   }
 

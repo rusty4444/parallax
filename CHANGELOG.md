@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Copy a code from the chat list
+
+- Tapping "Copy ‘123456’" on a chat's row now marks that chat as read as well as copying the code, so the unread badge and the button clear without opening the chat. This follows the Send read receipts setting, the same as "Mark as read". If the code can't be copied, the chat stays unread.
+
 ## 1.5.1
 
 ### Message search, back in the inbox

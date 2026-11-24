@@ -39,8 +39,8 @@ class RoomListTile extends StatelessWidget {
   final VoidCallback? onAccept;
   final VoidCallback? onDecline;
 
-  /// Copies the one-time code of an unread last message. Without it the
-  /// row offers no Copy button.
+  /// Copies the one-time code of an unread last message; the inbox then
+  /// marks the chat read. Without it the row offers no Copy button.
   final ValueChanged<String>? onCopyCode;
   final bool favourite;
   final bool failedSend;
