@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.3
+
+### Dependency and security updates
+
+- Android build tooling: Android Gradle Plugin 9.5.2, Gradle 9.9.2, Kotlin 2.4.21, androidx appcompat 1.8.0, desugar_jdk_libs 2.1.5.
+
 ## 1.5.2
 
 ### Copy a code from the chat list
