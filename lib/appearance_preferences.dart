@@ -79,6 +79,7 @@ class AppearancePreferences extends ChangeNotifier {
   static const _messageFontKey = 'parallax.appearance.v1.message_font';
   static const _appFontKey = 'parallax.appearance.v1.app_font';
   static const _syncAppearanceKey = 'parallax.appearance.v1.sync_appearance';
+  static const _showChatThemesKey = 'parallax.appearance.v1.show_chat_themes';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -103,6 +104,7 @@ class AppearancePreferences extends ChangeNotifier {
   String? _messageFont;
   AppFont _appFont = defaultAppFont;
   bool _syncAppearance = true;
+  bool _showChatThemes = true;
 
   double get textScale => _textScale;
 
@@ -112,6 +114,10 @@ class AppearancePreferences extends ChangeNotifier {
   /// Theme and font are the same on every device signed in to the account
   /// (on by default).
   bool get syncAppearance => _syncAppearance;
+
+  /// Show the bubble colours and background other Parallax users set for
+  /// everyone in a chat (on by default). Your own choice for a chat wins.
+  bool get showChatThemes => _showChatThemes;
 
   /// Look of the home room list rows (cards by default).
   HomeRowStyle get homeRowStyle => _homeRowStyle;
@@ -219,8 +225,10 @@ class AppearancePreferences extends ChangeNotifier {
         (rawAppFont is String ? appFontById(rawAppFont) : null) ??
         defaultAppFont;
     final syncAppearance = _boolOr(prefs.get(_syncAppearanceKey), true);
+    final showChatThemes = _boolOr(prefs.get(_showChatThemesKey), true);
     final changed =
         syncAppearance != _syncAppearance ||
+        showChatThemes != _showChatThemes ||
         appFont != _appFont ||
         messageFont != _messageFont ||
         linkPreviews != _linkPreviews ||
@@ -254,6 +262,7 @@ class AppearancePreferences extends ChangeNotifier {
     _messageFont = messageFont;
     _appFont = appFont;
     _syncAppearance = syncAppearance;
+    _showChatThemes = showChatThemes;
     if (changed) _notifyIfActive();
   });
 
@@ -275,6 +284,14 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setBool(_syncAppearanceKey, value));
     if (_syncAppearance == value) return;
     _syncAppearance = value;
+    _notifyIfActive();
+  });
+
+  Future<void> setShowChatThemes(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_showChatThemesKey, value));
+    if (_showChatThemes == value) return;
+    _showChatThemes = value;
     _notifyIfActive();
   });
 

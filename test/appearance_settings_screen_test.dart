@@ -89,8 +89,15 @@ void main() {
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1);
     expect(tester.widget<Slider>(find.byType(Slider)).min, 0.85);
     expect(tester.widget<Slider>(find.byType(Slider)).max, 1.5);
-    // Same look on all devices, compact, all home options, app logos.
-    expect(switchValues(tester), [true, false, false, false]);
+    // Same look on all devices, chat themes, compact, all home options,
+    // app logos.
+    expect(switchValues(tester), [true, true, false, false, false]);
+    final chatThemes = find.byKey(
+      const ValueKey('appearance.show_chat_themes'),
+    );
+    await tester.tap(chatThemes);
+    await tester.pumpAndSettle();
+    expect(preferences.showChatThemes, isFalse);
     final sync = find.byKey(const ValueKey('appearance.sync_appearance'));
     await tester.tap(sync);
     await tester.pumpAndSettle();

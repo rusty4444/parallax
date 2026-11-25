@@ -39,7 +39,13 @@ const callTimelineTypes = {
   'org.matrix.msc4075.rtc.notification',
 };
 
+/// A chat theme (bubble colours and background) set for everyone in a room
+/// by a Parallax user; shown as "Sam changed the chat theme". Other apps
+/// ignore it. See `features/appearance/chat_theme.dart`.
+const chatThemeEventType = 'net.samrusselltech.parallax.chat_theme';
+
 bool isTimelineVisibleType(String type) =>
+    type == chatThemeEventType ||
     type == 'm.room.message' ||
     type == 'm.room.encrypted' ||
     type == 'm.sticker' ||
@@ -65,7 +71,9 @@ EntryKind entryKindFor({
   if (pollStartTypes.contains(type)) return EntryKind.poll;
   if (beaconInfoTypes.contains(type)) return EntryKind.liveLocation;
   if (callTimelineTypes.contains(type)) return EntryKind.call;
-  if (timelineStateTypes.contains(type)) return EntryKind.state;
+  if (timelineStateTypes.contains(type) || type == chatThemeEventType) {
+    return EntryKind.state;
+  }
   if (type != 'm.room.message') return EntryKind.unknown;
   return switch (msgtype) {
     'm.emote' => EntryKind.emote,

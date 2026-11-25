@@ -4211,6 +4211,8 @@ class MatrixBackend extends ChatBackend
           ? room.withMentionNames(messagePreview)
           : event?.type == matrix.EventTypes.Encrypted
           ? 'Encrypted message'
+          : event?.type == chatThemeEventType
+          ? 'Chat theme changed'
           : '',
       lastActivity: event?.originServerTs,
       unread: unread,

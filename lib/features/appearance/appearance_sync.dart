@@ -6,6 +6,7 @@ import 'package:matrix/matrix.dart' as matrix;
 import '../../appearance_preferences.dart';
 import '../../room_events.dart';
 import '../app_fonts/app_fonts.dart';
+import 'chat_theme.dart';
 import 'room_theme_sync.dart';
 import 'sync_ledger.dart';
 
@@ -122,6 +123,10 @@ class AppearanceSync {
 
   Future<void> _flush(matrix.Client client) async {
     _token = client.accountData[eventType];
+    // Chat themes other people set: followed from the first sync on.
+    final chatThemes = ChatThemeSync.of(_backend);
+    chatThemes.attach();
+    unawaited(chatThemes.ensurePushRule());
     await reconcile();
     if (!_current(client)) return;
     try {

@@ -1,4 +1,6 @@
 import '../../chat_backend.dart';
+import '../../timeline_kinds.dart' show chatThemeEventType;
+import '../appearance/chat_theme.dart' show describeChatThemeChange;
 import 'rich_timeline_features.dart';
 
 /// Whether [entry] needs its previous state to be described precisely
@@ -31,6 +33,11 @@ String? describeStateEvent(
   String text(Object? value) => value is String ? value.trim() : '';
 
   switch (entry.eventType) {
+    case chatThemeEventType:
+      return describeChatThemeChange(
+        content['change'],
+        sender: senderIsYou ? null : sender,
+      );
     case 'm.room.member':
       return _membership(entry, ownUserId, previous, nameOf);
     case 'm.room.name':

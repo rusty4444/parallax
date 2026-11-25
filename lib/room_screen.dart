@@ -35,6 +35,7 @@ import 'timeline/double_tap_react.dart';
 import 'timeline/message_lift.dart';
 import 'features/appearance/bubble_colours.dart';
 import 'features/appearance/bubble_colours_screen.dart';
+import 'features/appearance/chat_theme.dart';
 import 'features/appearance/room_theme_sync.dart';
 import 'features/chat_lock/chat_lock_gate.dart';
 import 'pending_failure.dart';
@@ -203,6 +204,12 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
 
   /// This room's background is kept on this device only (not synced).
   bool _backgroundDeviceOnly = false;
+
+  /// The chat theme someone set for everyone in this room, and its picture.
+  late final ChatThemeSync _chatThemes = ChatThemeSync.of(widget.backend);
+  ChatTheme? _chatTheme;
+  File? _chatThemeBackground;
+  bool _chatThemeBusy = false;
   int _backgroundVersion = 0;
   bool _backgroundBusy = false;
   bool _opening = true;
@@ -227,6 +234,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       }),
     );
     unawaited(_loadBackgroundDeviceOnly());
+    _chatThemes.attach();
+    _chatThemes.store.addListener(_chatThemeChanged);
+    unawaited(_loadChatTheme());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _owner.isCurrent && _timelineOwner.isCurrent) {
         unawaited(_open());
@@ -508,6 +518,172 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     }
   }
 
+  Future<void> _loadChatTheme() async {
+    try {
+      await _chatThemes.store.load(widget.roomId);
+      _chatThemeChanged();
+      await _chatThemes.refresh(widget.roomId);
+    } catch (_) {
+      // Offline: the theme already known here stays.
+    }
+  }
+
+  void _chatThemeChanged() => unawaited(_showChatTheme());
+
+  Future<void> _showChatTheme() async {
+    if (!mounted || !_owner.isCurrent) return;
+    final theme = _chatThemes.store.cached(widget.roomId);
+    File? picture;
+    try {
+      picture = await _chatThemes.store.pictureFile(widget.roomId);
+    } catch (_) {}
+    if (!mounted || !_owner.isCurrent) return;
+    final newPicture =
+        picture?.path != _chatThemeBackground?.path ||
+        theme?.backgroundUrl != _chatTheme?.backgroundUrl;
+    if (newPicture && picture != null) await FileImage(picture).evict();
+    if (!mounted || !_owner.isCurrent) return;
+    setState(() {
+      _chatTheme = theme;
+      _chatThemeBackground = picture;
+      if (newPicture) _backgroundVersion++;
+    });
+  }
+
+  /// Share this device's look with everyone in the chat, or remove the
+  /// chat's theme. Sharing moves your own colours/background for this chat
+  /// into the chat theme, so later changes by others show here too.
+  Future<void> _openChatThemeSheet() async {
+    if (!mounted || !_owner.isCurrent || _chatThemeBusy) return;
+    final ownColours = !_bubbleColours.isEmpty;
+    final ownBackground = _background != null;
+    final theme = _chatTheme;
+    final canRemove = theme != null && !theme.isEmpty;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      // Scrolls on short screens and at large text sizes.
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'Chat theme for everyone',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'Other Parallax users in this chat see it, and the chat shows '
+                  'who changed it. Other apps don’t show chat themes. Your own '
+                  'colours and background for this chat become the chat theme.',
+                ),
+              ),
+              if (ownColours)
+                ListTile(
+                  key: const ValueKey('chat-theme-share-colours'),
+                  leading: const Icon(Icons.format_color_fill_rounded),
+                  title: const Text('Share my bubble colours'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, ChatThemeChange.colours),
+                ),
+              if (ownBackground)
+                ListTile(
+                  key: const ValueKey('chat-theme-share-background'),
+                  leading: const Icon(Icons.wallpaper_outlined),
+                  title: const Text('Share my background'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, ChatThemeChange.background),
+                ),
+              if (ownColours && ownBackground)
+                ListTile(
+                  key: const ValueKey('chat-theme-share-both'),
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Share both'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, ChatThemeChange.theme),
+                ),
+              if (canRemove)
+                ListTile(
+                  key: const ValueKey('chat-theme-remove'),
+                  leading: const Icon(Icons.format_color_reset_rounded),
+                  title: const Text('Remove the chat theme'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, ChatThemeChange.reset),
+                ),
+              if (!ownColours && !ownBackground && !canRemove)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Text(
+                    'Choose bubble colours or a background for this chat first, '
+                    'then share them here.',
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted || !_owner.isCurrent) return;
+    await _shareChatTheme(choice);
+  }
+
+  Future<void> _shareChatTheme(String choice) async {
+    final shareColours =
+        choice == ChatThemeChange.colours || choice == ChatThemeChange.theme;
+    final shareBackground =
+        choice == ChatThemeChange.background || choice == ChatThemeChange.theme;
+    setState(() => _chatThemeBusy = true);
+    try {
+      final colours = shareColours ? _bubbleColours : null;
+      final background = shareBackground
+          ? await _background?.readAsBytes()
+          : null;
+      if (shareBackground && background == null) return;
+      await _chatThemes.share(
+        widget.roomId,
+        colours: colours,
+        background: background,
+        reset: choice == ChatThemeChange.reset,
+      );
+      if (!mounted || !_owner.isCurrent) return;
+      // Now the chat theme: drop this account's own copy for the chat.
+      if (colours != null) {
+        await _bubbleStore.save(widget.roomId, BubbleColours.none);
+        unawaited(
+          _themeSync.coloursChanged(widget.roomId).catchError((Object _) {}),
+        );
+      }
+      if (background != null) {
+        await _backgroundStore.clear(widget.roomId);
+        if (mounted && _owner.isCurrent) setState(() => _background = null);
+        unawaited(
+          _themeSync.backgroundChanged(widget.roomId).catchError((Object _) {}),
+        );
+      }
+    } catch (_) {
+      if (mounted && _owner.isCurrent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Couldn’t set the chat theme. Check you’re online and can send '
+              'messages here.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted && _owner.isCurrent) setState(() => _chatThemeBusy = false);
+    }
+  }
+
   Future<void> _openBubbleColours(String roomName) =>
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -606,6 +782,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _bubbleStore.removeListener(_bubbleColoursChanged);
+    _chatThemes.store.removeListener(_chatThemeChanged);
     widget.backend.removeListener(_syncedThemeChanged);
     _draftTimer?.cancel();
     unawaited(_flushClosingDraft());
@@ -1538,13 +1715,22 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                   widget.backend,
                 )?.canSendMessages(widget.roomId) ??
                 true);
+        // Your own colours/background for the room win over the chat theme
+        // someone set for everyone (unless chat themes are turned off).
+        final showChatTheme = preferences?.showChatThemes ?? true;
+        final sharedTheme = showChatTheme ? _chatTheme : null;
+        final bubbleColours = _bubbleColours.isEmpty
+            ? sharedTheme?.colours ?? BubbleColours.none
+            : _bubbleColours;
+        final background =
+            _background ?? (showChatTheme ? _chatThemeBackground : null);
         // Per-room bubble colours (header menu → Bubble colours).
         return BubbleColoursScope(
-          colours: _bubbleColours,
+          colours: bubbleColours,
           child: Scaffold(
             body: GlowBackdrop(
               palette: p,
-              imageLayer: _background == null
+              imageLayer: background == null
                   ? null
                   : Stack(
                       fit: StackFit.expand,
@@ -1556,7 +1742,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           // ~48 MB decoded, pushing avatars and thumbnails
                           // out of the image cache.
                           image: ResizeImage(
-                            FileImage(_background!),
+                            FileImage(background),
                             width: _backgroundDecodeSize(context),
                             height: _backgroundDecodeSize(context),
                             policy: ResizeImagePolicy.fit,
@@ -1598,7 +1784,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                     Container(
                       decoration: BoxDecoration(
                         color: p.surface.withValues(
-                          alpha: _background == null ? 0.9 : 0.4,
+                          alpha: background == null ? 0.9 : 0.4,
                         ),
                         border: Border(bottom: BorderSide(color: p.stroke)),
                       ),
@@ -1714,6 +1900,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                 _chooseBackground();
                               } else if (value == 'device-only') {
                                 unawaited(_toggleBackgroundDeviceOnly());
+                              } else if (value == 'chat-theme') {
+                                unawaited(_openChatThemeSheet());
                               } else {
                                 _clearBackground();
                               }
@@ -1731,6 +1919,13 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                 const PopupMenuItem(
                                   value: 'clear',
                                   child: Text('Remove background'),
+                                ),
+                              if (_chatThemes.canShare)
+                                PopupMenuItem(
+                                  key: const ValueKey('room-chat-theme'),
+                                  value: 'chat-theme',
+                                  enabled: !_chatThemeBusy,
+                                  child: const Text('Chat theme for everyone…'),
                                 ),
                               if (_themeSync.available)
                                 CheckedPopupMenuItem(

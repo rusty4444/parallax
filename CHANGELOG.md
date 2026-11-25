@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Chat themes for everyone
+
+- Share your bubble colours and background with everyone in a chat: the chat's background menu → "Chat theme for everyone…". Other Parallax users in the chat see it, and the chat shows "Sam changed the chat colours", "… the chat background", "… the chat theme" or "… removed the chat theme". Sharing turns your own colours and background for the chat into the chat theme, so later changes by others show for you too.
+- Your own colours or background for a chat still win over its chat theme. Settings → Appearance → "Show chat themes" turns other people's themes off.
+- The theme travels as a hidden message, so anyone who can post can change it (bridged groups included). In encrypted chats it is end-to-end encrypted, picture key included. Other apps, and people on the far side of a bridge, don't see chat themes.
+- Theme changes never notify. Parallax adds a push rule to your account so your homeserver doesn't count them as unread either; in encrypted chats, members using other apps may still see an unread count for a change.
+- Text colours someone else picks are only used when they're readable on their bubble; otherwise Parallax picks the text colour.
+
 ## 1.6.1
 
 ### Portrait photos in the image editor

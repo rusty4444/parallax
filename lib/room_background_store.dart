@@ -10,14 +10,17 @@ import 'package:path_provider/path_provider.dart';
 
 /// Copies temporary picker images into private app storage. No URI grants survive.
 class RoomBackgroundStore {
-  RoomBackgroundStore({this.root});
+  RoomBackgroundStore({this.root, this.folder = 'room_backgrounds'});
 
   final Directory? root;
+
+  /// Sub-folder of [root] (chat themes shared by others use their own).
+  final String folder;
   static const maxBytes = 20 * 1024 * 1024;
 
   Future<Directory> _directory() async {
     final base = root ?? await getApplicationSupportDirectory();
-    final directory = Directory(path.join(base.path, 'room_backgrounds'));
+    final directory = Directory(path.join(base.path, folder));
     if (!await directory.exists()) await directory.create(recursive: true);
     return directory;
   }

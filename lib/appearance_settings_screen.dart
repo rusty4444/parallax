@@ -197,6 +197,19 @@ class PreferenceRows {
     onChanged: (value) => _save(() => preferences.setSyncAppearance(value)),
   );
 
+  /// Appearance → Your devices: chat themes other Parallax users set.
+  Widget showChatThemes() => SwitchListTile(
+    key: const ValueKey('appearance.show_chat_themes'),
+    secondary: const Icon(Icons.palette_outlined),
+    title: const Text('Show chat themes'),
+    subtitle: const Text(
+      'Bubble colours and backgrounds other Parallax users set for everyone '
+      'in a chat. Your own choice for a chat always wins.',
+    ),
+    value: preferences.showChatThemes,
+    onChanged: (value) => _save(() => preferences.setShowChatThemes(value)),
+  );
+
   /// Appearance → Home screen: chat row style, message preview and whether
   /// search, filters, Spaces and folders stay above the chat list.
   List<Widget> homeScreen() => [
@@ -475,8 +488,8 @@ class _AppearanceSettingsScreenState extends State<AppearanceSettingsScreen> {
         if (rows != null) ...[
           SettingsGroup(
             palette: p,
-            title: 'Your devices',
-            children: [rows.syncAppearance()],
+            title: 'Themes',
+            children: [rows.syncAppearance(), rows.showChatThemes()],
           ),
           SettingsGroup(palette: p, title: 'Reading', children: rows.reading()),
           SettingsGroup(

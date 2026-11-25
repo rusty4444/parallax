@@ -2,6 +2,8 @@
 // by the live (main isolate) and background resolvers.
 import 'package:matrix/matrix.dart' as matrix;
 
+import '../../timeline_kinds.dart' show chatThemeEventType;
+
 import 'notification_content.dart';
 import 'notification_media.dart';
 import 'notification_model.dart';
@@ -9,9 +11,10 @@ import '../../matrix_room_names.dart';
 
 /// The event could not be described (still encrypted, unsupported type …):
 /// the caller shows the generic notification.
-/// Event types that never produce a notification (live-location beacons
-/// and MatrixRTC call membership), even when the push rules notify.
+/// Event types that never produce a notification (chat themes, live-location
+/// beacons and MatrixRTC call membership), even when the push rules notify.
 const silentPushEventTypes = {
+  chatThemeEventType,
   'm.beacon',
   'org.matrix.msc3672.beacon',
   'm.call.member',
