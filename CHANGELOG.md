@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Your look on every device
+
+- Bubble colours chosen for a chat now reach your other devices even when those devices had already chosen colours for that chat. Before, a device kept its own colours when it opened the chat, so a change made on your phone only showed on your computer if the chat happened to be open at the time. A change made offline is uploaded when you're back online, and a newer change from another device wins over it.
+- Chat backgrounds sync too. The picture is shrunk, encrypted on your device and stored on your homeserver; your other devices download it when you open the chat. Removing a background removes it everywhere. "Background on this device only" (in the chat's background menu) keeps a picture to one device, for example a portrait photo on your phone and a wide one on your computer.
+- The app theme and font follow your account: pick a theme on one device and the others change to match. Turn this off with Settings → Appearance → "Same theme and font on all devices". Turning it back on takes the theme and font from your other devices.
+- These settings are stored as Matrix account data, which isn't end-to-end encrypted: your homeserver can read the colours, the theme and the key to a synced background.
+
 ## 1.5.4
 
 ### Notifications from newer rooms

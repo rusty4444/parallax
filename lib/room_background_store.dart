@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
@@ -51,6 +52,26 @@ class RoomBackgroundStore {
         await sink.close();
       }
       if (await temporary.length() != length) {
+        throw const FileSystemException('Background copy incomplete');
+      }
+      await temporary.rename(target.path);
+      return target;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
+  }
+
+  /// Same as [replace], from bytes (a background synced from another device).
+  Future<File> replaceBytes(String roomId, Uint8List bytes) async {
+    if (bytes.isEmpty || bytes.length > maxBytes) {
+      throw ArgumentError('Background must be smaller than 20 MB');
+    }
+    final target = await _target(roomId);
+    final suffix = Random.secure().nextInt(0x7fffffff);
+    final temporary = File('${target.path}.$suffix.tmp');
+    try {
+      await temporary.writeAsBytes(bytes, flush: true);
+      if (await temporary.length() != bytes.length) {
         throw const FileSystemException('Background copy incomplete');
       }
       await temporary.rename(target.path);

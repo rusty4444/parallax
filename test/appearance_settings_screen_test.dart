@@ -89,8 +89,13 @@ void main() {
     expect(tester.widget<Slider>(find.byType(Slider)).value, 1);
     expect(tester.widget<Slider>(find.byType(Slider)).min, 0.85);
     expect(tester.widget<Slider>(find.byType(Slider)).max, 1.5);
-    // Compact, all home options, app logos.
-    expect(switchValues(tester), [false, false, false]);
+    // Same look on all devices, compact, all home options, app logos.
+    expect(switchValues(tester), [true, false, false, false]);
+    final sync = find.byKey(const ValueKey('appearance.sync_appearance'));
+    await tester.tap(sync);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(sync).value, isFalse);
+    expect(preferences.syncAppearance, isFalse);
     final logos = find.byKey(const ValueKey('appearance.network_logos'));
     await tester.ensureVisible(logos);
     await tester.tap(logos);

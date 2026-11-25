@@ -183,6 +183,20 @@ class PreferenceRows {
     ),
   ];
 
+  /// Appearance → Your devices: theme and font follow the account.
+  Widget syncAppearance() => SwitchListTile(
+    key: const ValueKey('appearance.sync_appearance'),
+    secondary: const Icon(Icons.devices_rounded),
+    title: const Text('Same theme and font on all devices'),
+    subtitle: const Text(
+      'Uses your Matrix account. Turning this on takes the theme and font '
+      'from your other devices. Bubble colours and backgrounds for each chat '
+      'sync too.',
+    ),
+    value: preferences.syncAppearance,
+    onChanged: (value) => _save(() => preferences.setSyncAppearance(value)),
+  );
+
   /// Appearance → Home screen: chat row style, message preview and whether
   /// search, filters, Spaces and folders stay above the chat list.
   List<Widget> homeScreen() => [
@@ -459,6 +473,11 @@ class _AppearanceSettingsScreenState extends State<AppearanceSettingsScreen> {
       children: [
         ..._themeCards(p),
         if (rows != null) ...[
+          SettingsGroup(
+            palette: p,
+            title: 'Your devices',
+            children: [rows.syncAppearance()],
+          ),
           SettingsGroup(palette: p, title: 'Reading', children: rows.reading()),
           SettingsGroup(
             palette: p,

@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_theme.dart';
 import 'appearance_preferences.dart';
+import 'features/appearance/appearance_sync.dart';
 import 'chat_backend.dart';
 import 'feature_settings_scope.dart';
 import 'hooks/registry.dart';
@@ -174,6 +175,10 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
   late final MessageDraftStore _draftStore;
   late final PushNotifications _notifications;
   late final ChatBackend _backend;
+
+  /// Theme and font follow the account to the user's other devices.
+  late final AppearanceSync _appearanceSync;
+  Future<void>? _themeLoaded;
   late final bool _ownsPreferences;
   late final bool _ownsNotifications;
   late final bool _ownsBackend;
@@ -243,11 +248,21 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     _userId = _backend.userId;
     _authenticated = _backend.connection == SessionStatus.ready;
     _backend.addListener(_sessionChanged);
+    _appearanceSync = AppearanceSync(
+      backend: _backend,
+      preferences: _preferences,
+      currentTheme: () =>
+          _followSystemTheme ? systemThemePreference : _style.name,
+      applyTheme: _applySyncedTheme,
+      isKnownTheme: (theme) =>
+          theme == systemThemePreference ||
+          VisualTheme.values.any((style) => style.name == theme),
+    );
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _themeLoaded = _loadTheme();
       unawaited(_start());
-      unawaited(_loadTheme());
       unawaited(LocaleController.instance.load());
     });
   }
@@ -322,6 +337,13 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     await _initialize();
     if (!mounted || _closing) return;
     _bindPushSession();
+    // Synced only once this device's own theme and font are loaded, so a
+    // sync can't be undone by a late local load.
+    try {
+      await _themeLoaded;
+    } catch (_) {}
+    if (!mounted || _closing) return;
+    _appearanceSync.start();
   }
 
   Future<void> _initializePush() async {
@@ -500,7 +522,10 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_startNotifications());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_startNotifications());
+      unawaited(_appearanceSync.retryPending());
+    }
   }
 
   Future<void> _navigatePush(PushNavigationRequest request) async {
@@ -619,6 +644,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       _style = style;
     });
     unawaited(_saveTheme(style.name));
+    unawaited(_appearanceSync.themeChanged());
   }
 
   void _followSystem(bool follow) {
@@ -629,6 +655,30 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       _style = _systemStyle;
     });
     unawaited(_saveTheme(systemThemePreference));
+    unawaited(_appearanceSync.themeChanged());
+  }
+
+  /// A theme picked on another device (see [AppearanceSync]).
+  Future<void> _applySyncedTheme(String theme) async {
+    if (!mounted || _closing) return;
+    if (theme == systemThemePreference) {
+      _themeRevision++;
+      setState(() {
+        _followSystemTheme = true;
+        _style = _systemStyle;
+      });
+    } else {
+      final style = VisualTheme.values
+          .where((style) => style.name == theme)
+          .firstOrNull;
+      if (style == null) return;
+      _themeRevision++;
+      setState(() {
+        _followSystemTheme = false;
+        _style = style;
+      });
+    }
+    await _saveTheme(theme);
   }
 
   Future<void> _saveTheme(String value) async {
@@ -668,6 +718,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _preferences.removeListener(_syncHaptics);
     _backend.removeListener(_sessionChanged);
+    _appearanceSync.dispose();
     // Cancel immediately; release the SDK only after all accepted push callbacks
     // and exact pusher removals have joined. Never dispose borrowed resources.
     final cleanup = _ownsNotifications

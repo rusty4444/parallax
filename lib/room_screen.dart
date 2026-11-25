@@ -194,9 +194,15 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       widget.bubbleColourStore ?? RoomBubbleColourStore.shared;
   late BubbleColours _bubbleColours =
       _bubbleStore.cached(widget.roomId) ?? BubbleColours.none;
-  late final RoomThemeSync _themeSync = RoomThemeSync(widget.backend);
-  Object? _appliedThemeToken;
+  late final RoomThemeSync _themeSync = RoomThemeSync(
+    widget.backend,
+    colours: _bubbleStore,
+    backgrounds: _backgroundStore,
+  );
   File? _background;
+
+  /// This room's background is kept on this device only (not synced).
+  bool _backgroundDeviceOnly = false;
   int _backgroundVersion = 0;
   bool _backgroundBusy = false;
   bool _opening = true;
@@ -217,9 +223,10 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     unawaited(
       _bubbleStore.load(widget.roomId).then((_) {
         _bubbleColoursChanged();
-        return _applySyncedTheme(initial: true);
+        return _reconcileTheme();
       }),
     );
+    unawaited(_loadBackgroundDeviceOnly());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _owner.isCurrent && _timelineOwner.isCurrent) {
         unawaited(_open());
@@ -434,32 +441,71 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     setState(() => _bubbleColours = colours);
   }
 
-  void _syncedThemeChanged() => unawaited(_applySyncedTheme());
+  void _syncedThemeChanged() {
+    if (_themeSync.remoteChanged(widget.roomId)) unawaited(_reconcileTheme());
+  }
 
-  /// Adopt the account-wide room theme. On first open, only when this device
-  /// has no local choice; afterwards, whenever another device writes a newer
-  /// theme (the synced account-data event identity changes).
-  Future<void> _applySyncedTheme({bool initial = false}) async {
+  /// Brings this room's bubble colours and background in line with the
+  /// account (another device may have changed them), and uploads changes
+  /// this device made offline. Colours reach the screen through the bubble
+  /// colour store; a new background file is shown here.
+  Future<void> _reconcileTheme() async {
     if (!mounted || !_owner.isCurrent) return;
-    if (initial) {
-      final local = _bubbleStore.cached(widget.roomId);
-      if (local != null && !local.isEmpty) {
-        _appliedThemeToken = _themeSync.themeToken(widget.roomId);
-        return;
-      }
-      var colours = _themeSync.coloursFromSync(widget.roomId);
-      colours ??= await _themeSync.loadRemote(widget.roomId);
-      if (!mounted || !_owner.isCurrent || colours == null) return;
-      _appliedThemeToken = _themeSync.themeToken(widget.roomId);
-      await _bubbleStore.save(widget.roomId, colours);
-      return;
+    _themeSync.remoteChanged(widget.roomId);
+    try {
+      await _themeSync.reconcileColours(widget.roomId);
+    } catch (_) {
+      // Offline: this device's colours stay; retried on the next change.
     }
-    final token = _themeSync.themeToken(widget.roomId);
-    if (token == null || token == _appliedThemeToken) return;
-    final colours = _themeSync.coloursFromSync(widget.roomId);
-    _appliedThemeToken = token;
-    if (colours == null || !mounted || !_owner.isCurrent) return;
-    await _bubbleStore.save(widget.roomId, colours);
+    if (!mounted || !_owner.isCurrent) return;
+    try {
+      if (await _themeSync.reconcileBackground(widget.roomId)) {
+        await _showStoredBackground();
+      }
+    } catch (_) {
+      // Offline or the picture can't be read: keep this device's background.
+    }
+  }
+
+  Future<void> _showStoredBackground() async {
+    if (!mounted || !_owner.isCurrent) return;
+    final file = await _backgroundStore.fileFor(widget.roomId);
+    if (file != null) await FileImage(file).evict();
+    if (!mounted || !_owner.isCurrent) return;
+    setState(() {
+      _background = file;
+      _backgroundVersion++;
+    });
+  }
+
+  Future<void> _loadBackgroundDeviceOnly() async {
+    try {
+      final deviceOnly = await _themeSync.backgroundDeviceOnly(widget.roomId);
+      if (mounted && _owner.isCurrent && deviceOnly != _backgroundDeviceOnly) {
+        setState(() => _backgroundDeviceOnly = deviceOnly);
+      }
+    } catch (_) {
+      // Unreadable: the background syncs, as by default.
+    }
+  }
+
+  Future<void> _toggleBackgroundDeviceOnly() async {
+    if (!mounted || !_owner.isCurrent || _backgroundBusy) return;
+    final deviceOnly = !_backgroundDeviceOnly;
+    setState(() {
+      _backgroundBusy = true;
+      _backgroundDeviceOnly = deviceOnly;
+    });
+    try {
+      if (await _themeSync.setBackgroundDeviceOnly(widget.roomId, deviceOnly)) {
+        await _showStoredBackground();
+      }
+    } catch (_) {
+      if (mounted && _owner.isCurrent) _showBackgroundError();
+      await _loadBackgroundDeviceOnly();
+    } finally {
+      if (mounted && _owner.isCurrent) setState(() => _backgroundBusy = false);
+    }
   }
 
   Future<void> _openBubbleColours(String roomName) =>
@@ -505,6 +551,11 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
           _backgroundVersion++;
         });
       }
+      // Uploaded in the background; offline, it goes when the app is next
+      // online.
+      unawaited(
+        _themeSync.backgroundChanged(widget.roomId).catchError((Object _) {}),
+      );
     } catch (_) {
       if (mounted && _owner.isCurrent) _showBackgroundError();
     } finally {
@@ -518,6 +569,9 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     try {
       await _backgroundStore.clear(widget.roomId);
       if (mounted && _owner.isCurrent) setState(() => _background = null);
+      unawaited(
+        _themeSync.backgroundChanged(widget.roomId).catchError((Object _) {}),
+      );
     } catch (_) {
       if (mounted && _owner.isCurrent) _showBackgroundError();
     } finally {
@@ -1658,6 +1712,8 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                 );
                               } else if (value == 'choose') {
                                 _chooseBackground();
+                              } else if (value == 'device-only') {
+                                unawaited(_toggleBackgroundDeviceOnly());
                               } else {
                                 _clearBackground();
                               }
@@ -1675,6 +1731,17 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                 const PopupMenuItem(
                                   value: 'clear',
                                   child: Text('Remove background'),
+                                ),
+                              if (_themeSync.available)
+                                CheckedPopupMenuItem(
+                                  key: const ValueKey(
+                                    'room-background-device-only',
+                                  ),
+                                  value: 'device-only',
+                                  checked: _backgroundDeviceOnly,
+                                  child: const Text(
+                                    'Background on this device only',
+                                  ),
                                 ),
                             ],
                           ),

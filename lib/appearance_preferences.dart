@@ -78,6 +78,7 @@ class AppearancePreferences extends ChangeNotifier {
       'parallax.appearance.v1.link_previews_encrypted';
   static const _messageFontKey = 'parallax.appearance.v1.message_font';
   static const _appFontKey = 'parallax.appearance.v1.app_font';
+  static const _syncAppearanceKey = 'parallax.appearance.v1.sync_appearance';
 
   /// Double-tap reaction until the user picks another.
   static const defaultQuickReaction = '❤️';
@@ -101,11 +102,16 @@ class AppearancePreferences extends ChangeNotifier {
   bool _linkPreviewsEncrypted = false;
   String? _messageFont;
   AppFont _appFont = defaultAppFont;
+  bool _syncAppearance = true;
 
   double get textScale => _textScale;
 
   /// The font every screen is drawn in (Space Grotesk by default).
   AppFont get appFont => _appFont;
+
+  /// Theme and font are the same on every device signed in to the account
+  /// (on by default).
+  bool get syncAppearance => _syncAppearance;
 
   /// Look of the home room list rows (cards by default).
   HomeRowStyle get homeRowStyle => _homeRowStyle;
@@ -212,7 +218,9 @@ class AppearancePreferences extends ChangeNotifier {
     final appFont =
         (rawAppFont is String ? appFontById(rawAppFont) : null) ??
         defaultAppFont;
+    final syncAppearance = _boolOr(prefs.get(_syncAppearanceKey), true);
     final changed =
+        syncAppearance != _syncAppearance ||
         appFont != _appFont ||
         messageFont != _messageFont ||
         linkPreviews != _linkPreviews ||
@@ -245,6 +253,7 @@ class AppearancePreferences extends ChangeNotifier {
     _linkPreviewsEncrypted = linkPreviewsEncrypted;
     _messageFont = messageFont;
     _appFont = appFont;
+    _syncAppearance = syncAppearance;
     if (changed) _notifyIfActive();
   });
 
@@ -258,6 +267,14 @@ class AppearancePreferences extends ChangeNotifier {
     _requireSaved(await prefs.setString(_appFontKey, font.id));
     if (_appFont == font) return;
     _appFont = font;
+    _notifyIfActive();
+  });
+
+  Future<void> setSyncAppearance(bool value) => _ordered(() async {
+    final prefs = await _preferences();
+    _requireSaved(await prefs.setBool(_syncAppearanceKey, value));
+    if (_syncAppearance == value) return;
+    _syncAppearance = value;
     _notifyIfActive();
   });
 

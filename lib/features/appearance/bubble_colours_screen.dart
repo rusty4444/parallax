@@ -62,7 +62,10 @@ class _BubbleColoursScreenState extends State<BubbleColoursScreen> {
     _saving = _saving.then((_) async {
       try {
         await widget.store.save(widget.roomId, colours);
-        await widget.themeSync?.push(widget.roomId, colours);
+        // Uploads in the background; offline, it goes once back online.
+        await widget.themeSync
+            ?.coloursChanged(widget.roomId)
+            .catchError((Object _) {});
       } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
