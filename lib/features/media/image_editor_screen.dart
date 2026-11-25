@@ -122,6 +122,36 @@ MediaSelection processImageEdit(ImageEditSpec spec) {
 img.ColorRgb8 _rgb(int value) =>
     img.ColorRgb8((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
 
+/// The image's size the right way up, or null when it can't be read.
+///
+/// Phone cameras usually store a portrait photo as landscape pixels with an
+/// EXIF orientation of 5–8. The preview and [processImageEdit] both turn it
+/// upright, so the editor canvas has to use the swapped sides too.
+@visibleForTesting
+Size? editorImageSize(Uint8List bytes) {
+  final img.Decoder? decoder;
+  final img.DecodeInfo? header;
+  try {
+    decoder = img.findDecoderForData(bytes);
+    header = decoder?.startDecode(bytes);
+  } catch (_) {
+    return null;
+  }
+  if (header == null || header.width <= 0 || header.height <= 0) return null;
+  var orientation = 1;
+  if (decoder is img.JpegDecoder) {
+    try {
+      orientation = img.decodeJpgExif(bytes)?.imageIfd.orientation ?? 1;
+    } catch (_) {
+      orientation = 1;
+    }
+  }
+  final width = header.width.toDouble(), height = header.height.toDouble();
+  return orientation >= 5 && orientation <= 8
+      ? Size(height, width)
+      : Size(width, height);
+}
+
 class ImageEditorScreen extends StatefulWidget {
   const ImageEditorScreen({super.key, required this.source});
   final MediaSelection source;
@@ -143,9 +173,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     Color(0xFF000000),
   ];
 
-  late final img.DecodeInfo? _header = img
-      .findDecoderForData(widget.source.bytes)
-      ?.startDecode(widget.source.bytes);
+  late final Size? _imageSize = editorImageSize(widget.source.bytes);
   _EditorMode _mode = _EditorMode.crop;
   int _rotation = 0;
   Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
@@ -158,11 +186,11 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   bool _busy = false;
 
   double get _aspect {
-    final header = _header;
-    if (header == null) return 1;
+    final size = _imageSize;
+    if (size == null) return 1;
     return _rotation.isEven
-        ? header.width / header.height
-        : header.height / header.width;
+        ? size.width / size.height
+        : size.height / size.width;
   }
 
   void _rotate() {
@@ -264,7 +292,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   }
 
   Future<void> _done() async {
-    if (_busy || _header == null) return;
+    if (_busy || _imageSize == null) return;
     _end();
     setState(() => _busy = true);
     try {
@@ -306,7 +334,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
         title: const Text('Edit image'),
         actions: [
           TextButton(
-            onPressed: _busy || _header == null ? null : _done,
+            onPressed: _busy || _imageSize == null ? null : _done,
             child: Text(
               _busy ? 'Saving…' : 'Done',
               style: const TextStyle(color: Colors.white),
@@ -319,7 +347,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
         child: Column(
           children: [
             Expanded(
-              child: _header == null
+              child: _imageSize == null
                   ? const Center(
                       child: Text(
                         'This image format can’t be edited.',

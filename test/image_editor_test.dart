@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,7 +17,81 @@ Uint8List _blueImage() {
   return img.encodePng(image);
 }
 
+/// A portrait photo as phone cameras save it: landscape pixels plus EXIF
+/// orientation 6 (turn 90° clockwise to view).
+Uint8List _sidewaysPortraitJpeg() {
+  final image = img.Image(width: 120, height: 80, numChannels: 3);
+  img.fill(image, color: img.ColorRgb8(20, 60, 180));
+  image.exif.imageIfd.orientation = 6;
+  return img.encodeJpg(image);
+}
+
 void main() {
+  test('editor size follows the EXIF orientation of portrait photos', () {
+    final bytes = _sidewaysPortraitJpeg();
+    expect(img.decodeJpgExif(bytes)?.imageIfd.orientation, 6);
+    expect(editorImageSize(bytes), const Size(80, 120));
+    expect(editorImageSize(_blueImage()), const Size(120, 80));
+    expect(editorImageSize(Uint8List.fromList([1, 2, 3])), isNull);
+
+    final edited = processImageEdit(
+      ImageEditSpec(
+        bytes: bytes,
+        name: 'portrait.jpg',
+        rotation: 0,
+        crop: const Rect.fromLTWH(0, 0, 1, 1),
+        strokes: const [],
+      ),
+    );
+    final pixels = img.decodeJpg(edited.bytes)!;
+    expect(pixels.width, 80);
+    expect(pixels.height, 120);
+  });
+
+  testWidgets('the preview decoder turns EXIF portraits upright', (
+    tester,
+  ) async {
+    // The desktop engine (Windows, macOS, Linux and this test runner) decodes
+    // with Skia's codecs. The canvas size must match what Image.memory draws.
+    final bytes = _sidewaysPortraitJpeg();
+    final decoded = await tester.runAsync(() async {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final size = Size(
+        frame.image.width.toDouble(),
+        frame.image.height.toDouble(),
+      );
+      frame.image.dispose();
+      codec.dispose();
+      return size;
+    });
+    expect(decoded, const Size(80, 120));
+    expect(decoded, editorImageSize(bytes));
+  });
+
+  testWidgets('portrait photos get a portrait editing canvas', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ImageEditorScreen(
+          source: MediaSelection(
+            bytes: _sidewaysPortraitJpeg(),
+            name: 'portrait.jpg',
+            mimeType: 'image/jpeg',
+          ),
+        ),
+      ),
+    );
+    final canvas = find.byKey(const ValueKey('image-editor-canvas'));
+    var size = tester.getSize(canvas);
+    expect(size.height, greaterThan(size.width));
+    expect(size.width / size.height, closeTo(80 / 120, 0.01));
+
+    await tester.tap(find.byTooltip('Rotate image'));
+    await tester.pump();
+    size = tester.getSize(canvas);
+    expect(size.width / size.height, closeTo(120 / 80, 0.01));
+  });
+
   test('rotation and crop produce the expected dimensions and JPEG name', () {
     final rotated = processImageEdit(
       ImageEditSpec(
