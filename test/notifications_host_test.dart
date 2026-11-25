@@ -71,6 +71,16 @@ class _Backend extends FakeBackend implements NotificationFeatures {
     replies.add((roomId, text));
   }
 
+  final readUpTo = <(String, String, bool)>[];
+
+  @override
+  Future<void> markReadUpTo(
+    String roomId,
+    String eventId, {
+    required bool publicReceipt,
+    required DateTime pressedAt,
+  }) async => readUpTo.add((roomId, eventId, publicReceipt));
+
   void setRooms(List<ChatRoom> rooms) {
     roomList = rooms;
     notifyListeners();
@@ -319,6 +329,85 @@ void main() {
     );
     expect(store.pending, isEmpty);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('pending Mark as read presses are sent when the app opens', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    store.pendingReads.addAll([
+      PendingRead(
+        userId: '@me:example.org',
+        deviceId: 'DEVICE',
+        roomId: _room,
+        eventId: r'$event',
+        createdAt: now,
+      ),
+      PendingRead(
+        userId: '@me:example.org',
+        deviceId: 'DEVICE',
+        roomId: '!old:example.org',
+        eventId: r'$old',
+        createdAt: now.subtract(const Duration(days: 1)),
+      ),
+      PendingRead(
+        userId: '@someone-else:example.org',
+        deviceId: 'OTHER',
+        roomId: '!theirs:example.org',
+        eventId: r'$theirs',
+        createdAt: now,
+      ),
+    ]);
+    await pumpHost(tester);
+    await tester.pump();
+    await tester.pump();
+    // Only this account's recent press, and only up to the pressed message.
+    expect(backend.readUpTo, [(_room, r'$event', true)]);
+    expect(store.pendingReads, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('background Mark as read goes through the live client', (
+    tester,
+  ) async {
+    final (push, _, registration) = await enabledPush();
+    final marked = <String>[];
+    push.markReadHandler = (request) async => marked.add(request.roomId);
+    await pumpHost(tester, push: push);
+    final results = await tester.runAsync(
+      () async => [
+        await handOffToMainIsolate(
+          handoffKindMarkRead,
+          payload(registration),
+          directory: directory,
+        ),
+        await handOffToMainIsolate(handoffKindMarkRead, {
+          ...payload(registration),
+          'registration_id': 'S' * 32,
+        }, directory: directory),
+      ],
+    );
+    expect(results, [HandoffResult.accepted, HandoffResult.rejected]);
+    await tester.pump();
+    await tester.pump();
+    expect(marked, [_room]);
+    expect(surface.cancelled, contains(roomNotificationId(_room)));
+
+    // Without the app's handler, a receipt up to the notified message.
+    push.markReadHandler = null;
+    final direct = await tester.runAsync(
+      () => handOffToMainIsolate(
+        handoffKindMarkRead,
+        payload(registration),
+        directory: directory,
+      ),
+    );
+    expect(direct, HandoffResult.accepted);
+    await tester.pump();
+    await tester.pump();
+    expect(backend.readUpTo, [(_room, r'$event', true)]);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(push.shutdown);
   });
 
   testWidgets('background hand-offs: verified pushes and replies', (

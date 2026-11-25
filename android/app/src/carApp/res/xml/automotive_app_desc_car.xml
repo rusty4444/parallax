@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto: messaging notifications plus the car screen
+     (ParallaxCarAppService). Templated messaging apps must support both. -->
+<automotiveApp>
+    <uses name="notification" />
+    <uses name="template" />
+</automotiveApp>

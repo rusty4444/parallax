@@ -36,6 +36,7 @@ object ParallaxEngine {
         val app = context.applicationContext
         val engine = FlutterEngine(app)
         BackgroundConnection.attachChannel(app, engine)
+        AndroidAuto.attach(engine.dartExecutor.binaryMessenger)
         VideoTools.register(app, engine.dartExecutor.binaryMessenger)
         PdfTools.register(app, engine.dartExecutor.binaryMessenger)
         ShareShortcuts.register(app, engine.dartExecutor.binaryMessenger)

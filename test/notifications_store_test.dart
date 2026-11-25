@@ -176,6 +176,50 @@ void main() {
     expect(old.isExpired(now), isTrue);
   });
 
+  test('pending Mark as read keeps the newest press per room', () async {
+    final now = DateTime.now();
+    PendingRead read(
+      String room,
+      String event, {
+      Duration ago = Duration.zero,
+    }) => PendingRead(
+      userId: '@me:example.org',
+      deviceId: 'DEVICE',
+      roomId: room,
+      eventId: event,
+      createdAt: now.subtract(ago),
+    );
+    await store.addPendingRead(read('!a:x.org', r'$1'));
+    await store.addPendingRead(read('!b:x.org', r'$2'));
+    await store.addPendingRead(read('!a:x.org', r'$3'));
+    final taken = await store.takePendingReads();
+    expect(taken.map((r) => (r.roomId, r.eventId)), [
+      ('!b:x.org', r'$2'),
+      ('!a:x.org', r'$3'),
+    ]);
+    expect(await store.takePendingReads(), isEmpty);
+    expect(
+      read('!a:x.org', r'$4', ago: const Duration(days: 1)).isExpired(now),
+      isTrue,
+    );
+    // Expired presses are dropped when the next one is kept.
+    await store.addPendingRead(
+      read('!old:x.org', r'$5', ago: const Duration(days: 1)),
+    );
+    await store.addPendingRead(read('!c:x.org', r'$6'));
+    expect((await store.takePendingReads()).map((r) => r.roomId), ['!c:x.org']);
+    // Signing out forgets them.
+    await store.addPendingRead(read('!d:x.org', r'$7'));
+    await store.clearHistory();
+    expect(await store.takePendingReads(), isEmpty);
+    // Malformed entries are ignored.
+    expect(PendingRead.fromJson({'room_id': '!a:x.org'}), isNull);
+    expect(
+      PendingRead.fromJson(read('!a:x.org', 'not-an-event').toJson()),
+      isNull,
+    );
+  });
+
   test('concurrent writers from two store instances do not corrupt', () async {
     final second = NotificationStore(directory);
     await Future.wait([

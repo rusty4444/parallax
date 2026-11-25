@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../features/android_auto/android_auto_hooks.dart';
 import '../features/call/call_hooks.dart';
 import '../features/accounts/accounts_hooks.dart';
 import '../features/bug_report/bug_report_hooks.dart';
@@ -226,28 +227,32 @@ Widget wrapSignedInApp(
       wrapWithNotifications(
         context,
         ctx,
-        wrapWithLiveLocation(
+        wrapWithAndroidAuto(
           context,
           ctx,
-          wrapWithPlatformIntents(
+          wrapWithLiveLocation(
             context,
             ctx,
-            wrapWithChatLock(
+            wrapWithPlatformIntents(
               context,
               ctx,
-              wrapWithMessageRequests(
+              wrapWithChatLock(
                 context,
                 ctx,
-                wrapWithUserStatus(
+                wrapWithMessageRequests(
                   context,
                   ctx,
-                  wrapWithStories(
+                  wrapWithUserStatus(
                     context,
                     ctx,
-                    wrapWithReminders(
+                    wrapWithStories(
                       context,
                       ctx,
-                      wrapWithBugReport(context, ctx, child),
+                      wrapWithReminders(
+                        context,
+                        ctx,
+                        wrapWithBugReport(context, ctx, child),
+                      ),
                     ),
                   ),
                 ),

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Car screen accents (Android Auto). Keep in sync with lib/app_theme.dart. -->
+    <style name="ParallaxCarAppTheme">
+        <item name="carColorPrimary">@color/parallax_accent</item>
+        <item name="carColorPrimaryDark">#FFFF7A5C</item>
+        <item name="carColorSecondary">#FFFF8A6B</item>
+        <item name="carColorSecondaryDark">#FFFFA48A</item>
+    </style>
+</resources>

@@ -32,6 +32,14 @@ class _Backend extends FakeBackend implements NotificationFeatures {
   }) async => null;
   @override
   Future<void> sendQuickReply(String roomId, String text) async {}
+
+  @override
+  Future<void> markReadUpTo(
+    String roomId,
+    String eventId, {
+    required bool publicReceipt,
+    required DateTime pressedAt,
+  }) async {}
 }
 
 void main() {

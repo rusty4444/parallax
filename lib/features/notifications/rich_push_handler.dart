@@ -48,6 +48,7 @@ class RichPushHandler {
     bool Function()? isCurrent,
     this.confirm,
     this.suppressRoom,
+    this.carProjecting,
     DateTime Function()? clock,
     bool? showSummary,
     bool? clearAllWhenRead,
@@ -102,6 +103,22 @@ class RichPushHandler {
 
   /// True for a room the user is looking at (no notification, as Element X).
   final bool Function(String roomId)? suppressRoom;
+
+  /// Whether the phone is connected to Android Auto, which reads only
+  /// MessagingStyle notifications (null: never).
+  final Future<bool> Function()? carProjecting;
+
+  Future<bool> _carProjecting() async {
+    final projecting = carProjecting;
+    if (projecting == null) return false;
+    try {
+      return await projecting();
+    } catch (_) {
+      // Unknown: the car layout is safe on the phone too.
+      return true;
+    }
+  }
+
   final DateTime Function() _clock;
 
   String get account => notificationAccountKey(userId, deviceId);
@@ -143,6 +160,7 @@ class RichPushHandler {
         return RichPushOutcome.rich;
       }
       final thread = await _append(resolved);
+      final car = await _carProjecting();
       if (!await _stillCurrent()) return RichPushOutcome.skipped;
       await surface.show(
         renderRoomThread(
@@ -150,6 +168,7 @@ class RichPushHandler {
           myUserId: userId,
           registrationId: registration,
           contentUriFor: preferences.mediaEnabled ? contentUriFor : null,
+          carProjecting: car,
         ),
       );
       await _refreshSummary(fallback: [thread]);
@@ -299,6 +318,7 @@ class RichPushHandler {
       final preferences = store == null
           ? const NotificationPreferences()
           : await store.readPreferences();
+      final car = await _carProjecting();
       await surface.show(
         renderRoomThread(
           thread,
@@ -307,6 +327,7 @@ class RichPushHandler {
           contentUriFor: preferences.mediaEnabled ? contentUriFor : null,
           alert: false,
           statusLine: statusLine,
+          carProjecting: car,
         ),
       );
     } catch (_) {

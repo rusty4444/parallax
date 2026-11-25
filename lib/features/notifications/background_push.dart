@@ -35,6 +35,7 @@ import 'package:vodozemac/vodozemac.dart' as vod;
 import '../../homeserver_security.dart';
 import '../../message_copy_targets.dart';
 import '../../push_notifications.dart';
+import '../android_auto/android_auto_platform.dart';
 import 'matrix_push_projection.dart';
 import 'notification_media.dart';
 import 'notification_model.dart';
@@ -415,6 +416,7 @@ class BackgroundPushEnvironment {
     required this.store,
     required this.resolver,
     required this.contentUriFor,
+    this.carProjecting,
   });
 
   factory BackgroundPushEnvironment.production() => BackgroundPushEnvironment(
@@ -438,6 +440,7 @@ class BackgroundPushEnvironment {
       final cache = await getTemporaryDirectory();
       return (path) => notificationContentUri(path, cache.path);
     },
+    carProjecting: androidAutoProjecting,
   );
 
   final Future<HandoffResult> Function(
@@ -450,6 +453,9 @@ class BackgroundPushEnvironment {
   final Future<PushEventResolver> Function(PushBackgroundBinding binding)
   resolver;
   final Future<String? Function(String path)> Function() contentUriFor;
+
+  /// Whether the phone is connected to Android Auto (null: never).
+  final Future<bool> Function()? carProjecting;
 }
 
 /// Shows a verified push from a background isolate. [stillBound] re-reads
@@ -491,6 +497,7 @@ Future<RichPushOutcome?> handleBackgroundPushEnvelope({
     contentUriFor: contentUriFor,
     resolveTimeout: backgroundResolveTimeout,
     confirm: stillBound,
+    carProjecting: env.carProjecting,
   );
   return handler.handle(envelope);
 }
@@ -502,9 +509,10 @@ Future<void> _copyNotificationValue(String value) =>
 
 /// flutter_local_notifications runs actions that do not open the app here, in
 /// a background isolate. Copy actions use the platform clipboard directly.
-/// Inline replies are handed to the main isolate, which sends them through the
-/// guarded send path. With no main isolate a reply is kept privately and sent
-/// when Parallax is next opened; it is never sent from a background isolate.
+/// Inline replies and "Mark as read" (both also used by Android Auto) are
+/// handed to the main isolate, which sends them with the live client. With no
+/// main isolate they are kept privately and sent when the client next runs;
+/// nothing is ever sent from a background isolate.
 @pragma('vm:entry-point')
 Future<void> parallaxNotificationActionBackground(
   NotificationResponse response,
@@ -538,6 +546,15 @@ Future<void> handleBackgroundNotificationAction(
     await (clipboardWriter ?? _copyNotificationValue)(value);
     return;
   }
+  if (response.actionId == pushMarkReadActionId) {
+    await _markReadInBackground(
+      response,
+      environment: environment,
+      bindingStore: bindingStore,
+      clock: clock,
+    );
+    return;
+  }
   if (response.actionId != pushReplyActionId) return;
   final data = decodeNotificationPayload(response.payload);
   final text = response.input?.trim();
@@ -568,6 +585,7 @@ Future<void> handleBackgroundNotificationAction(
     resolve: (_, _) => Future.value(),
     userId: binding?.userId ?? '',
     deviceId: binding?.deviceId ?? '',
+    carProjecting: env.carProjecting,
   );
   final eventId = data['event_id'];
   if (handoff == HandoffResult.rejected ||
@@ -599,4 +617,56 @@ Future<void> handleBackgroundNotificationAction(
     registrationId: registrationId,
     statusLine: quickReplyPendingLine,
   );
+}
+
+/// "Mark as read" from a rich notification (or Android Auto). The plugin has
+/// already removed the notification. The running client sends the receipt;
+/// without one it is kept until the client next runs, for the same account.
+Future<void> _markReadInBackground(
+  NotificationResponse response, {
+  required BackgroundPushEnvironment? environment,
+  required PushStateStore bindingStore,
+  required DateTime Function() clock,
+}) async {
+  final data = decodeNotificationPayload(response.payload);
+  if (data == null) return;
+  final roomId = data['room_id'];
+  final eventId = data['event_id'];
+  final registrationId = data['registration_id'];
+  if (roomId is! String ||
+      eventId is! String ||
+      registrationId is! String ||
+      !roomId.startsWith('!') ||
+      !eventId.startsWith(r'$')) {
+    return;
+  }
+  final env = environment ?? BackgroundPushEnvironment.production();
+  final handoff = await env.handOff(handoffKindMarkRead, data);
+  if (handoff != HandoffResult.unavailable) return;
+  final binding = PushBackgroundBinding.parse(await bindingStore.read());
+  if (binding == null || binding.registrationId != registrationId) return;
+  NotificationStore store;
+  try {
+    store = await env.store();
+  } catch (_) {
+    return;
+  }
+  await store.addPendingRead(
+    PendingRead(
+      userId: binding.userId,
+      deviceId: binding.deviceId,
+      roomId: roomId,
+      eventId: eventId,
+      createdAt: clock(),
+    ),
+  );
+  // The room's next notification starts afresh, as after reading it.
+  try {
+    await store.removeRooms(
+      notificationAccountKey(binding.userId, binding.deviceId),
+      [roomId],
+    );
+  } catch (_) {
+    // History is a nicety.
+  }
 }

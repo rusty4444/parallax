@@ -56,6 +56,17 @@ abstract interface class NotificationFeatures {
   /// Sends [text] to [roomId] through the guarded send path (recipient
   /// trust, fail-closed encryption, final HTTP guard).
   Future<void> sendQuickReply(String roomId, String text);
+
+  /// Read receipts for [roomId] up to [eventId], for a "Mark as read"
+  /// pressed at [pressedAt] while Parallax was not running. Messages that
+  /// arrived later stay unread, and nothing is sent when the chat was read
+  /// since.
+  Future<void> markReadUpTo(
+    String roomId,
+    String eventId, {
+    required bool publicReceipt,
+    required DateTime pressedAt,
+  });
 }
 
 final _cache = Expando<NotificationFeatures>('notificationFeatures');
@@ -229,6 +240,30 @@ class MatrixNotificationFeatures implements NotificationFeatures {
     }
     _check(client);
     await _backend.sendText(roomId, text);
+    _check(client);
+  }
+
+  @override
+  Future<void> markReadUpTo(
+    String roomId,
+    String eventId, {
+    required bool publicReceipt,
+    required DateTime pressedAt,
+  }) async {
+    final client = _client();
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != matrix.Membership.join) {
+      throw StateError('Room is not joined');
+    }
+    final own =
+        room.receiptState.global.latestOwnReceipt?.ts ??
+        room.receiptState.mainThread?.latestOwnReceipt?.ts ??
+        0;
+    // Read on another device since: a receipt here would move it back.
+    if (own >= pressedAt.millisecondsSinceEpoch) return;
+    await room
+        .setReadMarker(eventId, mRead: eventId, public: publicReceipt)
+        .timeout(serverTimeout);
     _check(client);
   }
 }

@@ -301,7 +301,7 @@ void main() {
 
     test('other actions and empty replies are ignored', () async {
       await handleBackgroundNotificationAction(
-        reply('x', actionId: pushMarkReadActionId),
+        reply('x', actionId: 'parallax.unknown'),
         environment: environment(),
       );
       await handleBackgroundNotificationAction(
@@ -311,6 +311,90 @@ void main() {
       expect(handoffs, isEmpty);
       expect(surface.shown, isEmpty);
     });
+  });
+
+  group('mark as read from the action isolate', () {
+    NotificationResponse markRead({
+      String registration = _registration,
+      Object? eventId = r'$event',
+    }) => NotificationResponse(
+      notificationResponseType:
+          NotificationResponseType.selectedNotificationAction,
+      actionId: pushMarkReadActionId,
+      payload: jsonEncode({
+        'registration_id': registration,
+        'room_id': _room,
+        'event_id': eventId,
+        'user_id': '@me:example.org',
+        'device_id': 'DEVICE',
+      }),
+    );
+
+    test('is handed to the running client', () async {
+      handoffResult = HandoffResult.accepted;
+      await handleBackgroundNotificationAction(
+        markRead(),
+        environment: environment(),
+        bindingStore: _BindingStore(_bindingJson()),
+      );
+      expect(handoffs.single.$1, handoffKindMarkRead);
+      expect(handoffs.single.$2['room_id'], _room);
+      expect(handoffs.single.$2['event_id'], r'$event');
+      expect(await store.takePendingReads(), isEmpty);
+      expect(surface.shown, isEmpty);
+    });
+
+    test('without a running client it waits for the app', () async {
+      final account = notificationAccountKey('@me:example.org', 'DEVICE');
+      await store.appendEvent(account, _resolved());
+      final pressed = DateTime(2026, 11, 25, 8, 30);
+      await handleBackgroundNotificationAction(
+        markRead(),
+        environment: environment(),
+        bindingStore: _BindingStore(_bindingJson()),
+        clock: () => pressed,
+      );
+      final pending = await store.takePendingReads();
+      expect(pending.single.roomId, _room);
+      expect(pending.single.eventId, r'$event');
+      expect(pending.single.userId, '@me:example.org');
+      expect(pending.single.deviceId, 'DEVICE');
+      expect(pending.single.createdAt, pressed);
+      // The read room's history is gone, so its next message starts afresh.
+      expect(await store.thread(account, _room), isNull);
+      expect(surface.shown, isEmpty);
+    });
+
+    test(
+      'a refusal, stale registration or bad payload keeps nothing',
+      () async {
+        handoffResult = HandoffResult.rejected;
+        await handleBackgroundNotificationAction(
+          markRead(),
+          environment: environment(),
+          bindingStore: _BindingStore(_bindingJson()),
+        );
+        handoffResult = HandoffResult.unavailable;
+        await handleBackgroundNotificationAction(
+          markRead(registration: 'C' * 32),
+          environment: environment(),
+          bindingStore: _BindingStore(_bindingJson()),
+        );
+        await handleBackgroundNotificationAction(
+          markRead(),
+          environment: environment(),
+          bindingStore: _BindingStore(null),
+        );
+        handoffs.clear();
+        await handleBackgroundNotificationAction(
+          markRead(eventId: null),
+          environment: environment(),
+          bindingStore: _BindingStore(_bindingJson()),
+        );
+        expect(handoffs, isEmpty);
+        expect(await store.takePendingReads(), isEmpty);
+      },
+    );
   });
 
   group('copy from the action isolate', () {

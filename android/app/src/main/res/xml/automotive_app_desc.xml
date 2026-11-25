@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto: messaging notifications only. Builds with car templates
+     use src/carApp/res/xml/automotive_app_desc.xml instead. -->
+<automotiveApp>
+    <uses name="notification" />
+</automotiveApp>

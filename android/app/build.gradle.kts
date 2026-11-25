@@ -4,12 +4,24 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val parallaxPlayBuild = (providers.environmentVariable("PARALLAX_PLAY_BUILD").orNull
+    ?: providers.gradleProperty("parallax.playBuild").orNull) == "true"
+
+// The Android Auto car screen (templated messaging, src/carApp). Google Play
+// accepts templated messaging apps on internal and closed testing tracks only
+// and rejects them on open testing and production, so Play builds leave it
+// out unless PARALLAX_CAR_TEMPLATES=true is set for such a track. Every other
+// build (CI and local APKs) includes it. Car notifications are in every build.
+val parallaxCarTemplates = (providers.environmentVariable("PARALLAX_CAR_TEMPLATES").orNull
+    ?: providers.gradleProperty("parallax.carTemplates").orNull)
+    ?.let { it == "true" }
+    ?: !parallaxPlayBuild
+
 android {
     namespace = "net.samrussell.parallax"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
-    val playBuild = (providers.environmentVariable("PARALLAX_PLAY_BUILD").orNull
-        ?: providers.gradleProperty("parallax.playBuild").orNull) == "true"
+    val playBuild = parallaxPlayBuild
     val ciKeystoreFile = System.getenv("PARALLAX_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
 
     compileOptions {
@@ -26,6 +38,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["parallaxAutomotiveAppDesc"] =
+            if (parallaxCarTemplates) "automotive_app_desc_car" else "automotive_app_desc"
     }
 
     signingConfigs {
@@ -68,6 +82,15 @@ android {
     }
 }
 
+androidComponents {
+    onVariants { variant ->
+        if (parallaxCarTemplates) {
+            variant.sources.manifests.addStaticManifestFile("src/carApp/AndroidManifest.xml")
+            variant.sources.res?.addStaticSourceDirectory("src/carApp/res")
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
@@ -96,4 +119,13 @@ dependencies {
     // and translated text never leaves the device.
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    // Android Auto (AndroidAuto.kt, ParallaxCarApp.kt): car connection state
+    // for every build, conversation templates where the car screen is built.
+    // 1.8.0-rc01 carries a security fix missing from 1.7.0.
+    implementation("androidx.car.app:app:1.8.0-rc01")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.18.1")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("androidx.car.app:app-testing:1.8.0-rc01")
 }

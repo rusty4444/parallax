@@ -80,6 +80,7 @@ void main() {
     Duration timeout = const Duration(seconds: 5),
     NotificationStore? overrideStore,
     bool useStore = true,
+    Future<bool> Function()? carProjecting,
   }) => RichPushHandler(
     store: useStore ? (overrideStore ?? store) : null,
     surface: surface,
@@ -91,6 +92,7 @@ void main() {
     isCurrent: isCurrent,
     confirm: confirm,
     suppressRoom: suppress,
+    carProjecting: carProjecting,
   );
 
   group('rendered notification', () {
@@ -127,6 +129,12 @@ void main() {
         // Replies never open the app: they go through the action isolate.
         expect(reply.showsUserInterface, isFalse);
         expect(reply.cancelNotification, isFalse);
+        expect(reply.semanticAction, SemanticAction.reply);
+        // Android Auto needs Mark as read to work without opening the app.
+        final markRead = actions.last;
+        expect(markRead.showsUserInterface, isFalse);
+        expect(markRead.cancelNotification, isTrue);
+        expect(markRead.semanticAction, SemanticAction.markAsRead);
         final payload = jsonDecode(room.payload!) as Map<String, dynamic>;
         expect(payload['registration_id'], registration);
         expect(payload['room_id'], '!room:example.org');
@@ -269,6 +277,49 @@ void main() {
           surface.byId(notificationSummaryId)!,
         ).largeIcon;
         expect((summaryIcon as FilePathAndroidBitmap).data, senderAvatar.path);
+      },
+    );
+
+    test(
+      'every room is a conversation while Android Auto is connected',
+      () async {
+        final roomAvatar = File('${directory.path}/room.png')
+          ..writeAsBytesSync([1, 2, 3]);
+        Future<StyleInformation?> styleWhen(
+          Future<bool> Function()? car,
+          String eventId,
+        ) async {
+          await handler(
+            (_, _) async =>
+                resolved(eventId: eventId, roomAvatarPath: roomAvatar.path),
+            useStore: false,
+            carProjecting: car,
+          ).handle(envelope(eventId));
+          return android(
+            surface.byId(roomNotificationId(room))!,
+          ).styleInformation;
+        }
+
+        // On the phone a lone group message keeps its avatar row.
+        expect(
+          await styleWhen(() async => false, r'$phone'),
+          isA<BigTextStyleInformation>(),
+        );
+        // Android Auto reads only MessagingStyle.
+        final car = await styleWhen(() async => true, r'$car');
+        expect(car, isA<MessagingStyleInformation>());
+        expect(
+          (car! as MessagingStyleInformation).messages!.single.text,
+          'See you at 6',
+        );
+        // Unknown counts as connected: the conversation layout is always safe.
+        expect(
+          await styleWhen(
+            () async => throw StateError('no answer'),
+            r'$unknown',
+          ),
+          isA<MessagingStyleInformation>(),
+        );
       },
     );
 

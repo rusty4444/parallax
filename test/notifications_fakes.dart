@@ -51,6 +51,7 @@ class MemoryNotificationStore extends NotificationStore {
   NotificationPreferences preferences = const NotificationPreferences();
   final rooms = <String, RoomNotificationThread>{};
   final pending = <PendingReply>[];
+  final pendingReads = <PendingRead>[];
   int clears = 0;
   bool failWrites = false;
 
@@ -124,10 +125,24 @@ class MemoryNotificationStore extends NotificationStore {
   }
 
   @override
+  Future<void> addPendingRead(PendingRead read) async {
+    pendingReads.removeWhere((r) => r.roomId == read.roomId);
+    pendingReads.add(read);
+  }
+
+  @override
+  Future<List<PendingRead>> takePendingReads() async {
+    final taken = List.of(pendingReads);
+    pendingReads.clear();
+    return taken;
+  }
+
+  @override
   Future<void> clearHistory() async {
     clears++;
     rooms.clear();
     pending.clear();
+    pendingReads.clear();
   }
 }
 

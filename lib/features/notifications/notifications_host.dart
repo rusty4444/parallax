@@ -3,7 +3,8 @@
 //  - renders verified pushes with the live client (PushNotifications.
 //    richRenderer);
 //  - receives pushes and quick replies handed over by background isolates;
-//  - sends quick replies through the guarded send path;
+//  - sends quick replies through the guarded send path, and read receipts
+//    for "Mark as read" pressed on a notification or in Android Auto;
 //  - clears a room's notification when it is opened or read;
 //  - shows notifications for events this device's own sync receives when the
 //    built-in delivery is on (PushNotifications.presentInApp).
@@ -17,6 +18,7 @@ import '../../chat_backend.dart';
 import '../../feature_settings_scope.dart';
 import '../../hooks/hook_types.dart';
 import '../../push_notifications.dart';
+import '../android_auto/android_auto_platform.dart';
 import 'notification_features.dart';
 import 'notification_media.dart';
 import 'notification_renderer.dart';
@@ -31,6 +33,7 @@ class NotificationHostEnvironment {
     required this.surface,
     required this.cacheRoot,
     this.directory = const IsolateNameServerDirectory(),
+    this.carProjecting,
   });
 
   factory NotificationHostEnvironment.production() =>
@@ -38,12 +41,16 @@ class NotificationHostEnvironment {
         store: NotificationStore.open,
         surface: PluginNotificationSurface.new,
         cacheRoot: appTemporaryDirectory,
+        carProjecting: androidAutoProjecting,
       );
 
   final Future<NotificationStore> Function() store;
   final NotificationSurface Function() surface;
   final Future<Directory> Function() cacheRoot;
   final PortDirectory directory;
+
+  /// Whether the phone is connected to Android Auto (null: never).
+  final Future<bool> Function()? carProjecting;
 }
 
 class NotificationsHost extends StatefulWidget {
@@ -187,6 +194,7 @@ class _NotificationsHostState extends State<NotificationsHost>
           : (path) => notificationContentUri(path, cache.path),
       isCurrent: () => _sessionCurrent && (isCurrent?.call() ?? true),
       suppressRoom: _isViewing,
+      carProjecting: _env.carProjecting,
     );
   }
 
@@ -228,9 +236,46 @@ class _NotificationsHostState extends State<NotificationsHost>
         if (request == null) return false;
         unawaited(_sendReply(request, text.trim()));
         return true;
+      case handoffKindMarkRead:
+        final request = notifications.verifiedRequest(data);
+        if (request == null || request.eventId == null) return false;
+        unawaited(_markRead(request, notifications.markReadHandler));
+        return true;
       default:
         return false;
     }
+  }
+
+  /// The same path as "Mark as read" in the app when it is mounted;
+  /// otherwise a receipt up to the notification's message.
+  Future<void> _markRead(
+    PushNavigationRequest request,
+    Future<void> Function(PushNavigationRequest)? markRead,
+  ) async {
+    try {
+      if (markRead != null) {
+        await markRead(request);
+      } else {
+        final features = _features;
+        final eventId = request.eventId;
+        if (features == null || eventId == null || !mounted) return;
+        await features.markReadUpTo(
+          request.roomId,
+          eventId,
+          publicReceipt:
+              context
+                  .getInheritedWidgetOfExactType<FeatureSettingsScope>()
+                  ?.preferences
+                  .sendReadReceipts ??
+              true,
+          pressedAt: DateTime.now(),
+        );
+      }
+    } catch (_) {
+      // The room stays unread; reading it in the app still works.
+    }
+    if (!request.isCurrent) return;
+    await _clear({request.roomId});
   }
 
   Future<void> _sendReply(PushNavigationRequest request, String text) async {
@@ -258,7 +303,8 @@ class _NotificationsHostState extends State<NotificationsHost>
     }
   }
 
-  /// Sends quick replies typed while Parallax was not running.
+  /// Sends quick replies typed, and read receipts for "Mark as read"
+  /// pressed, while Parallax was not running.
   Future<void> _drainPendingReplies() async {
     if (_draining || !_sessionCurrent) return;
     _draining = true;
@@ -266,6 +312,8 @@ class _NotificationsHostState extends State<NotificationsHost>
       final store = await _openStore();
       final features = _features;
       if (store == null || features == null || !_sessionCurrent) return;
+      await _drainPendingReads(store);
+      if (!_sessionCurrent) return;
       final replies = await store.takePendingReplies();
       if (replies.isEmpty) return;
       final handler = await _handler();
@@ -302,6 +350,39 @@ class _NotificationsHostState extends State<NotificationsHost>
       // Best effort; nothing is logged.
     } finally {
       _draining = false;
+    }
+  }
+
+  Future<void> _drainPendingReads(NotificationStore store) async {
+    final reads = await store.takePendingReads();
+    final features = _features;
+    if (reads.isEmpty || features == null || !_sessionCurrent || !mounted) {
+      return;
+    }
+    final publicReceipt =
+        context
+            .getInheritedWidgetOfExactType<FeatureSettingsScope>()
+            ?.preferences
+            .sendReadReceipts ??
+        true;
+    final now = DateTime.now();
+    for (final read in reads) {
+      if (!_sessionCurrent) return;
+      if (read.userId != _userId ||
+          read.deviceId != _deviceId ||
+          read.isExpired(now)) {
+        continue;
+      }
+      try {
+        await features.markReadUpTo(
+          read.roomId,
+          read.eventId,
+          publicReceipt: publicReceipt,
+          pressedAt: read.createdAt,
+        );
+      } catch (_) {
+        // The chat stays unread; reading it on the phone still works.
+      }
     }
   }
 

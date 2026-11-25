@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged only into builds with car templates (app/build.gradle.kts):
+     Google Play takes templated messaging apps on internal and closed
+     testing tracks only, so production Play builds leave this out. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Conversations need Car App API level 7 (ConversationItem). -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="7" />
+        <meta-data
+            android:name="androidx.car.app.theme"
+            android:resource="@style/ParallaxCarAppTheme" />
+        <!-- The host is checked by ParallaxCarAppService.createHostValidator
+             (Android Auto's signing certificates in release builds). -->
+        <service
+            android:name=".ParallaxCarAppService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Parallax">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.MESSAGING" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

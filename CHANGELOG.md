@@ -9,6 +9,12 @@
 - The app theme and font follow your account: pick a theme on one device and the others change to match. Turn this off with Settings → Appearance → "Same theme and font on all devices". Turning it back on takes the theme and font from your other devices.
 - These settings are stored as Matrix account data, which isn't end-to-end encrypted: your homeserver can read the colours, the theme and the key to a synced background.
 
+### Android Auto
+
+- Message notifications now work in Android Auto: the car reads new messages aloud, and you can reply by voice or mark the chat as read. Mark as read no longer opens Parallax on the phone; it works in the background like Reply.
+- While the phone is connected to a car, Parallax keeps its connection open so voice replies and Mark as read are sent straight away. Ones made while Parallax wasn't running are sent when it next starts (a late Mark as read only covers the message it was pressed on).
+- Parallax on the car screen (test builds and Play test tracks): your recent chats, with an Unread filter, to listen to, answer by voice and mark as read. Locked chats never appear in the car, and if the app lock is on and Parallax is locked, the car says so instead of showing chats.
+
 ## 1.5.4
 
 ### Notifications from newer rooms

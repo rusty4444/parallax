@@ -233,6 +233,8 @@ class ParallaxUnifiedPushService : UnifiedPushService() {
     override fun getEngine(context: Context): FlutterEngine {
         val engine = FlutterEngine(context)
         VideoTools.register(context.applicationContext, engine.dartExecutor.binaryMessenger)
+        // Lets the push entrypoint lay notifications out for Android Auto.
+        AndroidAuto.attachStateOnly(engine.dartExecutor.binaryMessenger)
         val bundlePath = FlutterInjector.instance().flutterLoader().findAppBundlePath()
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint(

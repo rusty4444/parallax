@@ -75,7 +75,17 @@ jobs:
           grep -Fq "package: name='net.samrussell.parallax' versionCode='$APK_VERSION_CODE'" <<<"$BADGING"
           LIBS=$(unzip -Z1 "$APK")
           grep -Fxq 'lib/arm64-v8a/libvodozemac_bindings_dart.so' <<<"$LIBS"
+          # Test APKs carry the Android Auto car screen (docs/android-auto.md).
+          MANIFEST=$("$BT/aapt" dump xmltree "$APK" AndroidManifest.xml)
+          grep -Fq 'net.samrussell.parallax.ParallaxCarAppService' <<<"$MANIFEST"
+          grep -Fq 'androidx.car.app.category.MESSAGING' <<<"$MANIFEST"
           shasum -a 256 "$APK"
+
+      - name: Car screen tests (Robolectric)
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew :app:testDebugUnitTest --console=plain
 
       - name: Publish a per-commit test release
         if: ${{ gitea.ref == 'refs/heads/main' }}

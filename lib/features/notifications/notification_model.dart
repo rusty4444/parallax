@@ -327,3 +327,65 @@ class PendingReply {
     );
   }
 }
+
+/// "Mark as read" pressed (on the phone or in the car) while no main isolate
+/// was running. The receipt is sent, up to [eventId], the next time the
+/// client runs.
+@immutable
+class PendingRead {
+  const PendingRead({
+    required this.userId,
+    required this.deviceId,
+    required this.roomId,
+    required this.eventId,
+    required this.createdAt,
+  });
+
+  final String userId;
+  final String deviceId;
+  final String roomId;
+  final String eventId;
+  final DateTime createdAt;
+
+  /// Older ones are dropped: the user has seen the chat elsewhere by then.
+  static const maxAge = Duration(hours: 12);
+
+  bool isExpired(DateTime now) =>
+      now.isBefore(createdAt.subtract(const Duration(minutes: 1))) ||
+      now.difference(createdAt) > maxAge;
+
+  Map<String, Object?> toJson() => {
+    'user_id': userId,
+    'device_id': deviceId,
+    'room_id': roomId,
+    'event_id': eventId,
+    'ts': createdAt.millisecondsSinceEpoch,
+  };
+
+  static PendingRead? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final user = json['user_id'];
+    final device = json['device_id'];
+    final room = json['room_id'];
+    final event = json['event_id'];
+    final ts = json['ts'];
+    if (user is! String ||
+        !user.startsWith('@') ||
+        device is! String ||
+        device.isEmpty ||
+        room is! String ||
+        !room.startsWith('!') ||
+        event is! String ||
+        !event.startsWith(r'$') ||
+        ts is! int) {
+      return null;
+    }
+    return PendingRead(
+      userId: user,
+      deviceId: device,
+      roomId: room,
+      eventId: event,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(ts),
+    );
+  }
+}

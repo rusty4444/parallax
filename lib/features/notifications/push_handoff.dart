@@ -52,6 +52,7 @@ enum HandoffResult {
 /// Kinds of handed-off messages.
 const handoffKindPush = 'push';
 const handoffKindReply = 'reply';
+const handoffKindMarkRead = 'mark_read';
 
 /// Sends [payload] (plain JSON-like data only) to the main isolate.
 Future<HandoffResult> handOffToMainIsolate(

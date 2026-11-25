@@ -1,7 +1,8 @@
 // Small private store for notification state shared by the main isolate and
 // short-lived background isolates (FCM, UnifiedPush and notification-action
 // engines run in the same process): preferences, the last few messages per
-// room (MessagingStyle history) and quick replies waiting for the app.
+// room (MessagingStyle history), and quick replies and "Mark as read"
+// presses waiting for the app.
 //
 // Files live in the app's private support directory (excluded from backup).
 // Writes are atomic (temp file + rename) and serialised with an exclusive
@@ -22,6 +23,9 @@ const _maxStoreFileBytes = 512 * 1024;
 
 /// Pending quick replies kept at once.
 const _maxPendingReplies = 10;
+
+/// Pending "Mark as read" presses kept at once (one per room).
+const _maxPendingReads = 30;
 
 /// Rooms whose newest line is older than this are dropped from history.
 const _historyMaxAge = Duration(days: 3);
@@ -45,6 +49,7 @@ class NotificationStore {
   File get _preferencesFile => File(p.join(directory.path, 'preferences.json'));
   File get _historyFile => File(p.join(directory.path, 'history.json'));
   File get _repliesFile => File(p.join(directory.path, 'pending_replies.json'));
+  File get _readsFile => File(p.join(directory.path, 'pending_reads.json'));
   File get _lockFile => File(p.join(directory.path, '.lock'));
 
   // --- Preferences ---------------------------------------------------------
@@ -162,12 +167,48 @@ class NotificationStore {
     return replies;
   });
 
+  // --- Pending "Mark as read" ----------------------------------------------
+
+  /// Keeps [read] until the app runs; a newer press for the same room
+  /// replaces an older one.
+  Future<void> addPendingRead(PendingRead read) => _locked(() async {
+    final now = _clock();
+    final reads = [
+      ...(await _readReads()).where(
+        (r) =>
+            !r.isExpired(now) &&
+            !(r.roomId == read.roomId &&
+                r.userId == read.userId &&
+                r.deviceId == read.deviceId),
+      ),
+      read,
+    ];
+    await _writeJson(_readsFile, {
+      'v': 1,
+      'reads': [
+        for (final r in reads.skip(max(0, reads.length - _maxPendingReads)))
+          r.toJson(),
+      ],
+    });
+  });
+
+  /// Removes and returns every pending "Mark as read".
+  Future<List<PendingRead>> takePendingReads() => _locked(() async {
+    final reads = await _readReads();
+    if (reads.isNotEmpty || await _readsFile.exists()) {
+      await _delete(_readsFile);
+    }
+    return reads;
+  });
+
   // --- Clearing ------------------------------------------------------------
 
-  /// Forgets history and pending replies (sign-out, account change).
+  /// Forgets history, pending replies and pending "Mark as read" presses
+  /// (sign-out, account change).
   Future<void> clearHistory() => _locked(() async {
     await _delete(_historyFile);
     await _delete(_repliesFile);
+    await _delete(_readsFile);
   });
 
   // --- Internals -----------------------------------------------------------
@@ -206,6 +247,15 @@ class NotificationStore {
     return [
       for (final raw in (json['replies'] as List).take(_maxPendingReplies * 2))
         ?PendingReply.fromJson(raw),
+    ];
+  }
+
+  Future<List<PendingRead>> _readReads() async {
+    final json = await _readJson(_readsFile);
+    if (json is! Map || json['reads'] is! List) return [];
+    return [
+      for (final raw in (json['reads'] as List).take(_maxPendingReads * 2))
+        ?PendingRead.fromJson(raw),
     ];
   }
 

@@ -289,11 +289,14 @@ List<AndroidNotificationAction> _roomActions({
       showsUserInterface: false,
       cancelNotification: false,
     ),
+  // Runs in the background (Android Auto rejects a Mark as read that opens
+  // the app): the action isolate hands it to the running client, or keeps
+  // it until Parallax runs (handleBackgroundNotificationAction).
   if (canMarkRead)
     const AndroidNotificationAction(
       pushMarkReadActionId,
       'Mark as read',
-      showsUserInterface: true,
+      showsUserInterface: false,
       cancelNotification: true,
       semanticAction: SemanticAction.markAsRead,
     ),
@@ -303,7 +306,8 @@ List<AndroidNotificationAction> _roomActions({
 ///
 /// [contentUriFor] maps a preview file to the `content://` URI Android reads
 /// (null when previews are off). [alert] is false when the update must not
-/// buzz again (for example after a quick reply).
+/// buzz again (for example after a quick reply). [carProjecting] keeps every
+/// message in MessagingStyle, the only style Android Auto reads aloud.
 RenderedNotification renderRoomThread(
   RoomNotificationThread thread, {
   required String myUserId,
@@ -312,6 +316,7 @@ RenderedNotification renderRoomThread(
   String? Function(String path)? contentUriFor,
   bool alert = true,
   String? statusLine,
+  bool carProjecting = false,
   FileExists fileExists = _fileExists,
 }) {
   // Locked chats never reveal sender, body or media in a notification.
@@ -387,9 +392,11 @@ RenderedNotification renderRoomThread(
   // single text-only group message with avatar art, BigTextStyle keeps the
   // collapsed row's avatar visible. Media previews, direct chats and
   // multi-message threads retain MessagingStyle so inline/animated media
-  // and sender Person icons render.
+  // and sender Person icons render. Android Auto ignores BigTextStyle, so
+  // while the phone is connected to a car every room uses MessagingStyle.
   final hasMediaPreview = messages.any((message) => message.dataUri != null);
   final singleGroupWithAvatar =
+      !carProjecting &&
       !thread.isDirect &&
       thread.lines.length == 1 &&
       statusLine == null &&
