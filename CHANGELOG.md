@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1
+
+### Portrait photos in the image editor
+
+- Photos taken in portrait now open in the image editor upright and in their real shape. Before, the editor sized its canvas from the camera's stored landscape pixels, so the photo was squeezed into a wide box. The preview and the saved edit now match.
+
 ## 1.6.0
 
 ### Your look on every device
