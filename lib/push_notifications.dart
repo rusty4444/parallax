@@ -57,6 +57,19 @@ const pushReplyActionId = 'parallax.reply';
 const pushCopyCodeActionId = 'parallax.copy_code';
 const pushCopyPhoneActionId = 'parallax.copy_phone';
 
+/// ID of the quick-reply text box on Windows toasts.
+const windowsReplyInputId = 'parallax_reply';
+
+const _windowsActionKey = 'parallax_action';
+const _windowsPayloadKey = 'payload';
+
+/// `arguments` of a Windows toast button. Windows hands an activation only
+/// the pressed button's arguments (or the toast's launch string for a click
+/// on the toast itself), never both, so each button carries its action ID
+/// and the toast's routing payload.
+String windowsActionArguments(String actionId, String? payload) =>
+    jsonEncode({_windowsActionKey: actionId, _windowsPayloadKey: ?payload});
+
 /// Renders a verified envelope with sender, text and media. Implemented by
 /// the notifications module while the signed-in app is mounted. [isCurrent]
 /// turns false when push is disabled or re-registered meanwhile.
@@ -349,8 +362,10 @@ class PushEnvelope {
     if (!RegExp(r'^[A-Za-z0-9_-]{32}$').hasMatch(registrationId) ||
         data['registration_id'] != registrationId ||
         room is! String ||
+        // Room version 12 IDs have no server part ("!<hash>"), so only the
+        // sigil is required, not ":server".
         !room.startsWith('!') ||
-        !room.contains(':') ||
+        room.length < 2 ||
         room.length > 1024 ||
         room.contains(RegExp(r'\s')) ||
         (event != null &&
@@ -748,7 +763,7 @@ class PushNotifications extends ChangeNotifier {
             _emit(
               PushStatus.permissionDenied,
               inApp
-                  ? 'Notifications are blocked. Allow them for Parallax in Android settings, then turn them on again.'
+                  ? 'Notifications are blocked. Allow them for Parallax in $_systemSettingsName, then turn them on again.'
                   : 'Notifications are blocked. Allow them in Android app settings, then enable push again.',
             );
           }
@@ -776,7 +791,7 @@ class PushNotifications extends ChangeNotifier {
             error is PushSetupException
                 ? '${error.message} No delivery is confirmed.'
                 : inApp
-                ? 'Notifications could not start. Allow notifications for Parallax in Android settings, then try again.'
+                ? 'Notifications could not start. Allow notifications for Parallax in $_systemSettingsName, then try again.'
                 : unifiedPush
                 ? 'UnifiedPush could not start. Check your distributor app (for example ntfy), its Matrix gateway, notification permission and homeserver connectivity. No delivery is confirmed.'
                 : 'Push could not start. Check your Firebase Android app, gateway/project pairing, permission and homeserver connectivity. No delivery is confirmed.',
@@ -1442,14 +1457,88 @@ void routePushNotificationResponse(
   NotificationResponse response, {
   required void Function(Map<String, dynamic>) onOpen,
   void Function(Map<String, dynamic>)? onMarkRead,
+  void Function(NotificationResponse)? onAction,
 }) {
-  final data = _decodeMap(response.payload);
+  final normalised = normalisePushNotificationResponse(response);
+  final actionId = normalised.actionId;
+  if (actionId == pushReplyActionId ||
+      actionId == pushCopyCodeActionId ||
+      actionId == pushCopyPhoneActionId) {
+    // Android and iOS run these in the notification-action isolate; on
+    // Windows and macOS they arrive here, in the running app.
+    if (onAction != null) onAction(normalised);
+    return;
+  }
+  final data = _decodeMap(normalised.payload);
   if (data == null) return;
-  if (response.actionId == pushMarkReadActionId) {
+  if (actionId == pushMarkReadActionId) {
     if (onMarkRead != null) onMarkRead(data);
     return;
   }
-  if (response.actionId == null || response.actionId!.isEmpty) onOpen(data);
+  if (actionId == null || actionId.isEmpty) onOpen(data);
+}
+
+/// [response] with the Windows toast conventions undone, so every platform
+/// routes the same way: a click on the toast itself has no action ID (Windows
+/// reports its launch string as both payload and action), and a button's
+/// wrapped arguments (see [windowsActionArguments]) become its action ID,
+/// the toast's payload and, for Reply, the typed text.
+@visibleForTesting
+NotificationResponse normalisePushNotificationResponse(
+  NotificationResponse response,
+) {
+  final wrapped = _decodeMap(response.actionId);
+  final action = wrapped?[_windowsActionKey];
+  if (action is String) {
+    final payload = wrapped![_windowsPayloadKey];
+    final typed = response.data[windowsReplyInputId];
+    return NotificationResponse(
+      notificationResponseType:
+          NotificationResponseType.selectedNotificationAction,
+      id: response.id,
+      actionId: action,
+      payload: payload is String ? payload : null,
+      input: typed is String ? typed : response.input,
+      data: response.data,
+    );
+  }
+  final actionId = response.actionId;
+  if (actionId != null && actionId.isNotEmpty && actionId == response.payload) {
+    return NotificationResponse(
+      notificationResponseType: NotificationResponseType.selectedNotification,
+      id: response.id,
+      payload: response.payload,
+      data: response.data,
+    );
+  }
+  return response;
+}
+
+/// Where this platform's user allows Parallax's notifications.
+String get _systemSettingsName => kIsWeb
+    ? 'your browser settings'
+    : switch (defaultTargetPlatform) {
+        TargetPlatform.windows => 'Windows Settings',
+        TargetPlatform.macOS => 'System Settings',
+        TargetPlatform.iOS => 'the Settings app',
+        _ => 'Android settings',
+      };
+
+/// Windows and macOS deliver every notification action to the running app
+/// instead of a background isolate.
+bool get _desktopNotificationActions =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS);
+
+Future<void> _runDesktopNotificationAction(
+  NotificationResponse response,
+) async {
+  try {
+    await handleBackgroundNotificationAction(response);
+  } catch (_) {
+    // Never log payloads or message text.
+  }
 }
 
 /// Initialises local notifications for generic alerts. [onOpen] receives tap
@@ -1485,6 +1574,9 @@ Future<void> initializePushLocalNotifications(
             response,
             onOpen: onOpen,
             onMarkRead: onMarkRead,
+            onAction: _desktopNotificationActions
+                ? (action) => unawaited(_runDesktopNotificationAction(action))
+                : null,
           ),
     // Every initialisation must register this: the plugin stores the
     // callback handle used for actions that do not open the app (Reply).
@@ -1536,11 +1628,14 @@ NotificationDetails genericPushNotificationDetails(PushEnvelope envelope) =>
           : _markReadAndroidDetails,
       windows: envelope.eventId == null
           ? const WindowsNotificationDetails()
-          : const WindowsNotificationDetails(
+          : WindowsNotificationDetails(
               actions: [
                 WindowsAction(
                   content: 'Mark as read',
-                  arguments: pushMarkReadActionId,
+                  arguments: windowsActionArguments(
+                    pushMarkReadActionId,
+                    jsonEncode(envelope.toJson()),
+                  ),
                 ),
               ],
             ),

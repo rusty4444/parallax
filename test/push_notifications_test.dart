@@ -712,6 +712,28 @@ void main() {
       );
     });
 
+    test('presents events from room version 12 rooms', () async {
+      // v12 room IDs are "!<hash>" with no server part. Rejecting them
+      // dropped every notification from newer rooms (homeservers now create
+      // v12 rooms by default).
+      const v12Room = '!nfkDKzE_h7nKhXAeN3LV6VKom9DBJtxReuHgg6khlgI';
+      final rendered = <PushEnvelope>[];
+      builtIn.richRenderer = (envelope, isCurrent) async {
+        rendered.add(envelope);
+      };
+      await builtIn.setSession(session('@alice:example.org'));
+      await builtIn.enable(consent: true);
+      expect(builtIn.presentInApp(roomId: v12Room, eventId: r'$e'), isTrue);
+      expect(builtIn.presentInApp(roomId: '!', eventId: r'$e'), isFalse);
+      await builtIn.settle();
+      expect(rendered.single.roomId, v12Room);
+      expect(
+        builtIn.verifiedRequest(rendered.single.toJson())?.roomId,
+        v12Room,
+      );
+      await builtIn.disable();
+    });
+
     testWidgets('turning it off is remembered and needs no consent', (
       tester,
     ) async {

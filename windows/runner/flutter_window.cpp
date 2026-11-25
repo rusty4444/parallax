@@ -71,6 +71,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
   }
 
+  // Explorer restarts and taskbar button creation arrive as registered
+  // (runtime) messages, so they cannot be switch cases.
+  if (platform_ && message >= 0xC000 && platform_->HandleShellMessage(message)) {
+    return 0;
+  }
+
   switch (message) {
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();

@@ -16,9 +16,10 @@ Element X replacement.
 | Password / SSO / OIDC sign-in | Same flows; the browser round-trip uses a local loopback server (`flutter_web_auth_2`) |
 | App lock PIN / biometrics | PIN unchanged; Windows Hello via `local_auth_windows` when enrolled |
 | FLAG_SECURE for recovery secrets | `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` — the window is excluded from screen capture |
-| Foreground service background connection | Tray keep-alive: closing the window hides it to the notification area and sync keeps running; the tray icon's **Quit** stops the app |
+| Foreground service background connection | Tray keep-alive: the tray icon is there whenever Parallax runs; closing the window hides it to the notification area and sync keeps running; the tray icon's **Open Parallax** brings it back and **Quit** stops the app. Windows 11 puts new tray icons in the overflow (^) menu: drag the icon onto the taskbar, or turn it on in Settings → Personalisation → Taskbar → Other system tray icons |
 | UnifiedPush / Firebase delivery | Not applicable (Android concepts). The built-in connection is the only delivery; the settings page shows only **Built in** |
-| Local notifications | Windows toasts (`flutter_local_notifications_windows`), including the **Mark as read** action; content rules identical |
+| Local notifications | Windows toasts (`flutter_local_notifications_windows`): sender or room, message, room/sender picture and image preview, a **Reply** box, **Copy code**/**Copy phone number** and **Mark as read**. Clicking a toast opens the chat (restoring the window from the tray). Content rules identical; no group summary toast |
+| Launcher badge | Unread count as an overlay on the taskbar button (red badge, "9+" above nine) and a red dot on the tray icon, with the count in its tooltip |
 | Share into Parallax (ACTION_SEND) | Drag files onto the window, or open files with Parallax; a second launch forwards its command line to the running window |
 | Direct Share suggestions | Taskbar jump list ("Recent chats"), same rooms, same PIN/sign-out rules; requires the app pinned to the taskbar |
 | matrix.to / `matrix:` links | `matrix:` protocol registered per-user (`HKCU\Software\Classes\matrix`); matrix.to links via the in-app dialog and browser |

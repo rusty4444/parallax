@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -157,7 +159,13 @@ void main() {
         eventId: r'$event',
       );
       final details = genericPushNotificationDetails(envelope);
-      expect(details.windows!.actions.single.arguments, pushMarkReadActionId);
+      // Windows hands a button press only its arguments, so they carry the
+      // action and the alert's routing payload (desktop_notifications_test).
+      final arguments =
+          jsonDecode(details.windows!.actions.single.arguments)
+              as Map<String, dynamic>;
+      expect(arguments['parallax_action'], pushMarkReadActionId);
+      expect(jsonDecode(arguments['payload'] as String), envelope.toJson());
       expect(details.windows!.actions.single.content, 'Mark as read');
     });
   });

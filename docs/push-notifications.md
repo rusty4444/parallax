@@ -68,6 +68,29 @@ Notifications → Enable notifications on this device → How notifications arri
 boundary below. UnifiedPush no longer needs opt-in (see the top of this page);
 the consent rules below now apply to Firebase.
 
+## Windows and Mac
+
+The desktop apps use the built-in delivery only: notifications arrive while
+Parallax is running, from its own sync.
+
+- **Windows**: toasts with the sender or room, the message, a picture and image
+  preview, a **Reply** box, **Copy code** and **Mark as read**. Windows hands a
+  button press only that button's `arguments`, so each button carries the
+  toast's routing payload (`windowsActionArguments` in
+  `lib/push_notifications.dart`), and a click on the toast itself arrives with
+  its launch string as both payload and action ID; `normalisePushNotificationResponse`
+  undoes both before routing. Closing the window hides it to the tray (icon always
+  present while Parallax runs) and sync continues. Unread messages show as a red
+  badge over the taskbar button and a dot on the tray icon.
+- **Mac**: closing the window leaves Parallax running in the Dock, like Messages;
+  the Dock icon or a notification brings the window back, and Cmd-Q quits. The
+  unread count shows on the Dock icon. Reply and copy actions run in the app
+  rather than a background isolate.
+- Neither desktop posts the Android group summary notification.
+- The badge (`AppBadgeHost`, `lib/features/platform/desktop_app.dart`) counts
+  unread messages in rooms that notify for them, mentions in muted rooms, chats
+  marked unread and pending invites, over channel `parallax/desktop`.
+
 ## Firebase: status and consent boundary
 
 Push through your own Firebase project is **disabled by default**. No service credentials, Firebase project, gateway,

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Notifications from newer rooms
+
+- Messages in rooms created as room version 12 (the default on current homeservers, so most new chats and bridged conversations) now notify. Their room IDs have no `:server` part, and the notification check rejected them, so they were silently dropped on every platform.
+
+### Windows and Mac notifications
+
+- Windows: message notifications now show the sender, the message and their picture, with a Reply box, Copy code and Mark as read. Clicking one opens the chat, bringing the window back from the tray. Previously a click did nothing and Mark as read lost track of the chat. There is no extra "1 notification" summary toast after each message.
+- Windows: the tray icon is always there while Parallax runs, and unread messages show as a red count on the taskbar button and a dot on the tray icon.
+- Mac: closing the window keeps Parallax running in the Dock so notifications keep arriving; click the Dock icon to bring it back, or press Cmd-Q to quit. The unread count shows on the Dock icon, Reply and Copy code work from the notification, and the extra summary notification is gone.
+
 ## 1.5.3
 
 ### Dependency and security updates

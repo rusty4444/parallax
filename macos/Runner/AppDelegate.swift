@@ -39,7 +39,20 @@ class AppDelegate: FlutterAppDelegate {
     super.application(application, open: urls)
   }
 
+  // Like Messages, closing the window leaves Parallax running in the Dock so
+  // notifications keep arriving (MainFlutterWindow hides instead of closing).
+  // Quit with Cmd-Q or the Dock menu.
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    return false
+  }
+
+  // Clicking the Dock icon brings the closed window back.
+  override func applicationShouldHandleReopen(
+    _ sender: NSApplication, hasVisibleWindows flag: Bool
+  ) -> Bool {
+    if !flag {
+      mainFlutterWindow?.makeKeyAndOrderFront(nil)
+    }
     return true
   }
 

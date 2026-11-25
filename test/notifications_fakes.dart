@@ -29,6 +29,11 @@ class FakeSurface implements NotificationSurface {
   Future<void> showGeneric(PushEnvelope envelope) async =>
       generic.add(envelope);
 
+  int cancelledAll = 0;
+
+  @override
+  Future<void> cancelAll() async => cancelledAll++;
+
   RenderedNotification? byId(int id) =>
       shown.lastWhere((n) => n.id == id, orElse: () => _none);
   static final _none = RenderedNotification(

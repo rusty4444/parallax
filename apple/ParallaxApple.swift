@@ -915,6 +915,56 @@ final class ParallaxIntentStore {
     #endif
 }
 
+// MARK: - Desktop app (parallax/desktop)
+
+#if os(macOS)
+/// The Dock badge and bringing the main window back after it was closed to
+/// the Dock (lib/features/platform/desktop_app.dart).
+final class ParallaxDesktopApp {
+    func register(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
+        let channel = FlutterMethodChannel(name: "parallax/desktop", binaryMessenger: messenger)
+        channel.setMethodCallHandler { call, result in
+            switch call.method {
+            case "setBadgeCount":
+                let args = call.arguments as? [String: Any]
+                let count = max(0, args?["count"] as? Int ?? 0)
+                DispatchQueue.main.async {
+                    NSApp.dockTile.badgeLabel = ParallaxDesktopApp.badgeLabel(count)
+                    result(nil)
+                }
+            case "showWindow":
+                DispatchQueue.main.async {
+                    ParallaxDesktopApp.showMainWindow()
+                    result(nil)
+                }
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+        return channel
+    }
+
+    /// Nil (no badge) for zero; large counts are capped like Mail's.
+    static func badgeLabel(_ count: Int) -> String? {
+        if count <= 0 { return nil }
+        return count > 999 ? "999+" : String(count)
+    }
+
+    static func showMainWindow() {
+        if NSApp.isHidden { NSApp.unhide(nil) }
+        if let window = (NSApp.delegate as? FlutterAppDelegate)?.mainFlutterWindow {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+#endif
+
 // MARK: - Clipboard images (parallax/clipboard)
 
 #if os(macOS)
@@ -1126,6 +1176,7 @@ final class ParallaxAppleChannels {
         channels = [video, permissionsChannel, secure, intents]
         #if os(macOS)
         channels.append(ParallaxClipboardImage().register(messenger: messenger))
+        channels.append(ParallaxDesktopApp().register(messenger: messenger))
         #endif
         store.attach(intents)
     }

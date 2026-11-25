@@ -5,6 +5,8 @@
 // (short-lived read-only client).
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../../push_notifications.dart';
 import 'notification_content.dart';
 import 'notification_model.dart';
@@ -47,10 +49,30 @@ class RichPushHandler {
     this.confirm,
     this.suppressRoom,
     DateTime Function()? clock,
+    bool? showSummary,
+    bool? clearAllWhenRead,
   }) : _isCurrent = isCurrent ?? _always,
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now,
+       showSummary =
+           showSummary ??
+           (!kIsWeb && defaultTargetPlatform == TargetPlatform.android),
+       clearAllWhenRead =
+           clearAllWhenRead ??
+           (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows);
 
   static bool _always() => true;
+
+  /// Whether rooms are grouped under a summary notification. Only Android
+  /// groups notifications that way; elsewhere a summary would be one more
+  /// alert (a second toast on Windows, an extra entry on Apple platforms).
+  final bool showSummary;
+
+  /// Windows cannot take back a single toast of an app installed outside
+  /// the Store (they carry no group, and the plugin removes by tag only with
+  /// package identity), so a read chat's toast would stay in the
+  /// notification centre. Clearing all of Parallax's toasts once no notified
+  /// chat is left unread covers the usual case: reading everything.
+  final bool clearAllWhenRead;
 
   /// Asynchronous ownership check run right before posting (background
   /// isolates re-read the stored push binding).
@@ -173,6 +195,7 @@ class RichPushHandler {
   Future<void> _refreshSummary({
     List<RoomNotificationThread> fallback = const [],
   }) async {
+    if (!showSummary) return;
     var threads = fallback;
     try {
       if (store != null) threads = await store!.threads(account);
@@ -207,6 +230,13 @@ class RichPushHandler {
       await store?.removeRooms(account, ids);
     } catch (_) {
       // Best effort.
+    }
+    if (clearAllWhenRead && store != null) {
+      try {
+        if ((await store!.threads(account)).isEmpty) await surface.cancelAll();
+      } catch (_) {
+        // Best effort.
+      }
     }
     await _refreshSummary();
   }

@@ -30,6 +30,7 @@ import 'features/message_fonts/message_fonts.dart'
     show registerMessageFontLicences;
 import 'features/platform/apple_bootstrap.dart';
 import 'features/platform/background_connection.dart';
+import 'features/platform/desktop_app.dart';
 import 'features/platform/desktop_content_insets.dart';
 import 'features/platform/desktop_shell.dart';
 import 'features/platform/windows_bootstrap.dart';
@@ -518,6 +519,9 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
         _pushSession?.userId == request.userId &&
         _pushSession?.deviceId == request.deviceId;
     if (!current()) return;
+    // The window may be hidden in the tray (Windows) or closed to the Dock
+    // (macOS) while notifications keep arriving.
+    unawaited(const DesktopAppChannel().showWindow());
     bool joined() =>
         backend.rooms.any((room) => room.id == request.roomId && !room.invited);
     try {

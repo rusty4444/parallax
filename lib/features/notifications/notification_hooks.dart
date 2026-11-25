@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 
 import '../../hooks/hook_types.dart';
+import '../platform/desktop_app.dart';
 import 'notification_settings_section.dart';
 import 'notification_troubleshoot_screen.dart';
 import 'notifications_host.dart';
@@ -13,12 +14,16 @@ import 'notifications_host.dart';
 /// Wraps the signed-in app: receives pushes handed over from background
 /// isolates while the main isolate is alive, renders rich notifications with
 /// the live client, sends quick replies and clears notifications of rooms
-/// that are opened or read.
+/// that are opened or read. On Windows and macOS it also keeps the unread
+/// badge (taskbar button, tray icon, Dock icon) up to date.
 Widget wrapWithNotifications(
   BuildContext context,
   AppHookContext ctx,
   Widget child,
-) => NotificationsHost(app: ctx, child: child);
+) => NotificationsHost(
+  app: ctx,
+  child: AppBadgeHost(backend: ctx.backend, child: child),
+);
 
 /// Rows for the Settings Notifications group: message content and media
 /// previews in notifications.

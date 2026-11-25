@@ -248,18 +248,31 @@ ParallaxPlatform::ParallaxPlatform(HWND window, Win32Window* owner,
                    : shared_root_ + L"\\icons";
   Gdiplus::GdiplusStartupInput gdiplus_input;
   Gdiplus::GdiplusStartup(&gdiplus_token_, &gdiplus_input, nullptr);
+  taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
+  taskbar_button_created_message_ =
+      RegisterWindowMessageW(L"TaskbarButtonCreated");
   PruneOldSharedCopies();
   RegisterChannels(engine);
+  // The tray icon is there whenever Parallax runs: it is how the window is
+  // found again after closing it to the tray, and it shows unread messages.
+  AddTrayIcon();
 }
 
 ParallaxPlatform::~ParallaxPlatform() {
   RemoveTrayIcon();
+  if (taskbar_) {
+    taskbar_->Release();
+    taskbar_ = nullptr;
+  }
+  if (overlay_icon_) DestroyIcon(overlay_icon_);
+  if (tray_icon_) DestroyIcon(tray_icon_);
   intents_ = nullptr;
   shortcuts_ = nullptr;
   secure_ = nullptr;
   permissions_ = nullptr;
   connection_ = nullptr;
   clipboard_ = nullptr;
+  desktop_ = nullptr;
   if (gdiplus_token_) Gdiplus::GdiplusShutdown(gdiplus_token_);
 }
 
@@ -392,6 +405,27 @@ void ParallaxPlatform::RegisterChannels(flutter::FlutterEngine* engine) {
                    method == "requestIgnoreBatteryOptimizations") {
           // A desktop has no battery optimisation to exempt from.
           result->Success(EV(true));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
+  desktop_ = std::make_unique<flutter::MethodChannel<EV>>(
+      messenger, "parallax/desktop", codec);
+  desktop_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<EV>& call,
+             std::unique_ptr<flutter::MethodResult<EV>> result) {
+        const auto& method = call.method_name();
+        if (method == "setBadgeCount") {
+          int count = 0;
+          if (const auto* map = std::get_if<EM>(call.arguments())) {
+            count = static_cast<int>(MapInt(*map, "count", 0));
+          }
+          SetBadgeCount(count);
+          result->Success();
+        } else if (method == "showWindow") {
+          ShowMainWindow();
+          result->Success();
         } else {
           result->NotImplemented();
         }
@@ -536,12 +570,29 @@ void ParallaxPlatform::SetKeepAlive(bool keep_alive) {
   keep_alive_ = keep_alive;
   // While the connection runs, closing the window hides it to the tray and
   // the Matrix sync keeps going — the desktop counterpart of Android's
-  // foreground service. Stopping it makes the next close quit.
+  // foreground service. Stopping it makes the next close quit. The tray
+  // icon itself stays while Parallax runs.
   owner_->SetQuitOnClose(!keep_alive);
-  if (keep_alive && !tray_visible_) {
-    AddTrayIcon();
-  } else if (!keep_alive && tray_visible_) {
-    RemoveTrayIcon();
+  if (!tray_visible_) AddTrayIcon();
+}
+
+void ParallaxPlatform::FillTrayIcon(NOTIFYICONDATAW* nid) {
+  if (tray_icon_) DestroyIcon(tray_icon_);
+  const int size = GetSystemMetrics(SM_CXSMICON);
+  tray_icon_ = static_cast<HICON>(LoadImageW(
+      GetModuleHandleW(nullptr),
+      MAKEINTRESOURCEW(badge_count_ > 0 ? IDI_APP_ICON_UNREAD : IDI_APP_ICON),
+      IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
+  nid->hIcon = tray_icon_ ? tray_icon_
+                          : LoadIconW(GetModuleHandleW(nullptr),
+                                      MAKEINTRESOURCEW(IDI_APP_ICON));
+  if (badge_count_ <= 0) {
+    wcscpy_s(nid->szTip, L"Parallax");
+  } else if (badge_count_ == 1) {
+    wcscpy_s(nid->szTip, L"Parallax \u2013 1 unread message");
+  } else {
+    swprintf_s(nid->szTip, L"Parallax \u2013 %d unread messages",
+               badge_count_);
   }
 }
 
@@ -552,10 +603,111 @@ void ParallaxPlatform::AddTrayIcon() {
   nid.uID = kTrayIconId;
   nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   nid.uCallbackMessage = kParallaxTrayMessage;
-  nid.hIcon = LoadIconW(GetModuleHandleW(nullptr),
-                        MAKEINTRESOURCEW(IDI_APP_ICON));
-  wcscpy_s(nid.szTip, L"Parallax");
+  FillTrayIcon(&nid);
   if (Shell_NotifyIconW(NIM_ADD, &nid)) tray_visible_ = true;
+}
+
+void ParallaxPlatform::UpdateTrayIcon() {
+  if (!tray_visible_) {
+    AddTrayIcon();
+    return;
+  }
+  NOTIFYICONDATAW nid{};
+  nid.cbSize = sizeof(nid);
+  nid.hWnd = window_;
+  nid.uID = kTrayIconId;
+  nid.uFlags = NIF_ICON | NIF_TIP;
+  FillTrayIcon(&nid);
+  Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+bool ParallaxPlatform::HandleShellMessage(UINT message) {
+  if (message == 0) return false;
+  if (message == taskbar_created_message_) {
+    // Explorer restarted and forgot every tray icon.
+    tray_visible_ = false;
+    AddTrayIcon();
+    return true;
+  }
+  if (message == taskbar_button_created_message_) {
+    ApplyTaskbarBadge();
+    return true;
+  }
+  return false;
+}
+
+void ParallaxPlatform::SetBadgeCount(int count) {
+  if (count < 0) count = 0;
+  if (count == badge_count_) return;
+  badge_count_ = count;
+  UpdateTrayIcon();
+  ApplyTaskbarBadge();
+}
+
+void ParallaxPlatform::ApplyTaskbarBadge() {
+  if (!window_) return;
+  if (!taskbar_) {
+    if (FAILED(CoCreateInstance(CLSID_TaskbarList, nullptr,
+                                CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&taskbar_)))) {
+      taskbar_ = nullptr;
+      return;
+    }
+    if (FAILED(taskbar_->HrInit())) {
+      taskbar_->Release();
+      taskbar_ = nullptr;
+      return;
+    }
+  }
+  if (overlay_icon_) {
+    DestroyIcon(overlay_icon_);
+    overlay_icon_ = nullptr;
+  }
+  if (badge_count_ <= 0) {
+    taskbar_->SetOverlayIcon(window_, nullptr, nullptr);
+    return;
+  }
+  overlay_icon_ = CreateBadgeIcon(badge_count_);
+  wchar_t description[64];
+  if (badge_count_ == 1) {
+    wcscpy_s(description, L"1 unread message");
+  } else {
+    swprintf_s(description, L"%d unread messages", badge_count_);
+  }
+  taskbar_->SetOverlayIcon(window_, overlay_icon_, description);
+}
+
+// A red disc with the unread count in white ("9+" above nine): the
+// taskbar shows it over the bottom-right of the app's button.
+HICON ParallaxPlatform::CreateBadgeIcon(int count) {
+  UINT dpi = GetDpiForWindow(window_);
+  if (dpi == 0) dpi = 96;
+  const int size = GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+  Gdiplus::Bitmap bitmap(size, size, PixelFormat32bppARGB);
+  {
+    Gdiplus::Graphics graphics(&bitmap);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+    graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+    Gdiplus::SolidBrush red(Gdiplus::Color(255, 232, 17, 35));
+    graphics.FillEllipse(&red, 0.0f, 0.0f, static_cast<Gdiplus::REAL>(size),
+                         static_cast<Gdiplus::REAL>(size));
+    const std::wstring label = count > 9 ? L"9+" : std::to_wstring(count);
+    const Gdiplus::REAL font_size =
+        static_cast<Gdiplus::REAL>(size) * (label.size() > 1 ? 0.56f : 0.7f);
+    Gdiplus::Font font(L"Segoe UI", font_size, Gdiplus::FontStyleBold,
+                       Gdiplus::UnitPixel);
+    Gdiplus::SolidBrush white(Gdiplus::Color(255, 255, 255, 255));
+    Gdiplus::StringFormat format;
+    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+    Gdiplus::RectF box(0.0f, 0.0f, static_cast<Gdiplus::REAL>(size),
+                       static_cast<Gdiplus::REAL>(size));
+    graphics.DrawString(label.c_str(), -1, &font, box, &format, &white);
+  }
+  HICON icon = nullptr;
+  bitmap.GetHICON(&icon);
+  return icon;
 }
 
 void ParallaxPlatform::RemoveTrayIcon() {

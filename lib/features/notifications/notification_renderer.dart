@@ -132,6 +132,9 @@ abstract interface class NotificationSurface {
   Future<void> show(RenderedNotification notification);
   Future<void> cancel(int id);
   Future<void> showGeneric(PushEnvelope envelope);
+
+  /// Removes every notification Parallax has posted.
+  Future<void> cancelAll();
 }
 
 /// flutter_local_notifications. The plugin must already be initialised in
@@ -153,6 +156,9 @@ class PluginNotificationSurface implements NotificationSurface {
 
   @override
   Future<void> cancel(int id) => _plugin.cancel(id: id);
+
+  @override
+  Future<void> cancelAll() => _plugin.cancelAll();
 
   @override
   Future<void> showGeneric(PushEnvelope envelope) =>
@@ -199,6 +205,67 @@ bool _fileExists(String path) {
     return false;
   }
 }
+
+/// Windows toast for a room's conversation: the newest message with a reply
+/// box, plus the same copy and Mark as read actions as Android. Windows hands
+/// a button press only that button's arguments, so each one carries the
+/// toast's routing [payload] (see [windowsActionArguments]).
+@visibleForTesting
+WindowsNotificationDetails windowsRoomDetails({
+  required String payload,
+  required bool alert,
+  bool reply = true,
+  bool canMarkRead = false,
+  MessageCopyTarget? copyTarget,
+  String? avatarPath,
+  String? imagePath,
+  DateTime? timestamp,
+  FileExists fileExists = _fileExists,
+}) => WindowsNotificationDetails(
+  inputs: [
+    if (reply)
+      const WindowsTextInput(
+        id: windowsReplyInputId,
+        placeHolderContent: 'Message',
+      ),
+  ],
+  actions: [
+    if (reply)
+      WindowsAction(
+        content: 'Reply',
+        arguments: windowsActionArguments(pushReplyActionId, payload),
+        inputId: windowsReplyInputId,
+      ),
+    if (copyTarget != null)
+      WindowsAction(
+        content: copyTarget.label,
+        arguments: windowsActionArguments(
+          copyTarget.kind == MessageCopyKind.oneTimeCode
+              ? pushCopyCodeActionId
+              : pushCopyPhoneActionId,
+          payload,
+        ),
+      ),
+    if (canMarkRead)
+      WindowsAction(
+        content: 'Mark as read',
+        arguments: windowsActionArguments(pushMarkReadActionId, payload),
+      ),
+  ],
+  images: [
+    if (avatarPath != null && fileExists(avatarPath))
+      WindowsImage(
+        Uri.file(avatarPath, windows: true),
+        altText: '',
+        placement: WindowsImagePlacement.appLogoOverride,
+        crop: WindowsImageCrop.circle,
+      ),
+    if (imagePath != null && fileExists(imagePath))
+      WindowsImage(Uri.file(imagePath, windows: true), altText: ''),
+  ],
+  audio: alert ? null : WindowsNotificationAudio.silent(),
+  timestamp: timestamp,
+);
 
 List<AndroidNotificationAction> _roomActions({
   required bool canMarkRead,
@@ -254,6 +321,9 @@ RenderedNotification renderRoomThread(
       title: thread.roomName,
       body: 'Locked chat',
       details: NotificationDetails(
+        windows: WindowsNotificationDetails(
+          audio: alert ? null : WindowsNotificationAudio.silent(),
+        ),
         android: AndroidNotificationDetails(
           messageChannelId,
           messageChannelName,
@@ -382,21 +452,37 @@ RenderedNotification renderRoomThread(
         DarwinNotificationAttachment(previewImage),
     ],
   );
+  final payload = jsonEncode(
+    notificationPayload(
+      registrationId: registrationId,
+      roomId: thread.roomId,
+      eventId: thread.latestEventId,
+      userId: myUserId,
+      deviceId: myDeviceId,
+      copyValue: copyTarget?.value,
+    ),
+  );
+  final windows = windowsRoomDetails(
+    payload: payload,
+    alert: alert,
+    canMarkRead: thread.latestEventId != null,
+    copyTarget: copyTarget,
+    avatarPath: thread.isDirect ? latest.senderAvatarPath : roomAvatar,
+    imagePath: previewImage,
+    timestamp: latest.timestamp,
+    fileExists: fileExists,
+  );
   return RenderedNotification(
     id: roomNotificationId(thread.roomId),
     title: thread.isDirect ? latest.senderName : thread.roomName,
     body: latest.fromMe ? latest.text : '${latest.senderName}: ${latest.text}',
-    details: NotificationDetails(android: details, iOS: darwin, macOS: darwin),
-    payload: jsonEncode(
-      notificationPayload(
-        registrationId: registrationId,
-        roomId: thread.roomId,
-        eventId: thread.latestEventId,
-        userId: myUserId,
-        deviceId: myDeviceId,
-        copyValue: copyTarget?.value,
-      ),
+    details: NotificationDetails(
+      android: details,
+      iOS: darwin,
+      macOS: darwin,
+      windows: windows,
     ),
+    payload: payload,
   );
 }
 
@@ -443,8 +529,11 @@ RenderedNotification renderReplyStatus(
   id: roomNotificationId(roomId),
   title: 'Quick reply',
   body: status,
-  details: const NotificationDetails(
-    android: AndroidNotificationDetails(
+  details: NotificationDetails(
+    windows: WindowsNotificationDetails(
+      audio: WindowsNotificationAudio.silent(),
+    ),
+    android: const AndroidNotificationDetails(
       messageChannelId,
       messageChannelName,
       channelDescription: 'Messages and mentions',
@@ -456,11 +545,11 @@ RenderedNotification renderReplyStatus(
       onlyAlertOnce: true,
       silent: true,
     ),
-    iOS: DarwinNotificationDetails(
+    iOS: const DarwinNotificationDetails(
       categoryIdentifier: darwinMessageCategory,
       presentSound: false,
     ),
-    macOS: DarwinNotificationDetails(
+    macOS: const DarwinNotificationDetails(
       categoryIdentifier: darwinMessageCategory,
       presentSound: false,
     ),
@@ -492,6 +581,9 @@ RenderedNotification renderSummary(
     title: title,
     body: threads.map((t) => t.roomName).take(4).join(', '),
     details: NotificationDetails(
+      windows: WindowsNotificationDetails(
+        audio: WindowsNotificationAudio.silent(),
+      ),
       android: AndroidNotificationDetails(
         messageChannelId,
         messageChannelName,
@@ -538,6 +630,9 @@ RenderedNotification renderCall(
       ? event.line.text
       : '${event.line.senderName}: ${event.line.text}',
   details: NotificationDetails(
+    windows: const WindowsNotificationDetails(
+      duration: WindowsNotificationDuration.long,
+    ),
     android: AndroidNotificationDetails(
       callChannelId,
       callChannelName,
@@ -574,6 +669,7 @@ RenderedNotification renderInvite(
   title: event.isDirect ? event.line.senderName : event.roomName,
   body: event.line.text,
   details: NotificationDetails(
+    windows: const WindowsNotificationDetails(),
     android: AndroidNotificationDetails(
       messageChannelId,
       messageChannelName,
