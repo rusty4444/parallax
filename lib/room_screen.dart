@@ -211,6 +211,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   File? _chatThemeBackground;
   bool _chatThemeBusy = false;
   int _backgroundVersion = 0;
+  ImageProvider? _shownBackgroundImage;
   bool _backgroundBusy = false;
   bool _opening = true;
   bool _loadingOlder = false;
@@ -480,7 +481,6 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
   Future<void> _showStoredBackground() async {
     if (!mounted || !_owner.isCurrent) return;
     final file = await _backgroundStore.fileFor(widget.roomId);
-    if (file != null) await FileImage(file).evict();
     if (!mounted || !_owner.isCurrent) return;
     setState(() {
       _background = file;
@@ -541,7 +541,6 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     final newPicture =
         picture?.path != _chatThemeBackground?.path ||
         theme?.backgroundUrl != _chatTheme?.backgroundUrl;
-    if (newPicture && picture != null) await FileImage(picture).evict();
     if (!mounted || !_owner.isCurrent) return;
     setState(() {
       _chatTheme = theme;
@@ -720,7 +719,6 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
       if (selection == null || !mounted || !_owner.isCurrent) return;
       setState(() => _backgroundBusy = true);
       final file = await _backgroundStore.replace(widget.roomId, selection);
-      await FileImage(file).evict();
       if (mounted && _owner.isCurrent) {
         setState(() {
           _background = file;
@@ -744,7 +742,24 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     setState(() => _backgroundBusy = true);
     try {
       await _backgroundStore.clear(widget.roomId);
-      if (mounted && _owner.isCurrent) setState(() => _background = null);
+      if (mounted && _owner.isCurrent) {
+        setState(() {
+          _background = null;
+          _backgroundVersion++;
+        });
+        final preferences = FeatureSettingsScope.maybeOf(context)?.preferences;
+        if (_chatThemeBackground != null &&
+            (preferences?.showChatThemes ?? true)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'This chat’s theme has a background, so that shows now. '
+                'Remove it in “Chat theme for everyone…”.',
+              ),
+            ),
+          );
+        }
+      }
       unawaited(
         _themeSync.backgroundChanged(widget.roomId).catchError((Object _) {}),
       );
@@ -1693,6 +1708,29 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
     return (longest * MediaQuery.devicePixelRatioOf(context)).ceil();
   }
 
+  /// The background as drawn. Every background change writes the same file
+  /// path, and the image cache keys decoded pictures by path and size, so
+  /// the key carries [_backgroundVersion]: otherwise a new or re-chosen
+  /// picture shows the cached old one. The previous picture is dropped from
+  /// the cache once replaced.
+  ImageProvider _backgroundImage(File file, BuildContext context) {
+    final size = _backgroundDecodeSize(context);
+    final image = ResizeImage(
+      VersionedFileImage(file, _backgroundVersion),
+      width: size,
+      height: size,
+      policy: ResizeImagePolicy.fit,
+    );
+    final previous = _shownBackgroundImage;
+    _shownBackgroundImage = image;
+    if (previous != null && previous != image) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(previous.evict());
+      });
+    }
+    return image;
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.palette;
@@ -1741,12 +1779,7 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                           // is the gallery original, and a 12 MP photo is
                           // ~48 MB decoded, pushing avatars and thumbnails
                           // out of the image cache.
-                          image: ResizeImage(
-                            FileImage(background),
-                            width: _backgroundDecodeSize(context),
-                            height: _backgroundDecodeSize(context),
-                            policy: ResizeImagePolicy.fit,
-                          ),
+                          image: _backgroundImage(background, context),
                           key: ValueKey(_backgroundVersion),
                           fit: BoxFit.cover,
                           errorBuilder: (_, _, _) =>
@@ -1928,14 +1961,30 @@ class _RoomScreenState extends State<_OwnedRoomScreen>
                                   child: const Text('Chat theme for everyone…'),
                                 ),
                               if (_themeSync.available)
-                                CheckedPopupMenuItem(
+                                PopupMenuItem(
                                   key: const ValueKey(
                                     'room-background-device-only',
                                   ),
                                   value: 'device-only',
-                                  checked: _backgroundDeviceOnly,
-                                  child: const Text(
-                                    'Background on this device only',
+                                  child: Row(
+                                    children: [
+                                      // Taps go to the menu item.
+                                      IgnorePointer(
+                                        child: Checkbox(
+                                          value: _backgroundDeviceOnly,
+                                          onChanged: (_) {},
+                                          materialTapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Flexible(
+                                        child: Text(
+                                          'Background on this device only',
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                             ],

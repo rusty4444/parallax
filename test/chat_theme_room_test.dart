@@ -199,4 +199,61 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
   });
+
+  testWidgets('"Background on this device only" is a checkbox', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final client = _Client(
+      RecordingTransport((request) async {
+        if (request.url.path.contains('/relations/')) {
+          return jsonResponse({'chunk': []});
+        }
+        if (request.method == 'PUT') return jsonResponse({});
+        return jsonResponse({'errcode': 'M_NOT_FOUND', 'error': 'x'}, 404);
+      }),
+    );
+    client.rooms.add(
+      matrix.Room(
+        id: _roomId,
+        client: client,
+        membership: matrix.Membership.join,
+      ),
+    );
+    final backend = _ThemeBackend(client)
+      ..entries = [_entry('mine', 'My message', mine: true)];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomScreen(
+          backend: backend,
+          palette: _palette,
+          roomId: _roomId,
+          backgroundStore: FakeBackgroundStore(),
+          bubbleColourStore: RoomBubbleColourStore(preferences: prefs),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Checkbox box() => tester.widget<Checkbox>(
+      find.descendant(
+        of: find.byKey(const ValueKey('room-background-device-only')),
+        matching: find.byType(Checkbox),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Room background'));
+    await tester.pumpAndSettle();
+    expect(box().value, isFalse);
+    await tester.tap(find.text('Background on this device only'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Room background'));
+    await tester.pumpAndSettle();
+    expect(box().value, isTrue);
+    await tester.tapAt(const Offset(5, 5)); // close the menu
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+  });
 }

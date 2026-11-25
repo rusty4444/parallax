@@ -10,6 +10,12 @@
 - Theme changes never notify. Parallax adds a push rule to your account so your homeserver doesn't count them as unread either; in encrypted chats, members using other apps may still see an unread count for a change.
 - Text colours someone else picks are only used when they're readable on their bubble; otherwise Parallax picks the text colour.
 
+### Backgrounds
+
+- Choosing a new background for a chat that already had one now shows the new picture. Before, the chat kept showing the old picture until Parallax restarted, and removing a background and then choosing another brought the removed one back.
+- "Background on this device only" in the background menu now has a checkbox.
+- Removing your own background in a chat whose chat theme has a background now says that the chat theme's background shows instead.
+
 ## 1.6.1
 
 ### Portrait photos in the image editor

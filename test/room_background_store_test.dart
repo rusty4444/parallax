@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:parallax/room_background_store.dart';
@@ -64,5 +65,27 @@ void main() {
     );
     expect(await old.readAsBytes(), [1, 2, 3]);
     expect(await store.fileFor('!a:server'), isNotNull);
+  });
+
+  test('a background rewritten in place gets a new image cache key', () async {
+    final file = File('${root.path}/room.image');
+    ResizeImage shown(int version) => ResizeImage(
+      VersionedFileImage(file, version),
+      width: 1200,
+      height: 1200,
+      policy: ResizeImagePolicy.fit,
+    );
+    Future<Object> key(ImageProvider<Object> image) =>
+        image.obtainKey(ImageConfiguration.empty);
+
+    // Same picture: same key, so rebuilds reuse the decoded image.
+    expect(shown(1), shown(1));
+    expect(await key(shown(1)), await key(shown(1)));
+    // Re-chosen or replaced picture at the same path: a new key, so the
+    // cached old picture is not shown.
+    expect(shown(2), isNot(shown(1)));
+    expect(await key(shown(2)), isNot(await key(shown(1))));
+    // Plain FileImage keys (the old behaviour) collide.
+    expect(await key(FileImage(file)), await key(FileImage(file)));
   });
 }

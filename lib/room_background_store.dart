@@ -4,6 +4,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show immutable;
+import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -88,4 +90,25 @@ class RoomBackgroundStore {
     final target = await _target(roomId);
     if (await target.exists()) await target.delete();
   }
+}
+
+/// A [FileImage] whose cache key also carries a version. Room backgrounds
+/// are rewritten in place (same path), and the image cache keys decoded
+/// pictures by path: without a version a new picture shows the cached old
+/// one.
+@immutable
+class VersionedFileImage extends FileImage {
+  const VersionedFileImage(super.file, this.version);
+
+  final int version;
+
+  @override
+  bool operator ==(Object other) =>
+      other is VersionedFileImage &&
+      other.file.path == file.path &&
+      other.scale == scale &&
+      other.version == version;
+
+  @override
+  int get hashCode => Object.hash(file.path, scale, version);
 }
