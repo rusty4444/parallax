@@ -8,7 +8,7 @@
 ; direct distribution.
 
 #define MyAppName "Parallax"
-#define MyAppVersion "1.5.3"
+#define MyAppVersion "1.5.4"
 #define MyAppPublisher "Sam Russell"
 #define MyAppURL "https://samrusselltech.net/apps/parallax/"
 #define MyAppExeName "parallax.exe"
@@ -48,7 +48,7 @@ VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} for Windows
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
-VersionInfoVersion=1.5.3.0
+VersionInfoVersion=1.5.4.0
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
