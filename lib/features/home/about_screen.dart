@@ -5,8 +5,8 @@ import '../../widgets.dart';
 import 'settings_widgets.dart';
 
 /// Keep in step with `version:` in pubspec.yaml.
-const parallaxVersion = '1.5.4';
-const parallaxBuild = '32';
+const parallaxVersion = '1.6.0';
+const parallaxBuild = '33';
 
 /// Where problems are reported: an email to the developer.
 const reportProblemEmail = 'sam@samrusselltech.net';
