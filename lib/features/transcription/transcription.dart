@@ -1,14 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
-import 'package:matrix/matrix.dart' as matrix;
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../chat_backend.dart';
-import '../../room_events.dart';
 
 class TranscriptionUnavailable implements Exception {
   const TranscriptionUnavailable([
@@ -19,7 +13,9 @@ class TranscriptionUnavailable implements Exception {
   String toString() => message;
 }
 
-/// Dart bridge to the native on-device speech recognizer (Android).
+/// Dart bridge to the native on-device speech recogniser (Android 13+,
+/// android/.../SpeechTools.kt). The audio file is decoded and streamed into
+/// the recogniser: nothing plays aloud and the microphone is not used.
 class SpeechTools {
   static const _channel = MethodChannel('parallax/speech');
 
@@ -33,23 +29,61 @@ class SpeechTools {
     }
   }
 
-  static Future<String> transcribe(String path) async {
+  /// Text spoken in the audio file at [path]. Some recognisers insist on
+  /// the microphone permission even for a file; then [requestMicrophone]
+  /// asks once and the transcription is tried again.
+  static Future<String> transcribe(
+    String path, {
+    String? language,
+    Future<bool> Function()? requestMicrophone,
+  }) async {
     try {
-      final result = await _channel.invokeMethod<String>('transcribe', {
-        'path': path,
-      });
-      return result ?? '';
-    } on MissingPluginException {
-      throw const TranscriptionUnavailable();
+      return await _transcribe(path, language);
     } on PlatformException catch (error) {
-      if (error.code == 'UNSUPPORTED') {
+      if (error.code == 'NO_PERMISSION' && requestMicrophone != null) {
+        if (await requestMicrophone()) {
+          try {
+            return await _transcribe(path, language);
+          } on PlatformException catch (retry) {
+            throw _unavailable(retry);
+          }
+        }
         throw const TranscriptionUnavailable(
-          'This device has no on-device speech recognizer.',
+          'Android’s speech recogniser needs microphone access, even though '
+          'nothing is recorded.',
         );
       }
-      throw TranscriptionUnavailable(error.message ?? 'Transcription failed.');
+      throw _unavailable(error);
+    } on MissingPluginException {
+      throw const TranscriptionUnavailable();
     }
   }
+
+  static Future<String> _transcribe(String path, String? language) async {
+    final result = await _channel.invokeMethod<String>('transcribe', {
+      'path': path,
+      'language': ?language,
+    });
+    return result ?? '';
+  }
+
+  static TranscriptionUnavailable _unavailable(
+    PlatformException error,
+  ) => switch (error.code) {
+    'UNSUPPORTED' => const TranscriptionUnavailable(
+      'This device has no on-device speech recogniser.',
+    ),
+    'NO_SPEECH' => const TranscriptionUnavailable('No speech was recognised.'),
+    'NO_PERMISSION' => const TranscriptionUnavailable(
+      'Android’s speech recogniser needs microphone access, even though '
+      'nothing is recorded.',
+    ),
+    'LANGUAGE' => TranscriptionUnavailable(
+      '${error.message ?? 'This language isn’t available'}. '
+      'Try again in a little while.',
+    ),
+    _ => const TranscriptionUnavailable('Couldn’t transcribe this message.'),
+  };
 }
 
 /// Cached transcripts, per account and event (deleted with the account key).
@@ -78,42 +112,5 @@ class TranscriptCache {
         text,
       );
     } catch (_) {}
-  }
-}
-
-/// Downloads a voice/audio message to a temporary file for the recognizer.
-Future<String?> downloadAudioToFile(
-  ChatBackend backend,
-  String roomId,
-  String eventId,
-) async {
-  final sdk = backend is MatrixSdkAccess
-      ? (backend as MatrixSdkAccess).sdkClient
-      : null;
-  if (sdk == null) return null;
-  final room = sdk.getRoomById(roomId);
-  if (room == null) return null;
-  try {
-    final timeline = await room.getTimeline(eventContextId: eventId);
-    try {
-      matrix.Event? event;
-      for (final candidate in timeline.events) {
-        if (candidate.eventId == eventId) {
-          event = candidate;
-          break;
-        }
-      }
-      if (event == null || event.redacted) return null;
-      final file = await event.downloadAndDecryptAttachment();
-      final dir = await getTemporaryDirectory();
-      final name = file.name.isEmpty ? 'voice.m4a' : file.name;
-      final out = File('${dir.path}/transcribe_${eventId.hashCode}_$name');
-      await out.writeAsBytes(file.bytes, flush: true);
-      return out.path;
-    } finally {
-      timeline.cancelSubscriptions();
-    }
-  } catch (_) {
-    return null;
   }
 }

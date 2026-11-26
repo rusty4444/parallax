@@ -50,6 +50,7 @@ Widget? entryBodyFor(BuildContext context, EntryHookContext ctx) =>
 
 List<Widget> entryFootersFor(BuildContext context, EntryHookContext ctx) => [
   ?threadEntryFooter(context, ctx),
+  ?transcriptionEntryFooter(context, ctx),
   ?linkPreviewEntryFooter(context, ctx),
 ];
 

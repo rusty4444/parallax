@@ -14,6 +14,12 @@
 
 - Clicking the quote in a reply now reaches older messages on desktop too. Jumping used to give up with "Couldn't jump to that message" when earlier messages were already loading, or when the message was more than about 2,000 events back. Desktop keeps less history on the device than a phone that syncs all day, so it hit those limits far more often.
 
+### Transcribe voice notes
+
+- Voice notes and audio files have a small Transcribe button beside the player. The transcript appears under the player in the same message and is saved on this device, so it's still there next time you open the chat. Long-press → Transcribe does the same.
+- Transcription runs on your phone with Android's speech recogniser (Android 13 or later). Parallax reads the audio straight from the file, so nothing plays out loud, the microphone isn't used and nothing is uploaded. Before, Transcribe played the voice note through the speaker and listened with the microphone.
+- Not yet on Windows, Mac or iPhone: the button only shows where transcription works.
+
 ## 1.7.0
 
 ### Chat themes for everyone

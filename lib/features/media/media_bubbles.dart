@@ -13,6 +13,7 @@ import '../../media_viewer.dart';
 import '../../message_image.dart';
 import '../file_preview/inline_document_preview.dart';
 import '../rich_timeline/rich_timeline_hooks.dart';
+import '../transcription/transcript_widgets.dart';
 import 'inline_audio.dart';
 import 'media_actions.dart';
 import 'media_content.dart';
@@ -846,6 +847,8 @@ class _VoiceMessageBodyState extends State<VoiceMessageBody>
                 ),
               ),
             ),
+            // Transcript shows under the player (transcription footer).
+            TranscribeButton(ctx: ctx),
           ],
         ),
       ),
@@ -966,6 +969,7 @@ class _AudioMessageBodyState extends State<AudioMessageBody>
                   ],
                 ),
               ),
+              TranscribeButton(ctx: ctx),
             ],
           ),
           _caption(ctx, info.caption),
