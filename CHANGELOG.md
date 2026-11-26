@@ -20,6 +20,10 @@
 - Transcription runs on your phone with Android's speech recogniser (Android 13 or later). Parallax reads the audio straight from the file, so nothing plays out loud, the microphone isn't used and nothing is uploaded. Before, Transcribe played the voice note through the speaker and listened with the microphone.
 - Not yet on Windows, Mac or iPhone: the button only shows where transcription works.
 
+### Google Messages voice notes
+
+- Voice notes in Google Messages chats now play. The bridge first posts a "Waiting for attachment" notice and then edits the voice note into it; Parallax showed the edited message but downloaded from the notice, which has no file. It now plays the file the message shows (on every platform), and these bridge edits no longer show "(edited)".
+
 ## 1.7.0
 
 ### Chat themes for everyone

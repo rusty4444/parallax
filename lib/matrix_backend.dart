@@ -1835,10 +1835,15 @@ class MatrixBackend extends ChatBackend
     if (_activeRoomId != roomId || timeline == null) {
       throw StateError('Room unavailable');
     }
-    final event = await timeline.getEventById(eventId);
-    if (event?.hasAttachment != true || event!.redacted) {
+    final original = await timeline.getEventById(eventId);
+    if (original == null || original.redacted) {
       throw StateError('Attachment unavailable');
     }
+    // Download what the timeline shows: the latest edit's file. Bridges such
+    // as Google Messages post a placeholder first and edit the real file in
+    // (m.new_content), so the original event's own attachment is not it.
+    final event = original.getDisplayEvent(timeline);
+    if (!event.hasAttachment) throw StateError('Attachment unavailable');
     final declared = event.infoMap['size'];
     if (declared is int && declared > 25 * 1024 * 1024) {
       throw StateError('Attachment is too large');
@@ -1848,7 +1853,7 @@ class MatrixBackend extends ChatBackend
     );
     if (_timeline != timeline ||
         _activeRoomId != roomId ||
-        event.redacted ||
+        original.redacted ||
         file.bytes.lengthInBytes > 25 * 1024 * 1024) {
       throw StateError('Attachment unavailable');
     }
@@ -4382,6 +4387,27 @@ class MatrixBackend extends ChatBackend
     return merged;
   }
 
+  /// Whether the edit [display] came from asked not to be marked "(edited)".
+  /// mautrix bridges set `com.beeper.dont_render_edited` when they edit in
+  /// media that arrived after the message (Google Messages voice notes); the
+  /// flag sits beside `m.new_content`, so read it from the raw edit.
+  static bool _editHidden(
+    matrix.Event event,
+    matrix.Event display,
+    matrix.Timeline? timeline,
+  ) {
+    if (timeline == null) return false;
+    for (final edit in event.aggregatedEvents(
+      timeline,
+      matrix.RelationshipTypes.edit,
+    )) {
+      if (edit.eventId == display.eventId) {
+        return edit.content['com.beeper.dont_render_edited'] == true;
+      }
+    }
+    return false;
+  }
+
   ChatEntry _projectEntry(matrix.Event event, matrix.Timeline? timeline) {
     final client = _requireClient();
     final display = timeline == null ? event : event.getDisplayEvent(timeline);
@@ -4491,7 +4517,9 @@ class MatrixBackend extends ChatBackend
           }.contains(display.messageType),
       replyToId: replyToId,
       redacted: event.redacted,
-      edited: display.eventId != event.eventId,
+      edited:
+          display.eventId != event.eventId &&
+          !_editHidden(event, display, timeline),
       reactions: reactions,
       kind: kind,
       eventType: display.type,

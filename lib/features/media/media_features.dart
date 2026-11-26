@@ -132,6 +132,62 @@ class MatrixMediaFeatures implements MediaFeatures {
     return event;
   }
 
+  /// [event] as the timeline shows it: with its newest edit by the same
+  /// sender applied (`m.new_content`), like the SDK's getDisplayEvent but
+  /// without a loaded Timeline. Bridges such as Google Messages post a
+  /// placeholder and then edit the real file in, so the original's own
+  /// attachment is not what the user sees. Falls back to [event] when the
+  /// edits cannot be read.
+  Future<matrix.Event> _latestVersion(
+    matrix.Client client,
+    matrix.Event event,
+  ) async {
+    final room = event.room;
+    try {
+      final page = await client.getRelatingEventsWithRelType(
+        room.id,
+        event.eventId,
+        matrix.RelationshipTypes.edit,
+        limit: 20,
+        dir: matrix.Direction.b,
+      );
+      _requireCurrent(client);
+      matrix.Event? newest;
+      for (final raw in page.chunk) {
+        var edit = matrix.Event.fromMatrixEvent(raw, room);
+        if (edit.type == matrix.EventTypes.Encrypted) {
+          final encryption = client.encryption;
+          if (encryption == null || !client.encryptionEnabled) continue;
+          try {
+            edit = await encryption.decryptRoomEvent(edit);
+          } catch (_) {
+            continue;
+          }
+          _requireCurrent(client);
+        }
+        if (edit.senderId != event.senderId ||
+            edit.type != matrix.EventTypes.Message ||
+            edit.relationshipEventId != event.eventId ||
+            edit.content['m.new_content'] is! Map) {
+          continue;
+        }
+        if (newest == null ||
+            edit.originServerTs.isAfter(newest.originServerTs)) {
+          newest = edit;
+        }
+      }
+      if (newest == null) return event;
+      final json = newest.toJson()
+        ..['content'] = Map<String, Object?>.from(
+          newest.content['m.new_content'] as Map,
+        );
+      return matrix.Event.fromJson(json, room);
+    } catch (error) {
+      if (error is StateError) rethrow; // Session changed.
+      return event;
+    }
+  }
+
   Future<Uint8List> Function(Uri) _downloader(
     matrix.Client client,
     int maxBytes,
@@ -277,10 +333,10 @@ class MatrixMediaFeatures implements MediaFeatures {
     String eventId,
     int maxBytes,
   ) async {
-    final event = await _event(client, roomId, eventId);
-    if (event == null || !event.hasAttachment) {
-      throw StateError('Attachment unavailable');
-    }
+    final original = await _event(client, roomId, eventId);
+    if (original == null) throw StateError('Attachment unavailable');
+    final event = await _latestVersion(client, original);
+    if (!event.hasAttachment) throw StateError('Attachment unavailable');
     final declared = event.infoMap['size'];
     if (declared is int && declared > maxBytes) {
       throw StateError('Attachment is too large');
