@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../app_theme.dart';
 import '../../chat_backend.dart';
+import '../settings_sync/settings_sync.dart';
 import 'notification_features.dart';
 import 'notification_model.dart';
 import 'notification_renderer.dart';
@@ -80,6 +81,7 @@ class _NotificationContentSectionState
     });
     try {
       await store.writePreferences(next);
+      SettingsEdits.changed();
       if (previous.showContent && !next.showContent) {
         await _clearRichNotifications(store);
       }

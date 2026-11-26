@@ -39,6 +39,8 @@ import 'haptics.dart';
 import 'l10n/app_localizations.dart';
 import 'l10n/locale_controller.dart';
 import 'features/accounts/account_store.dart';
+import 'features/settings_sync/settings_sync.dart';
+import 'features/settings_sync/synced_settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -178,6 +180,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
 
   /// Theme and font follow the account to the user's other devices.
   late final AppearanceSync _appearanceSync;
+  late final SettingsSync _settingsSync;
   Future<void>? _themeLoaded;
   late final bool _ownsPreferences;
   late final bool _ownsNotifications;
@@ -257,6 +260,13 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
       isKnownTheme: (theme) =>
           theme == systemThemePreference ||
           VisualTheme.values.any((style) => style.name == theme),
+    );
+    _settingsSync = SettingsSync(
+      backend: _backend,
+      settings: appSyncedSettings(_preferences),
+      enabled: () => _preferences.syncAppearance,
+      enabledChanges: _preferences,
+      edits: appSettingsEdits(_preferences),
     );
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -344,6 +354,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     } catch (_) {}
     if (!mounted || _closing) return;
     _appearanceSync.start();
+    _settingsSync.start();
   }
 
   Future<void> _initializePush() async {
@@ -525,6 +536,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       unawaited(_startNotifications());
       unawaited(_appearanceSync.retryPending());
+      unawaited(_settingsSync.retryPending());
     }
   }
 
@@ -719,6 +731,7 @@ class _ParallaxAppState extends State<ParallaxApp> with WidgetsBindingObserver {
     _preferences.removeListener(_syncHaptics);
     _backend.removeListener(_sessionChanged);
     _appearanceSync.dispose();
+    _settingsSync.dispose();
     // Cancel immediately; release the SDK only after all accepted push callbacks
     // and exact pusher removals have joined. Never dispose borrowed resources.
     final cleanup = _ownsNotifications

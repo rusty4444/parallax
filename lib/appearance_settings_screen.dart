@@ -5,6 +5,7 @@ import 'appearance_preferences.dart';
 import 'features/app_fonts/app_font_picker.dart';
 import 'features/home/settings_widgets.dart';
 import 'features/reactions/emoji_picker_sheet.dart';
+import 'features/settings_sync/settings_sync.dart';
 import 'l10n/app_localizations.dart';
 import 'l10n/locale_controller.dart';
 import 'widgets.dart';
@@ -183,16 +184,13 @@ class PreferenceRows {
     ),
   ];
 
-  /// Appearance → Your devices: theme and font follow the account.
+  /// Appearance → Themes: settings follow the account (also on the main
+  /// Settings page).
   Widget syncAppearance() => SwitchListTile(
     key: const ValueKey('appearance.sync_appearance'),
     secondary: const Icon(Icons.devices_rounded),
-    title: const Text('Same theme and font on all devices'),
-    subtitle: const Text(
-      'Uses your Matrix account. Turning this on takes the theme and font '
-      'from your other devices. Bubble colours and backgrounds for each chat '
-      'sync too.',
-    ),
+    title: const Text('Same settings on all devices'),
+    subtitle: const Text(syncedSettingsSummary),
     value: preferences.syncAppearance,
     onChanged: (value) => _save(() => preferences.setSyncAppearance(value)),
   );

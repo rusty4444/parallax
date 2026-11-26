@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app_theme.dart';
 import '../home/settings_widgets.dart';
+import '../settings_sync/settings_sync.dart';
 import 'emoji_picker_sheet.dart';
 
 /// How the quick reaction row (long-press a message) is ordered.
@@ -57,6 +58,7 @@ class QuickReactionSettings {
     try {
       await (await _preferences()).setString(modeKey, mode.name);
     } catch (_) {}
+    SettingsEdits.changed();
   }
 
   Future<List<String>> manual() async {
@@ -80,6 +82,7 @@ class QuickReactionSettings {
         jsonEncode(emojis.take(manualReactionLimit).toList()),
       );
     } catch (_) {}
+    SettingsEdits.changed();
   }
 }
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Same settings on all devices
+
+- Your settings now follow your Matrix account to every device, not just the theme and font. That covers chat settings (double-tap reaction, the quick reaction row, undo send, message font, chat effects, message requests, Stories), home screen and reading options, media and link previews (including previews in encrypted chats), privacy (read receipts, typing, invite avatars), what notifications show, the app language and call settings.
+- Each setting syncs on its own: change one setting on your phone and another on your computer, and both changes reach every device. When the same setting changes in two places, the later change wins.
+- The first time a device syncs settings it takes your account's values. It only adds the settings your account doesn't have yet and that you changed on that device.
+- Text size, app lock, how notifications arrive, the background connection, the local search index and window layout stay on each device.
+- One switch covers it all: Settings → Appearance → "Same settings on all devices" (on by default; it used to say "Same theme and font on all devices").
+
 ### Who reacted
 
 - Hovering over a reaction on Windows or Mac now names who reacted, for example "You, Alex and 2 others reacted with 👍", instead of "React with 👍". Clicking it still adds or removes your reaction. Long-press still opens the full list.

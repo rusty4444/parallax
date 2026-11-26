@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../app_theme.dart';
 import '../../hooks/hook_types.dart';
 import '../home/about_screen.dart' show parallaxVersion, parallaxBuild;
+import '../settings_sync/settings_sync.dart';
 import 'bug_report_screen.dart';
 import 'diagnostic_log.dart';
 
@@ -27,6 +28,7 @@ class BugReportPreferences {
     try {
       await (await SharedPreferences.getInstance()).setBool(_key, value);
     } catch (_) {}
+    SettingsEdits.changed();
     try {
       await _channel.invokeMethod('setEnabled', {'enabled': value});
     } on MissingPluginException {
