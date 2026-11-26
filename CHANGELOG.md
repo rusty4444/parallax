@@ -6,6 +6,10 @@
 
 - Hovering over a reaction on Windows or Mac now names who reacted, for example "You, Alex and 2 others reacted with 👍", instead of "React with 👍". Clicking it still adds or removes your reaction. Long-press still opens the full list.
 
+### Voice notes on Windows
+
+- Voice notes from Element, Element X, WhatsApp and Signal now play on Windows. They arrive as Ogg Opus, which Windows can decode but not open, so they never played. Parallax now repackages them as WebM just before playing; the audio itself is unchanged.
+
 ## 1.7.0
 
 ### Chat themes for everyone

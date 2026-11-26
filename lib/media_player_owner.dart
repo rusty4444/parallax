@@ -11,6 +11,7 @@ import 'package:video_player/video_player.dart';
 
 import 'app_temporary_directory.dart';
 import 'chat_backend.dart';
+import 'ogg_opus_webm.dart';
 
 /// All injected factories transfer exclusive ownership of their result.
 typedef MediaLoader = Future<DownloadedAttachment> Function();
@@ -126,7 +127,9 @@ class MediaPlayerOwner {
       }
     } else if (_mimeType!.startsWith('audio/') ||
         _mimeType!.startsWith('video/')) {
-      _file = await fileFactory(attachment);
+      final playable = playableOnThisPlatform(attachment);
+      _mimeType = playable.mimeType;
+      _file = await fileFactory(playable);
       _checkOpen();
       _player = playerFactory(_file!, _mimeType!);
       _initializing = Future<void>.sync(_player!.initialize);
@@ -184,6 +187,27 @@ class MediaPlayerOwner {
     await _file?.delete();
     _file = null;
   }
+}
+
+/// [attachment] in a form this platform's player opens.
+///
+/// Windows plays audio through Media Foundation, which decodes Opus but has
+/// no Ogg reader, so the Ogg Opus voice notes Element and the bridges send
+/// never open there. They are rewrapped as WebM (same Opus audio, no
+/// re-encoding), which Windows plays. Other platforms read Ogg directly.
+DownloadedAttachment playableOnThisPlatform(DownloadedAttachment attachment) {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) {
+    return attachment;
+  }
+  if (!isOggOpus(attachment.bytes)) return attachment;
+  final webm = oggOpusToWebm(attachment.bytes);
+  if (webm == null) return attachment;
+  final dot = attachment.name.lastIndexOf('.');
+  return DownloadedAttachment(
+    name: '${dot > 0 ? attachment.name.substring(0, dot) : 'voice'}.webm',
+    mimeType: 'audio/webm',
+    bytes: webm,
+  );
 }
 
 /// Animated GIF/WebP originals above this size show their first frame only.
