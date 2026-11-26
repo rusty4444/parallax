@@ -10,6 +10,10 @@
 
 - Voice notes from Element, Element X, WhatsApp and Signal now play on Windows. They arrive as Ogg Opus, which Windows can decode but not open, so they never played. Parallax now repackages them as WebM just before playing; the audio itself is unchanged.
 
+### Jumping to the message a reply quotes
+
+- Clicking the quote in a reply now reaches older messages on desktop too. Jumping used to give up with "Couldn't jump to that message" when earlier messages were already loading, or when the message was more than about 2,000 events back. Desktop keeps less history on the device than a phone that syncs all day, so it hit those limits far more often.
+
 ## 1.7.0
 
 ### Chat themes for everyone

@@ -1379,6 +1379,14 @@ class MatrixBackend extends ChatBackend
 
   // --- Jump to event (lib/features/threads/timeline_navigation.dart) ------
 
+  /// Events requested per history page while jumping.
+  static const _jumpPage = 100;
+
+  /// A jump stops paging once this many events are loaded, or after
+  /// [_jumpTimeLimit], whichever comes first.
+  static const _jumpMaxEvents = 10000;
+  static const _jumpTimeLimit = Duration(minutes: 2);
+
   String? _focusedEventId;
   int _jumpGeneration = 0;
 
@@ -1427,14 +1435,35 @@ class MatrixBackend extends ChatBackend
         isSessionCurrent(client);
 
     // Page back through history until the target is loaded.
-    var pages = 0;
+    //
+    // The SDK's requestHistory returns at once, loading nothing, while
+    // another history request runs ("Load earlier messages"), so wait for
+    // that one rather than spending pages. Count only requests that bring
+    // in nothing new and leave the server's history position where it was:
+    // a session that was offline for a while pages through its sync gaps
+    // first (events it already holds), which used to use up a fixed
+    // 40-page budget before reaching older messages on desktop.
+    final deadline = DateTime.now().add(_jumpTimeLimit);
+    var idle = 0;
     while (current() &&
         !timeline.events.any((event) => event.eventId == eventId) &&
         timeline.canRequestHistory &&
-        pages < 40) {
-      _visibleMessageLimit += 50;
-      await timeline.requestHistory(historyCount: 50);
-      pages++;
+        idle < 3 &&
+        timeline.events.length < _jumpMaxEvents &&
+        DateTime.now().isBefore(deadline)) {
+      if (timeline.isRequestingHistory) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        continue;
+      }
+      final count = timeline.events.length;
+      final position = room.prev_batch;
+      if (_visibleMessageLimit < count + _jumpPage) {
+        _visibleMessageLimit = count + _jumpPage;
+      }
+      await timeline.requestHistory(historyCount: _jumpPage);
+      final moved =
+          timeline.events.length > count || room.prev_batch != position;
+      idle = moved ? 0 : idle + 1;
     }
     if (!current()) {
       throw StateError('Room changed while jumping to the message');
