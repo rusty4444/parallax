@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Who reacted
+
+- Hovering over a reaction on Windows or Mac now names who reacted, for example "You, Alex and 2 others reacted with 👍", instead of "React with 👍". Clicking it still adds or removes your reaction. Long-press still opens the full list.
+
 ## 1.7.0
 
 ### Chat themes for everyone

@@ -335,11 +335,30 @@ class ChatReaction {
     required this.emoji,
     required this.count,
     required this.mine,
+    this.senders = const [],
   });
 
   final String emoji;
   final int count;
   final bool mine;
+
+  /// Who reacted, earliest first (for the pill's hover text). Empty when the
+  /// backend did not say; [count] is still right then.
+  final List<ChatReactionSender> senders;
+}
+
+/// One member who reacted, named from cached room membership.
+@immutable
+class ChatReactionSender {
+  const ChatReactionSender({required this.userId, this.name});
+
+  final String userId;
+
+  /// Display name, if the member's state is loaded.
+  final String? name;
+
+  String get label =>
+      (name?.trim().isNotEmpty ?? false) ? name!.trim() : userId;
 }
 
 /// What a timeline row represents. Renderers dispatch on this.

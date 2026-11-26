@@ -4375,14 +4375,24 @@ class MatrixBackend extends ChatBackend
                         !reaction.redacted &&
                         !_reactionRemovalIds.contains(reaction.eventId),
                   )
-                  .map(
-                    (reaction) => ReactionVote(
+                  .map((reaction) {
+                    // Cached membership only (as for message senders); the
+                    // missing-member loader re-projects once names arrive.
+                    final name = reaction.room
+                        .getState(
+                          matrix.EventTypes.RoomMember,
+                          reaction.senderId,
+                        )
+                        ?.content['displayname'];
+                    return ReactionVote(
                       ((reaction.content['m.relates_to'] as Map?)?['key']
                               as String?) ??
                           '',
                       reaction.senderId,
-                    ),
-                  ),
+                      name: name is String ? name : null,
+                      time: reaction.originServerTs,
+                    );
+                  }),
               client.userID,
             );
           }();

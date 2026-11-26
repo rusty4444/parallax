@@ -312,9 +312,12 @@ class MessageBubble extends StatelessWidget {
                   key: ValueKey('reaction-${entry.id}-${reaction.emoji}'),
                   palette: outer,
                   mine: reaction.mine,
-                  tooltip: reaction.mine
-                      ? 'Remove your ${reactionKeyLabel(backend, roomId, reaction.emoji)} reaction'
-                      : 'React with ${reactionKeyLabel(backend, roomId, reaction.emoji)}',
+                  // Who reacted (Element's hover text); tap still toggles.
+                  tooltip: reactionSendersTooltip(
+                    reaction,
+                    reactionKeyLabel(backend, roomId, reaction.emoji),
+                    ownUserId: backend.userId,
+                  ),
                   // Custom emoji reactions (MSC4027) show the pack image;
                   // others keep the emoji text.
                   label:

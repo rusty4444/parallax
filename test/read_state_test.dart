@@ -30,10 +30,11 @@ Map<String, Object?> _reaction(
   String key,
   int ts, {
   int? status,
+  String sender = _me,
 }) => {
   'event_id': id,
   'type': 'm.reaction',
-  'sender': _me,
+  'sender': sender,
   'origin_server_ts': ts,
   'room_id': _roomId,
   'content': {
@@ -384,6 +385,28 @@ void main() {
       h.requests.where((request) => request.path.contains('/redact/')),
       isNotEmpty,
     );
+  });
+
+  test('reactions carry who reacted, earliest first, for hover text', () async {
+    final h = _Harness(
+      cached: [
+        _reaction(r'$mine', r'$message', '❤️', 10500),
+        _reaction(
+          r'$alice',
+          r'$message',
+          '❤️',
+          10000,
+          sender: '@alice:example.org',
+        ),
+        _event(r'$message', 9000),
+      ],
+    );
+    addTearDown(h.backend.dispose);
+    await h.backend.openRoom(_roomId);
+    final reaction = h.backend.messages.single.reactions.single;
+    expect(reaction.count, 2);
+    expect(reaction.mine, isTrue);
+    expect(reaction.senders.map((s) => s.userId), ['@alice:example.org', _me]);
   });
 
   test('an unsent own reaction is cancelled and removed locally', () async {

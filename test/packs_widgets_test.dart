@@ -374,7 +374,10 @@ void main() {
       );
       expect(find.text('2'), findsOneWidget);
       expect(find.text('👍 1'), findsOneWidget);
-      expect(find.byTooltip('Remove your :koala: reaction'), findsOneWidget);
+      expect(
+        find.byTooltip('You and 1 other reacted with :koala:'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('2'));
       await tester.pump();
       expect(reacted, ['mxc://example.org/koala']);

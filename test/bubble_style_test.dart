@@ -84,12 +84,26 @@ void main() {
       tester,
     ) async {
       final backend = FakeBackend()
+        ..currentUserId = '@me:example.org'
         ..entries = [
           _entry(
             'theirs',
             'Their message',
             mine: false,
-            reactions: const [ChatReaction(emoji: '❤️', count: 2, mine: true)],
+            reactions: const [
+              ChatReaction(
+                emoji: '❤️',
+                count: 2,
+                mine: true,
+                senders: [
+                  ChatReactionSender(
+                    userId: '@alice:example.org',
+                    name: 'Alice',
+                  ),
+                  ChatReactionSender(userId: '@me:example.org', name: 'Me'),
+                ],
+              ),
+            ],
           ),
           _entry(
             'mine',
@@ -151,7 +165,9 @@ void main() {
       await tester.tap(find.text('❤️ 2'));
       await tester.pump();
       expect(backend.lastReaction, '❤️');
-      expect(find.byTooltip('Remove your ❤️ reaction'), findsOneWidget);
+      // Hovering names who reacted, not the tap action.
+      expect(find.byTooltip('You and Alice reacted with ❤️'), findsOneWidget);
+      expect(find.byTooltip('1 person reacted with 😂'), findsOneWidget);
     });
   });
 

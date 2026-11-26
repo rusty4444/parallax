@@ -145,9 +145,12 @@ class GalleryBubble extends StatelessWidget {
             key: ValueKey('reaction-${entries[i].id}-${reaction.emoji}'),
             palette: outer,
             mine: reaction.mine,
-            tooltip: reaction.mine
-                ? 'Remove your ${reaction.emoji} reaction on photo ${i + 1}'
-                : 'React with ${reaction.emoji} on photo ${i + 1}',
+            tooltip: reactionSendersTooltip(
+              reaction,
+              reaction.emoji,
+              ownUserId: backend.userId,
+              suffix: ' to photo ${i + 1}',
+            ),
             label: Text('${i + 1}: ${reaction.emoji} ${reaction.count}'),
             onTap: () => onReaction(entries[i], reaction.emoji),
           ),
