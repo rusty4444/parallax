@@ -459,200 +459,93 @@ void main() {
   });
 
   group('room timeline', () {
-    Future<(FakeBackend, _Routes)> openRoom(WidgetTester tester) async {
-      final backend = FakeBackend()
-        ..entries = [
-          ChatEntry(
-            id: r'$hello',
-            sender: '@friend:example.org',
-            body: 'Hello from the room',
-            time: DateTime(2026),
-            mine: false,
-          ),
-        ];
-      final routes = await _pump(
-        tester,
-        RoomScreen(
-          backend: backend,
-          palette: paletteFor(VisualTheme.parallax),
-          roomId: '!r:example.org',
-          backgroundStore: FakeBackgroundStore(),
-        ),
-      );
-      return (backend, routes);
-    }
-
-    final replyLift = find.byKey(messageReplyLiftKey);
-
-    double sourceOpacity(WidgetTester tester) => tester
-        .widget<Opacity>(
-          find
-              .ancestor(
-                of: find.text('Hello from the room'),
-                matching: find.byType(Opacity),
+    for (final gesture in ['long press', 'right-click', 'swipe', 'own swipe']) {
+      for (final disableAnimations in [false, true]) {
+        testWidgets('$gesture reply composes without lift or dim '
+            '(reduced motion: $disableAnimations)', (tester) async {
+          final backend = FakeBackend()
+            ..entries = [
+              ChatEntry(
+                id: r'$hello',
+                sender: '@friend:example.org',
+                body: 'Hello from the room',
+                time: DateTime(2026),
+                mine: gesture == 'own swipe',
+              ),
+            ];
+          final routes = await _pump(
+            tester,
+            RoomScreen(
+              backend: backend,
+              palette: paletteFor(VisualTheme.parallax),
+              roomId: '!r:example.org',
+              backgroundStore: FakeBackgroundStore(),
+            ),
+            disableAnimations: disableAnimations,
+          );
+          final source = find.text('Hello from the room');
+          double opacity() => tester
+              .widget<Opacity>(
+                find.ancestor(of: source, matching: find.byType(Opacity)).first,
               )
-              .first,
-        )
-        .opacity;
+              .opacity;
+          void expectNoLift() {
+            expect(_lifted, findsNothing);
+            expect(_dim, findsNothing);
+            expect(find.byKey(messageLiftShadowKey), findsNothing);
+            expect(find.byType(BackdropFilter), findsNothing);
+            expect(find.byType(BottomSheet), findsNothing);
+            expect(opacity(), 1);
+            expect(routes.lifts.every((route) => !route.isActive), isTrue);
+          }
 
-    Future<void> cancelReply(WidgetTester tester) async {
-      await tester.tap(find.byTooltip('Cancel reply or edit').first);
-      await tester.pump();
-      await tester.pumpAndSettle();
-    }
+          if (gesture.endsWith('swipe')) {
+            final rest = tester.getRect(source);
+            await tester.timedDrag(
+              source,
+              Offset(gesture == 'own swipe' ? -300 : 300, 0),
+              const Duration(milliseconds: 300),
+            );
+            await tester.pumpAndSettle();
+            expect(routes.lifts, isEmpty);
+            expect(tester.getRect(source).left, closeTo(rest.left, 0.5));
+          } else {
+            if (gesture == 'right-click') {
+              await tester.tap(source, buttons: kSecondaryButton);
+              await tester.pumpAndSettle();
+            } else {
+              await _longPress(tester, source);
+            }
+            // The action sheet still lifts, dims and shadows the source.
+            expect(_lifted, findsOneWidget);
+            expect(_dim, findsOneWidget);
+            expect(find.byKey(messageLiftShadowKey), findsOneWidget);
+            expect(opacity(), 0);
+            await tester.tap(find.text('Reply'));
+            await tester.pumpAndSettle();
+          }
 
-    testWidgets('Reply keeps the message popped out until the reply ends', (
-      tester,
-    ) async {
-      final (_, routes) = await openRoom(tester);
-      await _longPress(tester, find.text('Hello from the room'));
-      expect(find.text('Reply'), findsOneWidget);
-      expect(_lifted, findsOneWidget);
-      expect(_sheetRoute(tester).barrierColor, Colors.transparent);
-      final sheetCopy = tester.getRect(_lifted);
-
-      await tester.tap(find.text('Reply'));
-      // The handover frame: the reply lift draws the copy where the sheet's
-      // lift left it, so nothing jumps.
-      await tester.pump();
-      expect(replyLift, findsOneWidget);
-      final handed = tester.getRect(
-        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
-      );
-      expect(handed.center.dy, closeTo(sheetCopy.center.dy, 1));
-      await tester.pumpAndSettle();
-
-      // Sheet and its route are gone; the message stays lifted over a dim
-      // while the reply is written, and the original stays hidden.
-      expect(find.text('Reply'), findsNothing);
-      expect(routes.lifts.single.isActive, isFalse);
-      // The only copy left is the reply lift's.
-      expect(_lifted, findsOneWidget);
-      expect(find.descendant(of: replyLift, matching: _lifted), findsOneWidget);
-      expect(_dim, findsNothing);
-      expect(find.textContaining('Replying to'), findsOneWidget);
-      expect(replyLift, findsOneWidget);
-      expect(find.byKey(messageReplyLiftDimKey), findsOneWidget);
-      expect(sourceOpacity(tester), 0);
-      // Settled back beside its own place once the sheet has gone.
-      final message = tester.getRect(
-        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
-      );
-      expect(message.width, greaterThan(0));
-
-      // The composer stays usable under the lift.
-      await tester.enterText(find.byType(TextField).last, 'Sounds good');
-      await tester.pump();
-      expect(replyLift, findsOneWidget);
-
-      await cancelReply(tester);
-      expect(replyLift, findsNothing);
-      expect(sourceOpacity(tester), 1);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
-
-    testWidgets('other sheet actions still settle the message back', (
-      tester,
-    ) async {
-      final (_, routes) = await openRoom(tester);
-      await _longPress(tester, find.text('Hello from the room'));
-      await tester.tapAt(const Offset(10, 10));
-      await tester.pumpAndSettle();
-      expect(routes.lifts.single.isActive, isFalse);
-      expect(_lifted, findsNothing);
-      expect(replyLift, findsNothing);
-      expect(sourceOpacity(tester), 1);
-      expect(find.textContaining('Replying to'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
-
-    testWidgets('swipe to reply springs back into the popped-out message', (
-      tester,
-    ) async {
-      await openRoom(tester);
-      expect(replyLift, findsNothing);
-      final rest = tester.getRect(find.text('Hello from the room'));
-      // Others' messages reply with a right swipe past 30% of the width.
-      // The message slides away, then the reply starts as it springs back.
-      // A timed drag pumps frames as it goes, as a real finger would.
-      await tester.timedDrag(
-        find.text('Hello from the room'),
-        const Offset(300, 0),
-        const Duration(milliseconds: 300),
-      );
-      for (var i = 0; i < 20 && replyLift.evaluate().isEmpty; i++) {
-        await tester.pump(const Duration(milliseconds: 20));
+          expect(find.textContaining('Replying to'), findsOneWidget);
+          expectNoLift();
+          final composer = find.byType(TextField).last;
+          expect(
+            tester.widget<TextField>(composer).focusNode?.hasFocus,
+            isTrue,
+          );
+          await tester.enterText(composer, 'Sounds good');
+          await tester.pumpAndSettle();
+          expect(find.text('Sounds good'), findsOneWidget);
+          expect(find.textContaining('Replying to'), findsOneWidget);
+          expectNoLift();
+          await tester.tap(find.byTooltip('Cancel reply or edit').first);
+          await tester.pumpAndSettle();
+          expect(find.textContaining('Replying to'), findsNothing);
+          expectNoLift();
+          await tester.pumpWidget(const SizedBox());
+          await tester.pump();
+        });
       }
-      expect(find.textContaining('Replying to'), findsOneWidget);
-      expect(replyLift, findsOneWidget);
-      expect(sourceOpacity(tester), 0);
-      // While the swipe springs back the copy rides along with the message,
-      // growing and gaining its shadow, so the two motions are one.
-      Rect copy() => tester.getRect(
-        find.descendant(of: replyLift, matching: find.byType(RawImage)).last,
-      );
-      final early = copy();
-      expect(early.left, greaterThan(rest.left + 50));
-      await tester.pump(const Duration(milliseconds: 60));
-      final later = copy();
-      expect(later.left, lessThan(early.left));
-      await tester.pumpAndSettle();
-      // Back home, popped out.
-      expect(copy().center.dx, closeTo(rest.center.dx, 8));
-      expect(replyLift, findsOneWidget);
-      expect(find.byKey(messageReplyLiftDimKey), findsOneWidget);
-
-      await cancelReply(tester);
-      expect(replyLift, findsNothing);
-      expect(sourceOpacity(tester), 1);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
-
-    testWidgets('reduced motion keeps the reply lift without animating', (
-      tester,
-    ) async {
-      final backend = FakeBackend()
-        ..entries = [
-          ChatEntry(
-            id: r'$hello',
-            sender: '@friend:example.org',
-            body: 'Hello from the room',
-            time: DateTime(2026),
-            mine: false,
-          ),
-        ];
-      await _pump(
-        tester,
-        RoomScreen(
-          backend: backend,
-          palette: paletteFor(VisualTheme.parallax),
-          roomId: '!r:example.org',
-          backgroundStore: FakeBackgroundStore(),
-        ),
-        disableAnimations: true,
-      );
-      await _longPress(tester, find.text('Hello from the room'));
-      await tester.tap(find.text('Reply'));
-      await tester.pumpAndSettle();
-      expect(replyLift, findsOneWidget);
-      final copy = find
-          .descendant(of: replyLift, matching: find.byType(RawImage))
-          .last;
-      final scale = tester
-          .widget<Transform>(
-            find.ancestor(of: copy, matching: find.byType(Transform)).first,
-          )
-          .transform
-          .getMaxScaleOnAxis();
-      expect(scale, closeTo(1, 0.001));
-      await cancelReply(tester);
-      expect(replyLift, findsNothing);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
+    }
   });
 
   // Visual QA (not a golden): renders the lifted state to a PNG when
@@ -743,16 +636,19 @@ void main() {
           ..createSync(recursive: true)
           ..writeAsBytesSync(bytes!.buffer.asUint8List());
       });
-      // Reply keeps it popped out while the reply is written.
+      // Reply returns the message to the undimmed timeline.
       await tester.tap(find.text('Reply'));
       await tester.pumpAndSettle();
-      expect(find.byKey(messageReplyLiftKey), findsOneWidget);
+      expect(_lifted, findsNothing);
+      expect(_dim, findsNothing);
+      expect(find.byKey(messageLiftShadowKey), findsNothing);
+      expect(find.textContaining('Replying to'), findsOneWidget);
       await tester.runAsync(() async {
         final boundary =
             key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
         final image = await boundary.toImage(pixelRatio: 2.75);
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        File('$dir/reply-lift-preview.png')
+        File('$dir/reply-preview.png')
           ..createSync(recursive: true)
           ..writeAsBytesSync(bytes!.buffer.asUint8List());
       });

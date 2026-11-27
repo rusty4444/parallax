@@ -363,6 +363,82 @@ void main() {
   });
 
   group('thread screen', () {
+    for (final mine in [false, true]) {
+      testWidgets(
+        'right-click quotes ${mine ? "own" : "other"} thread reply without lift or dim',
+        (tester) async {
+          final backend = _Backend();
+          await tester.pumpWidget(
+            _app(
+              ThreadScreen(
+                backend: backend,
+                roomId: _roomId,
+                root: _entry(r'$root', body: 'Root message', replies: 1),
+              ),
+            ),
+          );
+          backend.threadRequests.single.result.complete(
+            ThreadPage([
+              _entry(
+                r'$reply',
+                body: 'Quote this reply',
+                mine: mine,
+                sender: mine ? '@me:example.org' : '@alice:example.org',
+              ),
+            ]),
+          );
+          await tester.pumpAndSettle();
+          final source = find.text('Quote this reply');
+          void expectNoLift() {
+            expect(find.byKey(messageLiftSnapshotKey), findsNothing);
+            expect(find.byKey(messageLiftDimKey), findsNothing);
+            expect(find.byKey(messageLiftShadowKey), findsNothing);
+            expect(find.byType(BackdropFilter), findsNothing);
+            expect(find.byType(BottomSheet), findsNothing);
+            expect(
+              tester
+                  .widget<Opacity>(
+                    find
+                        .ancestor(of: source, matching: find.byType(Opacity))
+                        .first,
+                  )
+                  .opacity,
+              1,
+            );
+          }
+
+          await tester.tap(source, buttons: kSecondaryButton);
+          await tester.pumpAndSettle();
+          expect(find.byKey(messageLiftSnapshotKey), findsOneWidget);
+          expect(find.byKey(messageLiftDimKey), findsOneWidget);
+          expect(find.byKey(messageLiftShadowKey), findsOneWidget);
+          await tester.tap(find.text('Quote in reply'));
+          await tester.pumpAndSettle();
+          expect(find.textContaining('Replying to'), findsOneWidget);
+          expect(
+            tester
+                .widget<TextField>(find.byType(TextField))
+                .focusNode
+                ?.hasFocus,
+            isTrue,
+          );
+          expectNoLift();
+          await tester.enterText(find.byType(TextField), 'Quoted reply draft');
+          await tester.pumpAndSettle();
+          expectNoLift();
+          await tester.tap(find.byTooltip('Send reply'));
+          await tester.pumpAndSettle();
+          expect(backend.sends.single.reply, r'$reply');
+          expect(backend.sends.single.thread, r'$root');
+          expect(backend.sends.single.text, 'Quoted reply draft');
+          expect(find.textContaining('Replying to'), findsNothing);
+          expectNoLift();
+          backend.threadRequests.last.result.complete(const ThreadPage([]));
+          await tester.pumpAndSettle();
+        },
+      );
+    }
+
     testWidgets('sends a threaded receipt and quotes replies in thread', (
       tester,
     ) async {
@@ -398,6 +474,9 @@ void main() {
 
       await tester.longPress(find.text('first reply'));
       await tester.pumpAndSettle();
+      expect(find.byKey(messageLiftSnapshotKey), findsOneWidget);
+      expect(find.byKey(messageLiftDimKey), findsOneWidget);
+      expect(find.byKey(messageLiftShadowKey), findsOneWidget);
       await tester.tap(find.text('Quote in reply'));
       await tester.pumpAndSettle();
       expect(find.text('Replying to Alice: first reply'), findsOneWidget);
@@ -405,7 +484,31 @@ void main() {
         tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
         isTrue,
       );
+      void expectNoLift() {
+        expect(find.byKey(messageLiftSnapshotKey), findsNothing);
+        expect(find.byKey(messageLiftDimKey), findsNothing);
+        expect(find.byKey(messageLiftShadowKey), findsNothing);
+        expect(find.byType(BackdropFilter), findsNothing);
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(
+          tester
+              .widget<Opacity>(
+                find
+                    .ancestor(
+                      of: find.text('first reply'),
+                      matching: find.byType(Opacity),
+                    )
+                    .first,
+              )
+              .opacity,
+          1,
+        );
+      }
+
+      expectNoLift();
       await tester.enterText(find.byType(TextField), 'agreed');
+      await tester.pumpAndSettle();
+      expectNoLift();
       await tester.tap(find.byTooltip('Send reply'));
       await tester.pump();
       expect(backend.sends.single.text, 'agreed');

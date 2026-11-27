@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
-import 'message_lift.dart';
 
 /// A swipe-to-reply affordance: right swipe on others' messages, left swipe on
-/// your own. The message always springs back and never dismisses; with a
-/// [MessageReplyLift] around the timeline it springs back popped out and
-/// stays lifted while the reply is written.
+/// your own. The message always springs back and never dismisses.
 class SwipeReply extends StatelessWidget {
   const SwipeReply({
     required super.key,
@@ -34,7 +31,7 @@ class SwipeReply extends StatelessWidget {
       dismissThresholds: {direction: 0.3},
       background: _SwipeReplyBackground(palette: palette, mine: mine),
       confirmDismiss: (_) async {
-        liftForReply(context, reply);
+        reply();
         return false;
       },
       child: child,
