@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+- Replying no longer keeps the original message raised with a shadow or dims the timeline. Long-press and right-click still highlight the message while its action menu is open. The reply banner and automatic composer focus are unchanged, including swipe-to-reply.
+
 ## 1.8.0
 
 ### Same settings on all devices
